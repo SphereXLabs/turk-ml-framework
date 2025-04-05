@@ -49,21 +49,36 @@ pub enum AktivasyonFonksiyonu {
 
 #[derive(Debug, Clone)]
 pub enum KayipFonksiyonu {
-    MeanSquaredError,
+    MSE,
     CrossEntropy,
     BinaryCrossEntropy,
+}
+
+#[derive(Debug, Clone)]
+pub enum OptimizerTipi {
+    SGD(f64),  // Öğrenme oranı
+    Adam(f64), // Öğrenme oranı
+    AdamW {
+        lr: f64,
+        weight_decay: f64,
+        beta1: f64,
+        beta2: f64,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct KatmanOzellikleri {
     pub noron_sayisi: i64,
     pub aktivasyon: AktivasyonFonksiyonu,
+    pub kernel_initializer: Option<String>,
+    pub bias_initializer: Option<String>,
+    pub dropout_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ModelOzellikleri {
     pub katmanlar: Vec<KatmanOzellikleri>,
-    pub ogrenme_orani: f64,
+    pub optimizer: OptimizerTipi,
     pub kayip_fonksiyonu: KayipFonksiyonu,
     pub batch_boyutu: i64,
     pub epoch_sayisi: i64,

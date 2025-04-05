@@ -8,8 +8,11 @@ license = "MIT"
 repository = "https://github.com/snnkr/turk-lang"
 
 [dependencies]
-ndarray = { version = "0.15", features = ["serde"] }
+ndarray = { version = "0.15", features = ["serde", "rayon"] }
+ndarray-rand = "0.14"
+ndarray-stats = "0.5"
 rand = "0.8"
+rand_distr = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 env_logger = "0.10"
@@ -19,12 +22,29 @@ regex = "1.10"
 lazy_static = "1.4"
 thiserror = "1.0"
 anyhow = "1.0"
-logos = "0.13"
+logos = { version = "0.13", features = ["derive"] }
 mnist = "0.5"
+plotters = "0.3"
+chrono = "0.4"
+csv = "1.2"
+indicatif = "0.17"
+colored = "2.0"
 
 [dev-dependencies]
 criterion = "0.5"
+tempfile = "3.8"
+pretty_assertions = "1.4"
 
 [[example]]
 name = "mnist_classifier"
 path = "examples/mnist_classifier.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+debug = false
+
+[profile.dev]
+opt-level = 0
+debug = true
