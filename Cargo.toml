@@ -1,0 +1,30 @@
+[package]
+name = "turk-lang"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sinan Korkmaz <snnkr.sinan@gmail.com>"]
+description = "Türkçe yapay zeka programlama dili"
+license = "MIT"
+repository = "https://github.com/snnkr/turk-lang"
+
+[dependencies]
+ndarray = { version = "0.15", features = ["serde"] }
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+env_logger = "0.10"
+log = "0.4"
+rayon = "1.8"
+regex = "1.10"
+lazy_static = "1.4"
+thiserror = "1.0"
+anyhow = "1.0"
+logos = "0.13"
+mnist = "0.5"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[example]]
+name = "mnist_classifier"
+path = "examples/mnist_classifier.rs"
