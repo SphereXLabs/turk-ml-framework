@@ -1,15 +1,45 @@
-use crate::{Result, TinyMLError, Layer, Optimizer};
-use ndarray::Array2;
+use crate::{Result, TurkError, Layer, Optimizer};
+use ndarray::{Array2, Axis};
 use std::fs;
 use serde::{Serialize, Deserialize};
 use std::fmt;
+use std::path::Path;
+use rayon::prelude::*;
+use std::io::{BufReader, BufWriter};
 
+/// Model trait - Makine öğrenmesi modelleri için arayüz
+pub trait Model: Send + Sync + fmt::Debug {
+    /// İleri yayılım (forward propagation)
+    fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>>;
+    
+    /// Geri yayılım (backpropagation)
+    fn backward(&mut self, grad: &Array2<f32>) -> Result<()>;
+    
+    /// Ağırlık güncellemesi
+    fn update(&mut self) -> Result<()>;
+    
+    /// Modeli dosyaya kaydet
+    fn save(&self, path: &str) -> Result<()>;
+    
+    /// Modeli dosyadan yükle
+    fn load(&mut self, path: &str) -> Result<()>;
+    
+    /// Modeli özetini döndürür
+    fn summary(&self) -> String;
+}
+
+/// Sıralı model sınıfı.
+/// 
+/// Katmanları sıralı bir şekilde tutarak ileri ve geri yayılımı gerçekleştirir.
+/// Her katman, önceki katmanın çıktısını girdi olarak alır.
 #[derive(Debug)]
 pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
-    optimizer: Box<dyn Optimizer>,
+    optimizer: Option<Box<dyn Optimizer>>,
+    compiled: bool,
 }
 
+/// Katman verisi - Serileştirme/Deserileştirme için
 #[derive(Debug, Serialize, Deserialize)]
 struct LayerData {
     weights: Vec<f32>,
@@ -17,32 +47,82 @@ struct LayerData {
     activation: crate::layer::Activation,
     input_size: usize,
     output_size: usize,
+    layer_type: String,
+    dropout_rate: Option<f32>,
+    use_batch_norm: Option<bool>,
 }
 
+/// Model verisi - Serileştirme/Deserileştirme için
 #[derive(Debug, Serialize, Deserialize)]
 struct ModelData {
     layers: Vec<LayerData>,
     optimizer_type: String,
+    optimizer_params: OptimizerParams,
+    schema_version: String,
+}
+
+/// Optimizer parametreleri
+#[derive(Debug, Serialize, Deserialize)]
+struct OptimizerParams {
     learning_rate: f32,
+    momentum: Option<f32>,
+    beta1: Option<f32>,
+    beta2: Option<f32>,
+    epsilon: Option<f32>,
+    weight_decay: Option<f32>,
+    decay_rate: Option<f32>,
 }
 
 impl Sequential {
+    /// Yeni bir boş sıralı model oluşturur
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
-            optimizer: Box::new(crate::optimizer::SGD::new(0.01)),
+            optimizer: None,
+            compiled: false,
         }
     }
 
-    pub fn add<L: Layer + 'static>(&mut self, layer: L) {
+    /// Modele yeni bir katman ekler
+    ///
+    /// # Parametreler
+    /// - `layer`: Eklenecek katman
+    pub fn add<L: Layer + 'static>(&mut self, layer: L) -> &mut Self {
         self.layers.push(Box::new(layer));
+        self.compiled = false; // Yeni katman eklendiğinde derlenmiş durumu sıfırla
+        self
     }
 
-    pub fn compile<O: Optimizer + 'static>(&mut self, optimizer: O) {
-        self.optimizer = Box::new(optimizer);
+    /// Modeli verilen optimizer ile derler
+    ///
+    /// # Parametreler
+    /// - `optimizer`: Kullanılacak optimizer
+    pub fn compile<O: Optimizer + 'static>(&mut self, optimizer: O) -> &mut Self {
+        self.optimizer = Some(Box::new(optimizer));
+        self.compiled = true;
+        self
     }
 
+    /// Modelin derlenmiş olduğunu kontrol eder
+    fn ensure_compiled(&self) -> Result<()> {
+        if !self.compiled || self.optimizer.is_none() {
+            return Err(TurkError::ModelError("Model derlenmemiş. Önce compile() methodunu çağırın.".to_string()));
+        }
+        Ok(())
+    }
+
+    /// İleri yayılım (forward propagation)
+    ///
+    /// # Parametreler
+    /// - `input`: Girdi tensörü
+    ///
+    /// # Dönüş
+    /// Model çıktısı
     pub fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
+        if self.layers.is_empty() {
+            return Err(TurkError::ModelError("Model boş, en az bir katman ekleyin.".to_string()));
+        }
+        
         let mut output = input.clone();
         for layer in &mut self.layers {
             output = layer.forward(&output)?;
@@ -50,7 +130,13 @@ impl Sequential {
         Ok(output)
     }
 
+    /// Geri yayılım (backpropagation)
+    ///
+    /// # Parametreler
+    /// - `grad`: Gradyan tensörü
     pub fn backward(&mut self, grad: &Array2<f32>) -> Result<()> {
+        self.ensure_compiled()?;
+        
         let mut current_grad = grad.clone();
         for layer in self.layers.iter_mut().rev() {
             current_grad = layer.backward(&current_grad)?;
@@ -58,24 +144,58 @@ impl Sequential {
         Ok(())
     }
 
+    /// Ağırlık güncellemesi
     pub fn update(&mut self) -> Result<()> {
-        for layer in &mut self.layers {
-            let weight_grads = layer.get_weight_grads();
-            let mut weights = layer.get_weights().clone();
-            self.optimizer.step(&mut weights, weight_grads)?;
-            layer.set_weights(weights)?;
-            
-            let bias_grads = layer.get_bias_grads();
-            let mut bias = layer.get_bias().clone();
-            self.optimizer.step(&mut bias, bias_grads)?;
-            layer.set_bias(bias)?;
-            
-            layer.update()?;
+        self.ensure_compiled()?;
+        
+        // Optimizer'ı al (compile kontrolünden sonra güvenli)
+        let optimizer = self.optimizer.as_mut().unwrap();
+        
+        // Paralelleştirilebilir işlemler için rayon kullanımı
+        let update_results: Vec<Result<()>> = self.layers
+            .par_iter_mut()
+            .map(|layer| {
+                // Ağırlık güncellemeleri
+                let weight_grads = layer.get_weight_grads();
+                let mut weights = layer.get_weights().clone();
+                optimizer.step(&mut weights, weight_grads)?;
+                layer.set_weights(weights)?;
+                
+                // Bias güncellemeleri
+                let bias_grads = layer.get_bias_grads();
+                let mut bias = layer.get_bias().clone();
+                optimizer.step(&mut bias, bias_grads)?;
+                layer.set_bias(bias)?;
+                
+                // Katman iç güncellemeleri
+                layer.update()
+            })
+            .collect();
+        
+        // Tüm sonuçları kontrol et, herhangi bir hata varsa döndür
+        for result in update_results {
+            result?;
         }
+        
         Ok(())
     }
 
+    /// Modeli dosyaya kaydeder
+    ///
+    /// # Parametreler
+    /// - `path`: Kaydedilecek dosya yolu
     pub fn save(&self, path: &str) -> Result<()> {
+        // Model doğrulaması
+        if self.layers.is_empty() {
+            return Err(TurkError::ModelError("Boş model kaydedilemez.".to_string()));
+        }
+        
+        // Optimizer bilgisini kontrol et
+        let optimizer = self.optimizer.as_ref().ok_or_else(|| 
+            TurkError::ModelError("Derlenmiş bir model olmadan kaydetme yapılamaz.".to_string())
+        )?;
+        
+        // Katman verilerini topla
         let layers_data: Vec<LayerData> = self.layers.iter().map(|layer| {
             LayerData {
                 weights: layer.weights_as_vec(),
@@ -83,66 +203,345 @@ impl Sequential {
                 activation: layer.activation_type(),
                 input_size: layer.input_size(),
                 output_size: layer.output_size(),
+                layer_type: layer.layer_type().to_string(),
+                dropout_rate: layer.dropout_rate(),
+                use_batch_norm: layer.use_batch_norm(),
             }
         }).collect();
 
-        let model_data = ModelData {
-            layers: layers_data,
-            optimizer_type: std::any::type_name_of_val(&*self.optimizer).to_string(),
-            learning_rate: self.optimizer.learning_rate(),
+        // Optimizer parametrelerini topla
+        let optimizer_params = OptimizerParams {
+            learning_rate: optimizer.learning_rate(),
+            momentum: None, // Bu bilgileri optimizer tipine göre doldurabiliriz
+            beta1: None,
+            beta2: None,
+            epsilon: None,
+            weight_decay: None,
+            decay_rate: None,
         };
 
-        let json = serde_json::to_string_pretty(&model_data)?;
-        fs::write(path, json)?;
+        // Model verisini oluştur
+        let model_data = ModelData {
+            layers: layers_data,
+            optimizer_type: optimizer.optimizer_type().to_string(),
+            optimizer_params,
+            schema_version: "1.0".to_string(), // Şema versiyonunu ekle
+        };
+
+        // Dosyaya yaz
+        let file = fs::File::create(path).map_err(|e| 
+            TurkError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                format!("Dosya oluşturulamadı: {}, Hata: {}", path, e)
+            ))
+        )?;
+        
+        let writer = BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, &model_data)
+            .map_err(|e| TurkError::SerializationError(e))?;
+            
         Ok(())
     }
 
+    /// Modeli dosyadan yükler
+    ///
+    /// # Parametreler
+    /// - `path`: Yüklenecek dosya yolu
     pub fn load(&mut self, path: &str) -> Result<()> {
-        let json = fs::read_to_string(path)?;
-        let model_data: ModelData = serde_json::from_str(&json)?;
+        // Dosya varlığını kontrol et
+        if !Path::new(path).exists() {
+            return Err(TurkError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Dosya bulunamadı: {}", path)
+            )));
+        }
+        
+        // Dosyayı oku
+        let file = fs::File::open(path).map_err(|e| 
+            TurkError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                format!("Dosya açılamadı: {}, Hata: {}", path, e)
+            ))
+        )?;
+        
+        let reader = BufReader::new(file);
+        let model_data: ModelData = serde_json::from_reader(reader)
+            .map_err(|e| TurkError::SerializationError(e))?;
+            
+        // Şema versiyon kontrolü
+        if model_data.schema_version != "1.0" {
+            return Err(TurkError::ModelError(
+                format!("Desteklenmeyen model şema versiyonu: {}", model_data.schema_version)
+            ));
+        }
 
         // Katmanları yeniden oluştur
         self.layers.clear();
         for layer_data in model_data.layers {
-            let mut layer = crate::layer::Dense::new(
-                layer_data.input_size,
-                layer_data.output_size,
-                layer_data.activation,
-            );
+            let layer: Box<dyn Layer> = match layer_data.layer_type.as_str() {
+                "dense" => {
+                    let mut dense = crate::layer::Dense::new(
+                        layer_data.input_size,
+                        layer_data.output_size,
+                        layer_data.activation,
+                    );
+                    
+                    // Ağırlıkları ve bias'ı yükle
+                    let weights = Array2::from_shape_vec(
+                        (layer_data.output_size, layer_data.input_size),
+                        layer_data.weights,
+                    ).map_err(|e| TurkError::NdarrayError(e))?;
+                    
+                    let bias = Array2::from_shape_vec(
+                        (layer_data.output_size, 1),
+                        layer_data.bias,
+                    ).map_err(|e| TurkError::NdarrayError(e))?;
+                    
+                    // Ağırlıkları ve bias'ı ayarla
+                    dense.set_weights(weights)?;
+                    dense.set_bias(bias)?;
+                    
+                    Box::new(dense)
+                },
+                "dropout" => {
+                    if let Some(rate) = layer_data.dropout_rate {
+                        Box::new(crate::layer::Dropout::new(rate))
+                    } else {
+                        return Err(TurkError::ModelError(
+                            "Dropout katmanı için dropout_rate gerekli".to_string()
+                        ));
+                    }
+                },
+                "batch_norm" => {
+                    Box::new(crate::layer::BatchNorm::new(layer_data.input_size))
+                },
+                _ => return Err(TurkError::ModelError(
+                    format!("Bilinmeyen katman tipi: {}", layer_data.layer_type)
+                )),
+            };
             
-            // Ağırlıkları ve bias'ı yükle
-            let weights = Array2::from_shape_vec(
-                (layer_data.output_size, layer_data.input_size),
-                layer_data.weights,
-            )?;
-            let bias = Array2::from_shape_vec(
-                (layer_data.output_size, 1),
-                layer_data.bias,
-            )?;
-            
-            // Ağırlıkları ve bias'ı ayarla
-            layer.set_weights(weights)?;
-            layer.set_bias(bias)?;
-            
-            self.add(layer);
+            self.layers.push(layer);
         }
 
         // Optimizer'ı yeniden oluştur
-        match model_data.optimizer_type.as_str() {
-            "turk_lang::optimizer::SGD" => {
-                self.optimizer = Box::new(crate::optimizer::SGD::new(model_data.learning_rate));
-            }
-            "turk_lang::optimizer::Adam" => {
-                self.optimizer = Box::new(crate::optimizer::Adam::new(model_data.learning_rate));
-            }
-            _ => return Err(TinyMLError::ModelError("Bilinmeyen optimizer tipi".to_string())),
-        }
-
+        let params = &model_data.optimizer_params;
+        self.optimizer = match model_data.optimizer_type.as_str() {
+            "sgd" => {
+                if let Some(momentum) = params.momentum {
+                    Some(Box::new(crate::optimizer::SGD::with_momentum(
+                        params.learning_rate, momentum
+                    )))
+                } else {
+                    Some(Box::new(crate::optimizer::SGD::new(params.learning_rate)))
+                }
+            },
+            "adam" => {
+                Some(Box::new(crate::optimizer::Adam::new(params.learning_rate)))
+            },
+            "adamw" => {
+                if let Some(weight_decay) = params.weight_decay {
+                    Some(Box::new(crate::optimizer::AdamW::new(
+                        params.learning_rate, weight_decay
+                    )))
+                } else {
+                    return Err(TurkError::ModelError(
+                        "AdamW optimizeri için weight_decay parametresi gerekli".to_string()
+                    ));
+                }
+            },
+            "rmsprop" => {
+                Some(Box::new(crate::optimizer::RMSProp::new(params.learning_rate)))
+            },
+            _ => return Err(TurkError::ModelError(
+                format!("Bilinmeyen optimizer tipi: {}", model_data.optimizer_type)
+            )),
+        };
+        
+        self.compiled = true;
         Ok(())
+    }
+    
+    /// Model özetini döndürür
+    pub fn summary(&self) -> String {
+        let mut result = String::new();
+        result.push_str(&format!("Model: Sequential\n"));
+        result.push_str("-----------------------------\n");
+        result.push_str(&format!("{:<5} {:<15} {:<15} {:<20} {:<10}\n", 
+            "No", "Layer Type", "Output Shape", "Param Count", "Activation"));
+        result.push_str("-----------------------------\n");
+        
+        let mut total_params = 0;
+        for (i, layer) in self.layers.iter().enumerate() {
+            let layer_type = layer.layer_type();
+            let output_shape = format!("[{}, {}]", layer.output_size(), 1);
+            let params_count = layer.param_count();
+            total_params += params_count;
+            
+            result.push_str(&format!("{:<5} {:<15} {:<15} {:<20} {:<10}\n", 
+                i, layer_type, output_shape, params_count, layer.activation_type().to_string()));
+        }
+        
+        result.push_str("-----------------------------\n");
+        result.push_str(&format!("Toplam parametre sayısı: {}\n", total_params));
+        
+        if let Some(optimizer) = &self.optimizer {
+            result.push_str(&format!("Optimizer: {} (lr={})\n", 
+                optimizer.optimizer_type(), optimizer.learning_rate()));
+        } else {
+            result.push_str("Model henüz derlenmemiş.\n");
+        }
+        
+        result
+    }
+    
+    /// Modeli eğitir
+    ///
+    /// # Parametreler
+    /// - `x`: Girdi verileri
+    /// - `y`: Hedef değerler
+    /// - `epochs`: Epoch sayısı
+    /// - `batch_size`: Batch boyutu
+    /// - `validation_data`: Doğrulama verileri (isteğe bağlı)
+    pub fn fit(
+        &mut self, 
+        x: &Array2<f32>, 
+        y: &Array2<f32>, 
+        epochs: usize,
+        batch_size: usize,
+        validation_data: Option<(&Array2<f32>, &Array2<f32>)>
+    ) -> Result<Vec<(f32, Option<f32>)>> {
+        self.ensure_compiled()?;
+        
+        let mut loss_history = Vec::with_capacity(epochs);
+        let n_samples = x.len_of(Axis(0));
+        
+        if n_samples == 0 {
+            return Err(TurkError::InvalidInput("Eğitim verisinde örnek yok".to_string()));
+        }
+        
+        let effective_batch_size = batch_size.min(n_samples);
+        let n_batches = (n_samples + effective_batch_size - 1) / effective_batch_size;
+        
+        let loss_fn = crate::loss::MSE::new();
+        
+        for epoch in 0..epochs {
+            let mut epoch_loss = 0.0;
+            
+            // İndeksleri karıştır
+            let mut indices: Vec<usize> = (0..n_samples).collect();
+            let mut rng = rand::thread_rng();
+            rand::seq::SliceRandom::shuffle(&mut indices, &mut rng);
+            
+            for batch_idx in 0..n_batches {
+                let start_idx = batch_idx * effective_batch_size;
+                let end_idx = (start_idx + effective_batch_size).min(n_samples);
+                let batch_indices = &indices[start_idx..end_idx];
+                
+                let mut batch_loss = 0.0;
+                
+                // Her örnek için forward ve backward geçişi yap
+                for &idx in batch_indices {
+                    // Tek örneği al
+                    let x_sample = x.index_axis(Axis(0), idx).insert_axis(Axis(0));
+                    let y_true = y.index_axis(Axis(0), idx).insert_axis(Axis(0));
+                    
+                    // Forward pass
+                    let y_pred = self.forward(&x_sample)?;
+                    
+                    // Loss hesapla
+                    let loss_val = loss_fn.forward(&y_pred, &y_true)?;
+                    batch_loss += loss_val;
+                    
+                    // Backward pass
+                    let loss_grad = loss_fn.backward(&y_pred, &y_true)?;
+                    self.backward(&loss_grad)?;
+                }
+                
+                // Batch sonunda ağırlık güncellemesi
+                self.update()?;
+                
+                // Batch loss ortalamasını al
+                batch_loss /= batch_indices.len() as f32;
+                epoch_loss += batch_loss;
+            }
+            
+            // Epoch loss ortalamasını al
+            epoch_loss /= n_batches as f32;
+            
+            // Doğrulama
+            let validation_loss = if let Some((x_val, y_val)) = validation_data {
+                let mut val_loss = 0.0;
+                let n_val_samples = x_val.len_of(Axis(0));
+                
+                for i in 0..n_val_samples {
+                    let x_sample = x_val.index_axis(Axis(0), i).insert_axis(Axis(0));
+                    let y_true = y_val.index_axis(Axis(0), i).insert_axis(Axis(0));
+                    
+                    let y_pred = self.forward(&x_sample)?;
+                    val_loss += loss_fn.forward(&y_pred, &y_true)?;
+                }
+                
+                val_loss /= n_val_samples as f32;
+                Some(val_loss)
+            } else {
+                None
+            };
+            
+            loss_history.push((epoch_loss, validation_loss));
+            
+            // Eğitim durumunu yazdır
+            if let Some(val_loss) = validation_loss {
+                log::info!("Epoch {}/{} - loss: {:.4} - val_loss: {:.4}", 
+                    epoch + 1, epochs, epoch_loss, val_loss);
+            } else {
+                log::info!("Epoch {}/{} - loss: {:.4}", 
+                    epoch + 1, epochs, epoch_loss);
+            }
+        }
+        
+        Ok(loss_history)
+    }
+    
+    /// Tahmin yapar
+    ///
+    /// # Parametreler
+    /// - `x`: Girdi verileri
+    ///
+    /// # Dönüş
+    /// Model çıktısı
+    pub fn predict(&mut self, x: &Array2<f32>) -> Result<Array2<f32>> {
+        self.forward(x)
+    }
+    
+    /// Modeli test eder ve metrikleri döndürür
+    ///
+    /// # Parametreler
+    /// - `x`: Test verileri
+    /// - `y`: Gerçek etiketler
+    /// - `metrics`: Hesaplanacak metrikler
+    ///
+    /// # Dönüş
+    /// Metrik adı ve değeri çiftleri
+    pub fn evaluate(
+        &mut self, 
+        x: &Array2<f32>, 
+        y: &Array2<f32>,
+        metrics: &[&dyn crate::metrics::Metric]
+    ) -> Result<Vec<(String, f32)>> {
+        let y_pred = self.predict(x)?;
+        
+        let mut results = Vec::with_capacity(metrics.len());
+        
+        for metric in metrics {
+            let score = metric.compute(&y_pred, y)?;
+            results.push((metric.name().to_string(), score));
+        }
+        
+        Ok(results)
     }
 }
 
-impl crate::Model for Sequential {
+impl Model for Sequential {
     fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
         self.forward(input)
     }
@@ -162,28 +561,44 @@ impl crate::Model for Sequential {
     fn load(&mut self, path: &str) -> Result<()> {
         self.load(path)
     }
+    
+    fn summary(&self) -> String {
+        self.summary()
+    }
 }
 
 impl fmt::Display for Sequential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SequentialModel(layers={}, optimizer={})", 
-            self.layers.len(),
-            std::any::type_name_of_val(&*self.optimizer))
+        write!(f, "{}", self.summary())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layer::Dense;
-    use crate::layer::Activation;
-    use ndarray::Array2;
+    use crate::layer::{Dense, Activation, Dropout, BatchNorm};
+    use crate::optimizer::{SGD, Adam, AdamW, RMSProp};
+    use ndarray::{Array2, arr2};
+    use tempfile::tempdir;
+    use std::path::PathBuf;
+    use crate::metrics::{Accuracy, MSE};
+    
+    fn create_test_model() -> Sequential {
+        let mut model = Sequential::new();
+        model.add(Dense::new(10, 5, Activation::Relu))
+             .add(Dropout::new(0.2))
+             .add(Dense::new(5, 2, Activation::Softmax))
+             .compile(Adam::new(0.001));
+        model
+    }
 
     #[test]
     fn test_sequential_model() {
         let mut model = Sequential::new();
-        model.add(Dense::new(784, 128, Activation::Relu));
-        model.add(Dense::new(128, 10, Activation::Softmax));
+        model.add(Dense::new(784, 128, Activation::Relu))
+             .add(BatchNorm::new(128))
+             .add(Dense::new(128, 10, Activation::Softmax))
+             .compile(SGD::new(0.01));
 
         let input = Array2::zeros((784, 1));
         let output = model.forward(&input).unwrap();
@@ -193,8 +608,8 @@ mod tests {
     #[test]
     fn test_model_compile() {
         let mut model = Sequential::new();
-        model.add(Dense::new(10, 5, Activation::Relu));
-        model.compile(crate::optimizer::Adam::new(0.001));
+        model.add(Dense::new(10, 5, Activation::Relu))
+             .compile(Adam::new(0.001));
         
         let input = Array2::zeros((10, 1));
         let output = model.forward(&input).unwrap();
@@ -203,23 +618,125 @@ mod tests {
 
     #[test]
     fn test_model_serialization() {
-        let mut model = Sequential::new();
-        model.add(Dense::new(10, 5, Activation::Relu));
-        model.compile(crate::optimizer::SGD::new(0.01));
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("test_model.json");
+        let path_str = model_path.to_str().unwrap();
         
-        // Modeli kaydet
-        model.save("test_model.json").unwrap();
+        // Model oluştur ve kaydet
+        let mut model = create_test_model();
+        model.save(path_str).unwrap();
         
         // Modeli yükle
         let mut loaded = Sequential::new();
-        loaded.load("test_model.json").unwrap();
+        loaded.load(path_str).unwrap();
         
         // Yüklenen modeli test et
         let input = Array2::zeros((10, 1));
         let output = loaded.forward(&input).unwrap();
-        assert_eq!(output.shape(), &[5, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
+    }
+    
+    #[test]
+    fn test_model_adamw() {
+        let mut model = Sequential::new();
+        model.add(Dense::new(10, 5, Activation::Relu))
+             .compile(AdamW::new(0.001, 0.01));
         
-        // Test dosyasını temizle
-        std::fs::remove_file("test_model.json").unwrap();
+        let x = Array2::zeros((10, 1));
+        let output = model.forward(&x).unwrap();
+        assert_eq!(output.shape(), &[5, 1]);
+    }
+    
+    #[test]
+    fn test_model_rmsprop() {
+        let mut model = Sequential::new();
+        model.add(Dense::new(10, 5, Activation::Relu))
+             .compile(RMSProp::new(0.001));
+        
+        let x = Array2::zeros((10, 1));
+        let output = model.forward(&x).unwrap();
+        assert_eq!(output.shape(), &[5, 1]);
+    }
+    
+    #[test]
+    fn test_model_fit() {
+        let mut model = Sequential::new();
+        model.add(Dense::new(2, 3, Activation::Relu))
+             .add(Dense::new(3, 1, Activation::Sigmoid))
+             .compile(SGD::new(0.1));
+        
+        // XOR problemi için örnek veri
+        let x = arr2(&[
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+        ]);
+        
+        let y = arr2(&[
+            [0.0],
+            [1.0],
+            [1.0],
+            [0.0],
+        ]);
+        
+        // Eğitim
+        let history = model.fit(&x, &y, 100, 1, None).unwrap();
+        
+        // Son kaybın başlangıç kaybından düşük olduğunu kontrol et
+        assert!(history.last().unwrap().0 < history.first().unwrap().0);
+        
+        // Tahmin
+        let y_pred = model.predict(&x).unwrap();
+        assert_eq!(y_pred.shape(), y.shape());
+    }
+    
+    #[test]
+    fn test_model_evaluate() {
+        let mut model = Sequential::new();
+        model.add(Dense::new(2, 3, Activation::Relu))
+             .add(Dense::new(3, 1, Activation::Sigmoid))
+             .compile(SGD::new(0.1));
+        
+        // Örnek veri
+        let x = arr2(&[
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+        ]);
+        
+        let y = arr2(&[
+            [0.0],
+            [1.0],
+            [1.0],
+            [0.0],
+        ]);
+        
+        // Metrikler
+        let mse = MSE::new();
+        let accuracy = Accuracy::new(0.5);
+        
+        // Değerlendirme
+        let metrics = model.evaluate(&x, &y, &[&mse, &accuracy]).unwrap();
+        
+        // En az iki metrik sonucu olmalı
+        assert_eq!(metrics.len(), 2);
+        assert_eq!(metrics[0].0, "MSE");
+        assert_eq!(metrics[1].0, "Accuracy");
+    }
+    
+    #[test]
+    fn test_model_summary() {
+        let model = create_test_model();
+        let summary = model.summary();
+        
+        // Özet, model yapısı hakkında bilgi içermeli
+        assert!(summary.contains("Sequential"));
+        assert!(summary.contains("Dense"));
+        assert!(summary.contains("Dropout"));
+        assert!(summary.contains("Relu"));
+        assert!(summary.contains("Softmax"));
+        assert!(summary.contains("Optimizer"));
     }
 } 

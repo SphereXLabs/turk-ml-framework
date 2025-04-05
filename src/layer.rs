@@ -42,7 +42,7 @@ pub trait Layer: fmt::Debug + Send + Sync {
     fn update(&mut self) -> Result<()>;
     
     /// Aktivasyon fonksiyonunu döndürür
-    fn activation_type(&self) -> Option<Activation>;
+    fn activation_type(&self) -> Activation;
     
     /// Katman tipini döndürür
     fn layer_type(&self) -> &'static str;
@@ -67,6 +67,40 @@ pub trait Layer: fmt::Debug + Send + Sync {
     
     /// Katmanı sıfırlar
     fn reset(&mut self);
+    
+    /// Ağırlıkları vektör olarak döndürür (serileştirme için)
+    fn weights_as_vec(&self) -> Vec<f32> {
+        if let Some(weights) = self.get_weights() {
+            weights.iter().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Bias değerlerini vektör olarak döndürür (serileştirme için)
+    fn bias_as_vec(&self) -> Vec<f32> {
+        if let Some(bias) = self.get_bias() {
+            bias.iter().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Dropout oranını döndürür (eğer varsa)
+    fn dropout_rate(&self) -> Option<f32> {
+        None
+    }
+    
+    /// Batch normalizasyon kullanılıp kullanılmadığını döndürür
+    fn use_batch_norm(&self) -> Option<bool> {
+        None
+    }
+    
+    /// Ağırlık değerlerini ayarlar
+    fn set_weights(&mut self, weights: Array2<f32>) -> Result<()>;
+    
+    /// Bias değerlerini ayarlar
+    fn set_bias(&mut self, bias: Array2<f32>) -> Result<()>;
 }
 
 /// Makro: şekil kontrolü yapar
@@ -278,8 +312,8 @@ impl Layer for Dense {
         Ok(())
     }
 
-    fn activation_type(&self) -> Option<Activation> {
-        Some(self.activation)
+    fn activation_type(&self) -> Activation {
+        self.activation
     }
     
     fn layer_type(&self) -> &'static str {
@@ -311,9 +345,42 @@ impl Layer for Dense {
     }
     
     fn reset(&mut self) {
-        // Gradyanları sıfırla
-        self.weight_grads.fill(0.0);
-        self.bias_grads.fill(0.0);
+        let initializer = match self.activation {
+            Activation::Relu | Activation::LeakyRelu(_) | Activation::Elu(_) | Activation::Selu => {
+                HeNormal::default()
+            },
+            _ => Xavier::default(),
+        };
+        
+        if let Ok(weights) = initializer.initialize(&[self.input_size(), self.output_size()]) {
+            self.weights = weights;
+        }
+        
+        self.bias = Array2::zeros((self.output_size(), 1));
+        self.weight_grads = Array2::zeros(self.weights.raw_dim());
+        self.bias_grads = Array2::zeros(self.bias.raw_dim());
+    }
+    
+    fn set_weights(&mut self, weights: Array2<f32>) -> Result<()> {
+        if weights.shape() != self.weights.shape() {
+            return Err(TurkError::ShapeMismatch(format!(
+                "Ağırlık şekli uyuşmazlığı: beklenen {:?}, alınan {:?}",
+                self.weights.shape(), weights.shape()
+            )));
+        }
+        self.weights = weights;
+        Ok(())
+    }
+    
+    fn set_bias(&mut self, bias: Array2<f32>) -> Result<()> {
+        if bias.shape() != self.bias.shape() {
+            return Err(TurkError::ShapeMismatch(format!(
+                "Bias şekli uyuşmazlığı: beklenen {:?}, alınan {:?}",
+                self.bias.shape(), bias.shape()
+            )));
+        }
+        self.bias = bias;
+        Ok(())
     }
 }
 
@@ -345,66 +412,68 @@ pub struct Dropout {
     rate: f32,
     mask: Array2<f32>,
     input_shape: Vec<usize>,
+    output_shape: Vec<usize>,
     trainable: bool,
+    training: bool,
 }
 
 impl Dropout {
+    /// Yeni bir dropout katmanı oluşturur
     pub fn new(rate: f32) -> Self {
-        if rate < 0.0 || rate >= 1.0 {
-            panic!("Dropout oranı 0 ile 1 arasında olmalıdır (0 dahil, 1 hariç)");
-        }
+        let rate = rate.max(0.0).min(1.0); // 0-1 arasında olduğundan emin ol
         
         Self {
             rate,
             mask: Array2::zeros((1, 1)),
             input_shape: vec![1, 1],
-            trainable: true,
+            output_shape: vec![1, 1],
+            trainable: false, // Dropout eğitilebilir parametre içermez
+            training: true,   // Varsayılan olarak eğitim modunda
         }
+    }
+    
+    /// Eğitim modunu ayarlar
+    pub fn set_training(&mut self, training: bool) {
+        self.training = training;
     }
 }
 
 impl Layer for Dropout {
     fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
-        let batch_size = input.shape()[0];
-        let feature_size = input.shape()[1];
+        let input_shape = input.shape();
+        self.input_shape = vec![input_shape[0], input_shape[1]];
+        self.output_shape = self.input_shape.clone();
         
-        self.input_shape = vec![batch_size, feature_size];
-        
-        if self.is_trainable() {
-            // Eğitim modu - dropout uygula
-            let mut rng = thread_rng();
-            let scale = 1.0 / (1.0 - self.rate);
-            
-            // Rastgele maske oluştur
-            self.mask = Array::from_shape_fn((batch_size, feature_size), |_| {
-                if rng.gen::<f32>() > self.rate { scale } else { 0.0 }
-            });
-            
-            Ok(input * &self.mask)
-        } else {
-            // Çıkarım modu - doğrudan geçir
-            Ok(input.clone())
+        if !self.training {
+            // Test modunda dropout uygulanmaz
+            return Ok(input.clone());
         }
+        
+        // Rastgele maske oluştur
+        let mut rng = thread_rng();
+        self.mask = Array::from_shape_fn(input_shape, |_| {
+            if rng.gen::<f32>() > self.rate { 1.0 / (1.0 - self.rate) } else { 0.0 }
+        });
+        
+        // Maskeyi uygula
+        Ok(input * &self.mask)
     }
     
     fn backward(&mut self, grad: &Array2<f32>) -> Result<Array2<f32>> {
-        if grad.shape() != self.input_shape.as_slice() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Dropout backward için beklenen gradyan şekli: {:?}, alınan: {:?}",
-                self.input_shape, grad.shape()
-            )));
+        if !self.training {
+            return Ok(grad.clone());
         }
         
-        // Aynı maskeyi gradyanlara uygula
+        // Aynı maskeyi geriye de uygula
         Ok(grad * &self.mask)
     }
     
     fn get_weights(&self) -> Option<&Array2<f32>> {
-        None
+        None // Dropout'un ağırlığı yok
     }
     
     fn get_bias(&self) -> Option<&Array2<f32>> {
-        None
+        None // Dropout'un bias'ı yok
     }
     
     fn get_weight_grads(&self) -> Option<&Array2<f32>> {
@@ -416,11 +485,12 @@ impl Layer for Dropout {
     }
     
     fn update(&mut self) -> Result<()> {
+        // Dropout'un güncellenecek parametresi yok
         Ok(())
     }
     
-    fn activation_type(&self) -> Option<Activation> {
-        None
+    fn activation_type(&self) -> Activation {
+        Activation::Linear // Dropout'un aktivasyonu yok
     }
     
     fn layer_type(&self) -> &'static str {
@@ -432,11 +502,11 @@ impl Layer for Dropout {
     }
     
     fn output_size(&self) -> usize {
-        self.input_shape[1]
+        self.output_shape[1]
     }
     
     fn param_count(&self) -> usize {
-        0
+        0 // Dropout'un parametresi yok
     }
     
     fn set_trainable(&mut self, trainable: bool) {
@@ -452,7 +522,19 @@ impl Layer for Dropout {
     }
     
     fn reset(&mut self) {
-        // Do nothing
+        // Dropout için reset işlemi yok
+    }
+    
+    fn dropout_rate(&self) -> Option<f32> {
+        Some(self.rate)
+    }
+    
+    fn set_weights(&mut self, _weights: Array2<f32>) -> Result<()> {
+        Err(TurkError::InvalidLayer("Dropout katmanının ağırlığı yoktur".to_string()))
+    }
+    
+    fn set_bias(&mut self, _bias: Array2<f32>) -> Result<()> {
+        Err(TurkError::InvalidLayer("Dropout katmanının bias'ı yoktur".to_string()))
     }
 }
 
@@ -465,119 +547,121 @@ impl fmt::Display for Dropout {
 /// Toplu Normalizasyon (Batch Normalization) katmanı
 #[derive(Debug, Clone)]
 pub struct BatchNorm {
-    gamma: Array2<f32>,     // ölçeklendirme parametresi
-    beta: Array2<f32>,      // kaydırma parametresi
-    input: Array2<f32>,
-    normalized: Array2<f32>,
-    xhat: Array2<f32>,      // normalize edilmiş giriş
-    std: Array2<f32>,       // standart sapma
-    var: Array2<f32>,       // varyans
-    mean: Array2<f32>,      // ortalama
-    gamma_grad: Array2<f32>,
-    beta_grad: Array2<f32>,
-    epsilon: f32,           // sayısal stabilite için küçük değer
-    momentum: f32,          // hareketli ortalama için momentum
-    moving_mean: Array2<f32>,
-    moving_var: Array2<f32>,
+    gamma: Array2<f32>,        // Ölçekleme parametresi
+    beta: Array2<f32>,         // Kaydırma parametresi
+    gamma_grad: Array2<f32>,   // Gamma gradyanı
+    beta_grad: Array2<f32>,    // Beta gradyanı
+    running_mean: Array2<f32>, // Koşu ortalaması (eğitim modunda güncellenir)
+    running_var: Array2<f32>,  // Koşu varyansı (eğitim modunda güncellenir)
+    momentum: f32,             // Koşu istatistiklerini güncelleme hızı
+    epsilon: f32,              // Sayısal stabilite için küçük sabit
+    input: Array2<f32>,        // Giriş değeri
+    norm_input: Array2<f32>,   // Normalize edilmiş giriş
+    std: Array2<f32>,          // Standart sapma
+    var: Array2<f32>,          // Batch varyansı
+    mean: Array2<f32>,         // Batch ortalaması
     input_shape: Vec<usize>,
+    output_shape: Vec<usize>,
     trainable: bool,
+    training: bool,
 }
 
 impl BatchNorm {
-    pub fn new(feature_size: usize, epsilon: Option<f32>, momentum: Option<f32>) -> Self {
-        let epsilon = epsilon.unwrap_or(1e-5);
-        let momentum = momentum.unwrap_or(0.99);
-        
+    /// Yeni bir batch normalizasyon katmanı oluşturur
+    pub fn new(features: usize) -> Self {
         Self {
-            gamma: Array2::ones((1, feature_size)),
-            beta: Array2::zeros((1, feature_size)),
-            input: Array2::zeros((1, feature_size)),
-            normalized: Array2::zeros((1, feature_size)),
-            xhat: Array2::zeros((1, feature_size)),
-            std: Array2::zeros((1, feature_size)),
-            var: Array2::zeros((1, feature_size)),
-            mean: Array2::zeros((1, feature_size)),
-            gamma_grad: Array2::zeros((1, feature_size)),
-            beta_grad: Array2::zeros((1, feature_size)),
-            epsilon,
-            momentum,
-            moving_mean: Array2::zeros((1, feature_size)),
-            moving_var: Array2::zeros((1, feature_size)),
-            input_shape: vec![1, feature_size],
+            gamma: Array2::ones((1, features)),
+            beta: Array2::zeros((1, features)),
+            gamma_grad: Array2::zeros((1, features)),
+            beta_grad: Array2::zeros((1, features)),
+            running_mean: Array2::zeros((1, features)),
+            running_var: Array2::ones((1, features)),
+            momentum: 0.9,
+            epsilon: 1e-5,
+            input: Array2::zeros((1, features)),
+            norm_input: Array2::zeros((1, features)),
+            std: Array2::zeros((1, features)),
+            var: Array2::zeros((1, features)),
+            mean: Array2::zeros((1, features)),
+            input_shape: vec![1, features],
+            output_shape: vec![1, features],
             trainable: true,
+            training: true,
         }
+    }
+    
+    /// Eğitim modunu ayarlar
+    pub fn set_training(&mut self, training: bool) {
+        self.training = training;
     }
 }
 
 impl Layer for BatchNorm {
     fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
         let batch_size = input.shape()[0];
-        let feature_size = input.shape()[1];
+        let features = input.shape()[1];
         
-        if feature_size != self.input_shape[1] {
+        if features != self.input_shape[1] {
             return Err(TurkError::ShapeMismatch(format!(
-                "BatchNorm katmanı için beklenen özellik boyutu: {}, alınan: {}",
-                self.input_shape[1], feature_size
+                "BatchNorm katmanı için beklenen özellik sayısı: {}, alınan: {}",
+                self.input_shape[1], features
             )));
         }
         
         self.input = input.clone();
         self.input_shape[0] = batch_size;
+        self.output_shape[0] = batch_size;
         
-        if self.is_trainable() {
-            // Eğitim modu
+        if self.training {
             // Batch ortalaması ve varyansını hesapla
-            self.mean = input.mean_axis(Axis(0)).insert_axis(Axis(0));
-            self.var = input.var_axis(Axis(0), 0.0).insert_axis(Axis(0));
+            self.mean = input.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
+            self.var = (&input - &self.mean).mapv(|x| x * x).mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
             self.std = (&self.var + self.epsilon).mapv(f32::sqrt);
             
-            // Hareketli ortalamaları güncelle
-            if self.moving_mean.shape()[1] != feature_size {
-                self.moving_mean = Array2::zeros((1, feature_size));
-            }
-            if self.moving_var.shape()[1] != feature_size {
-                self.moving_var = Array2::zeros((1, feature_size));
-            }
-            
-            self.moving_mean = &self.moving_mean * self.momentum + &self.mean * (1.0 - self.momentum);
-            self.moving_var = &self.moving_var * self.momentum + &self.var * (1.0 - self.momentum);
+            // Koşu istatistiklerini güncelle
+            self.running_mean = &self.running_mean * self.momentum + &self.mean * (1.0 - self.momentum);
+            self.running_var = &self.running_var * self.momentum + &self.var * (1.0 - self.momentum);
             
             // Normalize et
-            self.xhat = (input - &self.mean) / &self.std;
-            self.normalized = &self.xhat * &self.gamma + &self.beta;
+            self.norm_input = (input - &self.mean) / &self.std;
         } else {
-            // Çıkarım modu
-            self.normalized = (input - &self.moving_mean) / (&self.moving_var + self.epsilon).mapv(f32::sqrt) * &self.gamma + &self.beta;
+            // Test modunda koşu istatistiklerini kullan
+            self.norm_input = (input - &self.running_mean) / (&self.running_var + self.epsilon).mapv(f32::sqrt);
         }
         
-        Ok(self.normalized.clone())
+        // Gamma ve beta ile ölçekle ve kaydır
+        Ok(&self.norm_input * &self.gamma + &self.beta)
     }
     
     fn backward(&mut self, grad: &Array2<f32>) -> Result<Array2<f32>> {
-        if !self.is_trainable() {
-            // Eğitim modunda değilse
+        if !self.is_trainable() || !self.training {
+            // Eğitilebilir değilse veya test modundaysa basitçe gradyanı geçir
             return Ok(grad.clone());
         }
         
-        let batch_size = self.input.shape()[0] as f32;
+        let batch_size = grad.shape()[0] as f32;
         
-        if grad.shape() != self.normalized.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "BatchNorm backward için beklenen gradyan şekli: {:?}, alınan: {:?}",
-                self.normalized.shape(), grad.shape()
-            )));
-        }
-        
-        // Parametrelere göre gradyanları hesapla
+        // Gamma ve beta için gradyanları hesapla
         self.beta_grad = grad.sum_axis(Axis(0)).insert_axis(Axis(0));
-        self.gamma_grad = (grad * &self.xhat).sum_axis(Axis(0)).insert_axis(Axis(0));
+        self.gamma_grad = (grad * &self.norm_input).sum_axis(Axis(0)).insert_axis(Axis(0));
         
-        // Girişe göre gradyanı hesapla (zincir kuralı)
-        let dxhat = grad * &self.gamma;
-        let dvar = -0.5 * &(dxhat * (&self.input - &self.mean) * (&self.var + self.epsilon).mapv(|v| v.powf(-1.5))).sum_axis(Axis(0)).insert_axis(Axis(0));
-        let dmean = -(&dxhat / &self.std).sum_axis(Axis(0)).insert_axis(Axis(0)) - 2.0 * dvar * (&self.input - &self.mean).mean_axis(Axis(0)).insert_axis(Axis(0));
+        // Normalize edilmiş giriş için gradyan
+        let dnorm = grad * &self.gamma;
         
-        let dx = dxhat / &self.std + 2.0 * dvar * (&self.input - &self.mean) / batch_size + dmean / batch_size;
+        // Varyans için gradyan
+        let dvar = (dnorm * &self.norm_input * -0.5 * (&self.std).mapv(|x| 1.0 / (x * x * x))).sum_axis(Axis(0)).insert_axis(Axis(0));
+        
+        // Ortalama için gradyan
+        let dmu1 = (dnorm * -1.0 / &self.std).sum_axis(Axis(0)).insert_axis(Axis(0));
+        let dmu2 = dvar * -2.0 * (&self.input - &self.mean).mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
+        let dmu = dmu1 + dmu2;
+        
+        // Giriş için gradyan
+        let dx1 = dnorm / &self.std;
+        let dx2 = dvar * 2.0 * (&self.input - &self.mean) / batch_size;
+        let dx3 = dmu / batch_size;
+        
+        let dx = dx1 + dx2 + dx3;
         
         Ok(dx)
     }
@@ -599,11 +683,12 @@ impl Layer for BatchNorm {
     }
     
     fn update(&mut self) -> Result<()> {
+        // BatchNorm güncellemesi optimizer'a bırakılır
         Ok(())
     }
     
-    fn activation_type(&self) -> Option<Activation> {
-        None
+    fn activation_type(&self) -> Activation {
+        Activation::Linear // BatchNorm'un aktivasyonu yok
     }
     
     fn layer_type(&self) -> &'static str {
@@ -615,10 +700,11 @@ impl Layer for BatchNorm {
     }
     
     fn output_size(&self) -> usize {
-        self.input_shape[1]
+        self.output_shape[1]
     }
     
     fn param_count(&self) -> usize {
+        // Gamma + Beta
         self.gamma.len() + self.beta.len()
     }
     
@@ -635,8 +721,38 @@ impl Layer for BatchNorm {
     }
     
     fn reset(&mut self) {
-        self.gamma_grad.fill(0.0);
-        self.beta_grad.fill(0.0);
+        self.gamma = Array2::ones((1, self.input_shape[1]));
+        self.beta = Array2::zeros((1, self.input_shape[1]));
+        self.gamma_grad = Array2::zeros((1, self.input_shape[1]));
+        self.beta_grad = Array2::zeros((1, self.input_shape[1]));
+        self.running_mean = Array2::zeros((1, self.input_shape[1]));
+        self.running_var = Array2::ones((1, self.input_shape[1]));
+    }
+    
+    fn use_batch_norm(&self) -> Option<bool> {
+        Some(true)
+    }
+    
+    fn set_weights(&mut self, weights: Array2<f32>) -> Result<()> {
+        if weights.shape() != self.gamma.shape() {
+            return Err(TurkError::ShapeMismatch(format!(
+                "BatchNorm gamma şekli uyuşmazlığı: beklenen {:?}, alınan {:?}",
+                self.gamma.shape(), weights.shape()
+            )));
+        }
+        self.gamma = weights;
+        Ok(())
+    }
+    
+    fn set_bias(&mut self, bias: Array2<f32>) -> Result<()> {
+        if bias.shape() != self.beta.shape() {
+            return Err(TurkError::ShapeMismatch(format!(
+                "BatchNorm beta şekli uyuşmazlığı: beklenen {:?}, alınan {:?}",
+                self.beta.shape(), bias.shape()
+            )));
+        }
+        self.beta = bias;
+        Ok(())
     }
 }
 
@@ -684,7 +800,7 @@ mod tests {
         assert_eq!(output_train.shape(), &[10, 20]);
         
         // Forward pass (inference mode)
-        dropout.set_trainable(false);
+        dropout.set_training(false);
         let output_inference = dropout.forward(&input).unwrap();
         assert_eq!(output_inference, input);
         
@@ -696,7 +812,7 @@ mod tests {
 
     #[test]
     fn test_batch_norm_layer() {
-        let mut batch_norm = BatchNorm::new(10, None, None);
+        let mut batch_norm = BatchNorm::new(10);
         
         // Test input
         let input = Array2::from_shape_fn((5, 10), |_| {
@@ -717,12 +833,12 @@ mod tests {
         }
         
         // Forward pass (inference mode)
-        batch_norm.set_trainable(false);
+        batch_norm.set_training(false);
         let output_inference = batch_norm.forward(&input).unwrap();
         assert_eq!(output_inference.shape(), &[5, 10]);
         
         // Backward pass
-        batch_norm.set_trainable(true);
+        batch_norm.set_training(true);
         let grad = Array2::ones((5, 10));
         let _ = batch_norm.forward(&input);
         let grad_back = batch_norm.backward(&grad).unwrap();
