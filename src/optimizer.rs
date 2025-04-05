@@ -1,4 +1,4 @@
-use crate::error::{Result, TurkError};
+use crate::{Result, TurkError};
 use ndarray::Array2;
 use serde::{Serialize, Deserialize};
 use std::fmt;
@@ -69,10 +69,10 @@ impl Optimizer for SGD {
                 .or_insert_with(|| Array2::zeros(params.raw_dim()));
             
             // v = momentum * v - learning_rate * grads
-            *velocity = &*velocity * self.momentum - grads * self.learning_rate;
+            *velocity = &*velocity * self.momentum - &(grads * self.learning_rate);
             
             // params += v
-            *params += velocity;
+            *params += &*velocity;
         } else {
             // Standart SGD
             *params -= &(grads * self.learning_rate);
@@ -167,15 +167,15 @@ impl Optimizer for Adam {
             .or_insert_with(|| Array2::zeros(params.raw_dim()));
         
         // Moment ve hız güncellemeleri
-        *m = m * self.beta1 + grads * (1.0 - self.beta1);
-        *v = v * self.beta2 + grads.map(|x| x * x) * (1.0 - self.beta2);
+        *m = &*m * self.beta1 + &(grads * (1.0 - self.beta1));
+        *v = &*v * self.beta2 + &(grads.map(|x| x * x) * (1.0 - self.beta2));
 
         // Bias düzeltmeleri
-        let m_hat = m / (1.0 - self.beta1.powf(t));
-        let v_hat = v / (1.0 - self.beta2.powf(t));
+        let m_hat = &*m / (1.0 - self.beta1.powf(t));
+        let v_hat = &*v / (1.0 - self.beta2.powf(t));
 
         // Parametre güncellemesi
-        *params -= &(m_hat.clone() * self.learning_rate / (v_hat.map(|x| x.sqrt()) + self.epsilon));
+        *params -= &(m_hat * self.learning_rate / (v_hat.map(|x| x.sqrt()) + self.epsilon));
         
         Ok(())
     }
@@ -266,18 +266,18 @@ impl Optimizer for AdamW {
         // Hızı başlat veya al
         let v = self.v.entry(param_key)
             .or_insert_with(|| Array2::zeros(params.raw_dim()));
-
+        
         // Moment ve hız güncellemeleri - standart Adam gibi
-        *m = m * self.beta1 + grads * (1.0 - self.beta1);
-        *v = v * self.beta2 + grads.map(|x| x * x) * (1.0 - self.beta2);
+        *m = &*m * self.beta1 + &(grads * (1.0 - self.beta1));
+        *v = &*v * self.beta2 + &(grads.map(|x| x * x) * (1.0 - self.beta2));
 
         // Bias düzeltmeleri
-        let m_hat = m / (1.0 - self.beta1.powf(t));
-        let v_hat = v / (1.0 - self.beta2.powf(t));
+        let m_hat = &*m / (1.0 - self.beta1.powf(t));
+        let v_hat = &*v / (1.0 - self.beta2.powf(t));
         
         // AdamW: Önce ağırlık aşınması uygula, sonra Adam güncellemesi
         *params *= 1.0 - self.learning_rate * self.weight_decay;
-        *params -= &(m_hat.clone() * self.learning_rate / (v_hat.map(|x| x.sqrt()) + self.epsilon));
+        *params -= &(m_hat * self.learning_rate / (v_hat.map(|x| x.sqrt()) + self.epsilon));
         
         Ok(())
     }
@@ -352,7 +352,7 @@ impl Optimizer for RMSProp {
             .or_insert_with(|| Array2::zeros(params.raw_dim()));
 
         // Cache güncelleme: decay_rate * cache + (1 - decay_rate) * grads^2
-        *cache = cache * self.decay_rate + grads.map(|x| x * x) * (1.0 - self.decay_rate);
+        *cache = &*cache * self.decay_rate + &(grads.map(|x| x * x) * (1.0 - self.decay_rate));
 
         // Parametre güncellemesi: params -= learning_rate * grads / sqrt(cache + epsilon)
         *params -= &(grads * self.learning_rate / cache.map(|x| (x + self.epsilon).sqrt()));

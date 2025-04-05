@@ -1,255 +1,238 @@
-use turk_lang::{
-    Sequential, Dense, Activation, Dropout, BatchNorm,
-    Adam, SGD, AdamW,
-    loss::{Loss, CrossEntropy},
-    metrics::{Metric, Accuracy, Precision, Recall, F1Score},
-    utils::{one_hot_encode, normalize, confusion_matrix},
-    TurkError, Result
-};
+use anyhow::Result;
 use mnist::{MnistBuilder, Mnist};
-use ndarray::{Array2, Axis, s};
-use rayon::prelude::*;
+use ndarray::{Array, Array2, Axis};
 use std::time::Instant;
 use indicatif::{ProgressBar, ProgressStyle};
 use colored::*;
-
-// Veri yükleme ve önişleme fonksiyonu
-fn load_mnist_data() -> Result<(Array2<f32>, Array2<f32>, Array2<f32>, Array2<f32>)> {
-    let start = Instant::now();
-    println!("{}", "MNIST veriseti yükleniyor...".blue());
-    
-    // MNIST verisini indir ve yükle
-    let Mnist {
-        trn_img,
-        trn_lbl,
-        tst_img,
-        tst_lbl,
-        ..
-    } = MnistBuilder::new()
-        .label_format_digit()
-        .training_set_length(60_000)
-        .test_set_length(10_000)
-        .finalize();
-    
-    let train_size = trn_img.len() / 784;
-    let test_size = tst_img.len() / 784;
-    
-    // Verileri ndarray formatına dönüştür
-    // Paralel işleme ile performansı artır
-    let x_train = Array2::from_shape_vec((train_size, 784), trn_img)
-        .map_err(|e| TurkError::NdarrayError(e))?;
-    
-    let x_test = Array2::from_shape_vec((test_size, 784), tst_img)
-        .map_err(|e| TurkError::NdarrayError(e))?;
-
-    // Etiketleri one-hot encode yap
-    let y_train = one_hot_encode(&trn_lbl, 10)
-        .map_err(|e| TurkError::InvalidInput(format!("Etiket dönüşümü hatası: {}", e)))?;
-    
-    let y_test = one_hot_encode(&tst_lbl, 10)
-        .map_err(|e| TurkError::InvalidInput(format!("Etiket dönüşümü hatası: {}", e)))?;
-    
-    // Verileri normalize et (0-1 aralığına)
-    let x_train = x_train.mapv(|x| x as f32 / 255.0);
-    let x_test = x_test.mapv(|x| x as f32 / 255.0);
-    
-    println!("{} ({:?})", "MNIST veriseti yüklendi".green(), start.elapsed());
-    println!("  Eğitim seti: {} örnek", train_size);
-    println!("  Test seti: {} örnek", test_size);
-    
-    Ok((x_train, y_train, x_test, y_test))
-}
-
-// Model oluşturma fonksiyonu
-fn create_model(model_type: &str) -> Result<Sequential> {
-    let mut model = Sequential::new();
-    
-    match model_type {
-        "simple" => {
-            model.add(Dense::new(784, 128, Activation::Relu))
-                 .add(Dense::new(128, 10, Activation::Softmax))
-                 .compile(SGD::new(0.01));
-        },
-        "medium" => {
-            model.add(Dense::new(784, 256, Activation::Relu))
-                 .add(Dropout::new(0.2))
-                 .add(Dense::new(256, 128, Activation::Relu))
-                 .add(Dropout::new(0.2))
-                 .add(Dense::new(128, 10, Activation::Softmax))
-                 .compile(Adam::new(0.001));
-        },
-        "advanced" => {
-            model.add(Dense::new(784, 512, Activation::Relu))
-                 .add(BatchNorm::new(512))
-                 .add(Dropout::new(0.25))
-                 .add(Dense::new(512, 256, Activation::Relu))
-                 .add(BatchNorm::new(256))
-                 .add(Dropout::new(0.25))
-                 .add(Dense::new(256, 128, Activation::Relu))
-                 .add(Dropout::new(0.2))
-                 .add(Dense::new(128, 10, Activation::Softmax))
-                 .compile(AdamW::new(0.001, 0.0001));
-        },
-        _ => return Err(TurkError::InvalidInput(format!("Bilinmeyen model tipi: {}", model_type))),
-    }
-    
-    Ok(model)
-}
+use turk_lang::{
+    Sequential, Dense, Dropout, BatchNorm, Activation, 
+    SGD, Adam, AdamW, RMSProp, 
+    Layer, Optimizer, Loss, MSE, CrossEntropy,
+    metrics::Accuracy
+};
 
 fn main() -> Result<()> {
     // Log seviyesini ayarla
     env_logger::init();
     
-    println!("\n{}", "TURK DİLİ MNIST SINIFLANDIRICI".bold().magenta());
-    println!("{}", "=================================".magenta());
+    println!("{}", "MNIST El Yazısı Rakam Sınıflandırıcı".green().bold());
+    println!("{}", "==========================================".green());
     
-    // Verileri yükle
-    let (x_train, y_train, x_test, y_test) = load_mnist_data()?;
+    // MNIST veri setini yükle
+    println!("MNIST veri seti yükleniyor...");
+    let start = Instant::now();
+    
+    let Mnist {
+        trn_img, trn_lbl,
+        val_img, val_lbl,
+        ..
+    } = MnistBuilder::new()
+        .label_format_digit()
+        .training_set_length(50000)
+        .validation_set_length(10000)
+        .test_set_length(10000)
+        .finalize();
+    
+    // Veri setini yeniden şekillendir
+    let train_data = ndarray::Array3::from_shape_vec((50000, 28, 28), trn_img)?
+        .map(|x| *x as f32 / 255.0);
+    let train_labels = Array1::from_vec(trn_lbl);
+    
+    let val_data = ndarray::Array3::from_shape_vec((10000, 28, 28), val_img)?
+        .map(|x| *x as f32 / 255.0);
+    let val_labels = Array1::from_vec(val_lbl);
+    
+    println!("Veri yükleme tamamlandı! ({:.2}s)", start.elapsed().as_secs_f32());
+    
+    // Verileri düzleştir
+    println!("Veriler ön işleniyor...");
+    let start = Instant::now();
+    
+    // Paralel işleme kullanarak verileri düzleştir
+    let train_data = flatten_images(&train_data);
+    let val_data = flatten_images(&val_data);
+    
+    // Etiketleri one-hot encode et
+    let train_labels = one_hot_encode(&train_labels, 10)?;
+    let val_labels = one_hot_encode(&val_labels, 10)?;
+    
+    println!("Ön işleme tamamlandı! ({:.2}s)", start.elapsed().as_secs_f32());
+    println!("Eğitim veri şekli: {:?}", train_data.shape());
+    println!("Doğrulama veri şekli: {:?}", val_data.shape());
     
     // Model oluştur
-    let model_type = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "medium".to_string());
+    println!("\n{}", "Model oluşturuluyor...".green());
+    let mut model = Sequential::new();
     
-    println!("\n{} '{}' modeli oluşturuluyor...", ">>".blue(), model_type);
-    let mut model = create_model(&model_type)?;
+    // Model mimarisi
+    model.add(Dense::new(784, 128, Activation::Relu));
+    model.add(Dropout::new(0.2));
+    model.add(BatchNorm::new(128));
+    model.add(Dense::new(128, 64, Activation::Relu));
+    model.add(Dropout::new(0.2));
+    model.add(Dense::new(64, 10, Activation::Softmax));
+    
+    // Optimizer seçimi
+    model.compile(Adam::new(0.001));
     
     // Model özetini göster
-    println!("\n{}", model.summary());
-    
-    // Eğitim parametreleri
-    let epochs = 10;
-    let batch_size = 128;
-    
-    // Eğitim veri setinin bir kısmını doğrulama için ayır (%20)
-    let train_size = x_train.shape()[0];
-    let valid_size = train_size / 5;
-    let train_samples = train_size - valid_size;
-    
-    let x_valid = x_train.slice(s![train_samples.., ..]).to_owned();
-    let y_valid = y_train.slice(s![train_samples.., ..]).to_owned();
-    
-    let x_train = x_train.slice(s![0..train_samples, ..]).to_owned();
-    let y_train = y_train.slice(s![0..train_samples, ..]).to_owned();
-    
-    println!("\n{}", "Eğitim başlıyor...".green().bold());
-    println!("  Epochs: {}", epochs);
-    println!("  Batch size: {}", batch_size);
-    println!("  Eğitim örnekleri: {}", train_samples);
-    println!("  Doğrulama örnekleri: {}", valid_size);
-    
-    // İlerleme çubuğu oluştur
-    let progress_style = ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:50.cyan/blue} {pos:>7}/{len:7} Epoch {msg}")
-        .unwrap()
-        .progress_chars("##-");
-    
-    let progress_bar = ProgressBar::new(epochs as u64)
-        .with_style(progress_style);
+    println!("{}", model.summary());
     
     // Modeli eğit
-    let start_time = Instant::now();
-    let history = model.fit(
-        &x_train, 
-        &y_train, 
-        epochs, 
-        batch_size, 
-        Some((&x_valid, &y_valid))
+    println!("\n{}", "Model eğitimi başlıyor...".green());
+    let start = Instant::now();
+    
+    // Hiperparametreler
+    let epochs = 10;
+    let batch_size = 32;
+    
+    // İlerleme çubuğu
+    let pb = ProgressBar::new((epochs * (train_data.shape()[0] / batch_size)) as u64);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} batches ({eta})")
+        .unwrap()
+        .progress_chars("#>-"));
+    
+    // Eğitim geri çağırma fonksiyonu
+    let progress_callback = move |_epoch: usize, batch: usize, _loss: f32| {
+        pb.inc(1);
+        if batch % 100 == 0 {
+            pb.println(format!("Epoch {}, Batch {}, Loss: {:.4}", _epoch + 1, batch + 1, _loss));
+        }
+    };
+    
+    let history = model.fit_with_callback(
+        &train_data, &train_labels, 
+        epochs, batch_size, 
+        Some((&val_data, &val_labels)),
+        Some(&progress_callback)
     )?;
     
-    // Her epoch sonuçlarını göster
+    pb.finish_with_message("Eğitim tamamlandı!");
+    
+    println!("Eğitim süresi: {:.2}s", start.elapsed().as_secs_f32());
+    
+    // Eğitim geçmişini göster
+    println!("\n{}", "Eğitim Geçmişi".green());
+    println!("{}", "=============".green());
     for (epoch, (train_loss, val_loss)) in history.iter().enumerate() {
-        progress_bar.set_position((epoch + 1) as u64);
-        
-        if let Some(val) = val_loss {
-            progress_bar.set_message(format!("- loss: {:.4} - val_loss: {:.4}", train_loss, val));
-        } else {
-            progress_bar.set_message(format!("- loss: {:.4}", train_loss));
-        }
-        
-        // Her epoch'ta dosyaya kaydet
-        if (epoch + 1) % 5 == 0 {
-            let checkpoint_path = format!("model_checkpoint_epoch_{}.json", epoch + 1);
-            model.save(&checkpoint_path)?;
-            println!("\nModel kaydedildi: {}", checkpoint_path);
-        }
+        let val_loss_str = match val_loss {
+            Some(val) => format!("{:.4}", val),
+            None => "N/A".to_string(),
+        };
+        println!("Epoch {}: Train Loss = {:.4}, Val Loss = {}", epoch + 1, train_loss, val_loss_str);
     }
     
-    progress_bar.finish_with_message(format!("Eğitim tamamlandı! Süre: {:?}", start_time.elapsed()));
+    // Modeli değerlendir
+    println!("\n{}", "Model değerlendiriliyor...".green());
+    let start = Instant::now();
+    
+    // Accuracy metriki oluştur
+    let accuracy = Accuracy::new(0.5);
+    
+    // Değerlendirme
+    let metrics = model.evaluate(&val_data, &val_labels, &[&accuracy])?;
+    
+    println!("Değerlendirme tamamlandı! ({:.2}s)", start.elapsed().as_secs_f32());
+    
+    // Metrikleri göster
+    println!("\n{}", "Değerlendirme Sonuçları".green());
+    println!("{}", "=====================".green());
+    for (name, value) in metrics {
+        println!("{}: {:.4}", name, value);
+    }
     
     // Modeli kaydet
-    let model_path = "mnist_model.json";
-    model.save(model_path)?;
-    println!("\nModel kaydedildi: {}", model_path);
+    println!("\n{}", "Model kaydediliyor...".green());
+    model.save("mnist_model.json")?;
+    println!("Model başarıyla kaydedildi: mnist_model.json");
     
-    // Modeli test et
-    println!("\n{}", "Model test ediliyor...".blue());
-    let start_eval = Instant::now();
+    // Birkaç örnek tahmin yap
+    println!("\n{}", "Örnek Tahminler".green());
+    println!("{}", "===============".green());
     
-    // Metrikleri ayarla
-    let accuracy = Accuracy::new(0.5);
-    let precision = Precision::new(0.5);
-    let recall = Recall::new(0.5);
-    let f1 = F1Score::new(0.5);
+    // Rastgele 5 örnek seç
+    let indices = [42, 123, 456, 789, 890];
     
-    let metrics = model.evaluate(&x_test, &y_test, &[&accuracy, &precision, &recall, &f1])?;
-    
-    println!("{} ({:?})", "Test tamamlandı".green(), start_eval.elapsed());
-    
-    // Sonuçları göster
-    println!("\n{}", "METRİKLER".bold().yellow());
-    println!("{}", "=========".yellow());
-    
-    for (name, value) in metrics {
-        println!("  {}: {:.6}", name, value);
+    for &idx in &indices {
+        let sample = val_data.slice(s![idx..idx+1, ..]).to_owned();
+        let true_label = val_labels.slice(s![idx..idx+1, ..]).to_owned();
+        
+        // Modeli çalıştır
+        let prediction = model.predict(&sample)?;
+        
+        // En yüksek olasılıklı sınıfı bul
+        let pred_class = get_argmax(&prediction);
+        let true_class = get_argmax(&true_label);
+        
+        // Sonucu göster
+        let result_text = if pred_class == true_class {
+            format!("Doğru: {} ✓", pred_class).green()
+        } else {
+            format!("Yanlış: {} (gerçek: {})", pred_class, true_class).red()
+        };
+        
+        println!("Örnek {}: {}", idx, result_text);
     }
     
-    // Confusion matrix
-    println!("\n{}", "KARIŞIKLIK MATRİSİ".bold().yellow());
-    println!("{}", "================".yellow());
-    
-    let y_pred = model.predict(&x_test)?;
-    let pred_labels: Vec<usize> = y_pred
-        .axis_iter(Axis(0))
-        .map(|row| {
-            row.iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(idx, _)| idx)
-                .unwrap_or(0)
-        })
-        .collect();
-    
-    let true_labels: Vec<usize> = y_test
-        .axis_iter(Axis(0))
-        .map(|row| {
-            row.iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .map(|(idx, _)| idx)
-                .unwrap_or(0)
-        })
-        .collect();
-    
-    let cm = confusion_matrix(&pred_labels, &true_labels, 10)?;
-    
-    // Karışıklık matrisini güzel göster
-    println!("      0     1     2     3     4     5     6     7     8     9");
-    println!("    --------------------------------------------------");
-    
-    for (i, row) in cm.outer_iter().enumerate() {
-        print!("{}  |", i);
-        for val in row.iter() {
-            let val_str = format!("{:5}", val);
-            if *val > 0 {
-                print!("{}", val_str.green());
-            } else {
-                print!("{}", val_str);
-            }
-        }
-        println!();
-    }
-    
-    println!("\n{}", "İŞLEM TAMAMLANDI".bold().green());
     Ok(())
-} 
+}
+
+// Görüntü verilerini düzleştir (paralel)
+fn flatten_images(images: &ndarray::Array3<f32>) -> Array2<f32> {
+    let n_samples = images.shape()[0];
+    let mut flattened = Array2::<f32>::zeros((n_samples, 784));
+    
+    // Rayon ile paralel işlem
+    use rayon::prelude::*;
+    
+    (0..n_samples).into_par_iter().for_each(|i| {
+        let img_flat = images.slice(s![i, .., ..]).to_owned().into_shape((784,)).unwrap();
+        
+        // Güvenli bir şekilde thread-safe erişim olmadığı için 
+        // her thread kendi sonucunu döndürür ve sonra birleştiririz
+        let mut local_result = Array1::<f32>::zeros(784);
+        local_result.assign(&img_flat);
+        
+        // Bu eşzamanlı erişim sorunu yaratmaz
+        // çünkü her thread farklı bir satıra erişiyor
+        flattened.slice_mut(s![i, ..]).assign(&local_result);
+    });
+    
+    flattened
+}
+
+// Etiketleri one-hot encode et
+fn one_hot_encode(labels: &ndarray::Array1<u8>, n_classes: usize) -> Result<Array2<f32>> {
+    let n_samples = labels.len();
+    let mut one_hot = Array2::<f32>::zeros((n_samples, n_classes));
+    
+    for (i, &label) in labels.iter().enumerate() {
+        // Güvenlik kontrolü: out-of-bounds erişimi engelle
+        if label as usize >= n_classes {
+            return Err(anyhow::anyhow!("Etiket sayısı sınıf sayısından büyük: {} >= {}", label, n_classes));
+        }
+        one_hot[[i, label as usize]] = 1.0;
+    }
+    
+    Ok(one_hot)
+}
+
+// Argmax fonksiyonu
+fn get_argmax(array: &Array2<f32>) -> usize {
+    let mut max_idx = 0;
+    let mut max_val = f32::MIN;
+    
+    for (i, &val) in array.slice(s![0, ..]).iter().enumerate() {
+        if val > max_val {
+            max_val = val;
+            max_idx = i;
+        }
+    }
+    
+    max_idx
+}
+
+// Yardımcı tiplemeler
+type Array1<T> = ndarray::Array1<T>;
+type Callback = dyn Fn(usize, usize, f32) -> ();

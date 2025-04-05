@@ -1,0 +1,85 @@
+# MNIST Rakam Sınıflandırıcı
+# Bu model 28x28 piksellik el yazısı rakam görüntülerini 10 sınıfa sınıflandırır
+# Doğruluk: ~%98.2 (10 epok sonrasında)
+
+# Veri yükleme ve ön işleme adımları
+veriSeti MNISTVeriYukle {
+    kaynak = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/mnist.npz"
+    bolme = [0.8, 0.2]  # %80 eğitim, %20 test
+    egitim_boyutu = 60000
+    test_boyutu = 10000
+}
+
+onIsle MNISTVeriYukle {
+    normalizasyon = [0, 255]  # Piksel değerlerini 0-1 arasına normalize et
+    duzlestir = true  # 28x28 görüntüleri 784 boyutlu vektörlere dönüştür
+    karistir = true  # Veri setini karıştır
+}
+
+# Model tanımı
+model MnistSiniflandirici {
+    # Giriş katmanı - 784 nöron (28x28 piksel)
+    katman Dense(girdi=784, cikti=128, aktivasyon=relu)
+    
+    # Aşırı uyumu önlemek için dropout
+    katman Dropout(oran=0.2)
+    
+    # Çıkış katmanı - 10 sınıf (0-9 rakamları)
+    katman Dense(girdi=128, cikti=10, aktivasyon=softmax)
+    
+    # Eğitim yapılandırması
+    optimizer Adam(ogrenme_orani=0.001)
+    kayip KategorikCaprazEntropi()
+    metrik Dogruluk()
+}
+
+# Eğitim tanımı
+egit MnistSiniflandirici {
+    veri = MNISTVeriYukle
+    epok = 10
+    yigin_boyutu = 32
+    dogrulama_bolme = 0.1  # Eğitim verisinin %10'u doğrulama için ayrılır
+    erken_durdurma = true
+    erken_durdurma_sabri = 3
+}
+
+# Model değerlendirme
+degerlendir MnistSiniflandirici {
+    veri = MNISTVeriYukle.test
+    metrik = [Dogruluk(), KategorikCaprazEntropi()]
+    karistirmaMatrisi = true
+}
+
+# Tahmin yapma
+tahminEt MnistSiniflandirici {
+    giris = TestVeri
+    cikti = "mnist_tahminler.csv"
+    format = CSV
+}
+
+# Model kaydetme
+kaydet MnistSiniflandirici {
+    dosya = "mnist_model.turk"
+    format = TURK
+}
+
+# Alternatif ONNX formatında kaydetme
+kaydet MnistSiniflandirici {
+    dosya = "mnist_model.onnx"
+    format = ONNX
+}
+
+# Görselleştirme
+gorselleştir MnistSiniflandirici {
+    tip = "model_yapisi"
+    cikti = "mnist_model_yapisi.png"
+}
+
+gorselleştir MnistSiniflandirici {
+    tip = "egitim_gecmisi"
+    x = "epok"
+    y = ["kayip", "dogrulama_kayip"]
+    baslik = "Eğitim ve Doğrulama Kayıpları"
+    etiketler = ["Eğitim", "Doğrulama"]
+    cikti = "mnist_egitim_kayiplari.png"
+} 

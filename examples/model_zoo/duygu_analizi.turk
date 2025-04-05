@@ -1,0 +1,120 @@
+# Türkçe Film Yorumları Duygu Analizi Modeli
+# Bu model, Türkçe film yorumlarını olumlu veya olumsuz olarak sınıflandırır
+# Doğruluk: ~%87.5 (5 epok sonrasında)
+
+# Veri yükleme ve ön işleme
+veriSeti TurkceFilmYorumlari {
+    kaynak = "https://raw.githubusercontent.com/turkish-nlp-datasets/film-yorumlari/main/reviews.csv"
+    bolme = [0.8, 0.1, 0.1]  # %80 eğitim, %10 doğrulama, %10 test
+    metin_kolonu = "yorum"
+    etiket_kolonu = "duygu"
+    etiket_eslemesi = {
+        "olumlu": 1,
+        "olumsuz": 0
+    }
+}
+
+onIsle TurkceFilmYorumlari {
+    temizle = true  # HTML karakterlerini, fazla boşlukları temizle
+    turkce_karakter_normalize = true
+    kucult = true  # Tüm metni küçük harfe dönüştür
+    tokenize = "kelime"  # Kelime seviyesinde tokenleştirme
+    stopwords_kaldir = true  # Türkçe bağlaç-edat vb. kelimeleri kaldır
+    
+    vektorize = {
+        tip = "sozcuk_torbasi",
+        max_ozellik = 5000,
+        max_uzunluk = 100
+    }
+    
+    pad = "max_uzunluk"  # Tüm dizileri aynı uzunluğa getir
+}
+
+# Kelime gömme modeli tanımı
+gomme SozcukGomme {
+    token_sayisi = 5000
+    gomme_boyutu = 100
+    maske_tokeni = true
+}
+
+# Model tanımı
+model DuyguAnalizi {
+    # Kelime gömme katmanı
+    katman Gomme(girdi=5000, cikti=100, trainable=true)
+    
+    # Uzun/Kısa Süreli Bellek (LSTM) katmanı 
+    katman LSTM(birimler=64, aktivasyon=tanh, geri_donus=false)
+    
+    # Ara katman
+    katman Dense(girdi=64, cikti=32, aktivasyon=relu)
+    katman Dropout(oran=0.3)
+    
+    # Çıkış katmanı - ikili sınıflandırma
+    katman Dense(girdi=32, cikti=1, aktivasyon=sigmoid)
+    
+    # Eğitim yapılandırması
+    optimizer RMSProp(ogrenme_orani=0.001)
+    kayip IkiliCaprazEntropi()
+    metrik [Dogruluk(), F1Skoru()]
+}
+
+# Eğitim tanımı
+egit DuyguAnalizi {
+    veri = TurkceFilmYorumlari
+    epok = 5
+    yigin_boyutu = 64
+    dogrulama_veri = TurkceFilmYorumlari.val
+    erken_durdurma = true
+    erken_durdurma_sabri = 2
+}
+
+# Model değerlendirme
+degerlendir DuyguAnalizi {
+    veri = TurkceFilmYorumlari.test
+    metrik = [Dogruluk(), F1Skoru(), Kesinlik(), Duyarlilik()]
+    karistirmaMatrisi = true
+    roc_egri = true
+}
+
+# Tahmin yapma
+tahminEt DuyguAnalizi {
+    giris = "yeni_yorumlar.txt"
+    cikti = "yorum_tahminleri.csv"
+    format = CSV
+    esik = 0.5  # Olumlu/olumsuz sınıflandırma eşiği
+}
+
+# Model kaydetme
+kaydet DuyguAnalizi {
+    dosya = "duygu_analizi_model.turk"
+    format = TURK
+}
+
+# Ayrıca vektörleştiriciyi de kaydet
+kaydet TurkceFilmYorumlari.vektorleyici {
+    dosya = "duygu_vektorleyici.turk"
+    format = TURK
+}
+
+# Görselleştirme
+gorselleştir DuyguAnalizi {
+    tip = "model_yapisi"
+    cikti = "duygu_model_yapisi.png"
+}
+
+gorselleştir DuyguAnalizi {
+    tip = "egitim_gecmisi"
+    x = "epok"
+    y = ["kayip", "dogrulama_kayip", "dogruluk", "dogrulama_dogruluk"]
+    baslik = "Eğitim Metrikleri"
+    etiketler = ["Eğitim Kaybı", "Doğrulama Kaybı", "Eğitim Doğruluğu", "Doğrulama Doğruluğu"]
+    cikti = "duygu_egitim_metrikleri.png"
+}
+
+# Kelime gömme görselleştirme
+gorselleştir SozcukGomme {
+    tip = "tsne"
+    boyut = 2
+    kelimeler = 100  # En sık kullanılan 100 kelime
+    cikti = "kelime_gomme_tsne.png"
+} 

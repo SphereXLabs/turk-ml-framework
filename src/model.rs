@@ -1,11 +1,16 @@
-use crate::{Result, TurkError, Layer, Optimizer};
+use crate::{Result, TurkError};
+use crate::layer::Layer;
+use crate::optimizer::Optimizer;
+use crate::loss::Loss;
+use turk_lang::metrics::Metric;
 use ndarray::{Array2, Axis};
 use std::fs;
 use serde::{Serialize, Deserialize};
 use std::fmt;
 use std::path::Path;
-use rayon::prelude::*;
 use std::io::{BufReader, BufWriter};
+use log::{warn};
+use rand::Rng;
 
 /// Model trait - Makine öğrenmesi modelleri için arayüz
 pub trait Model: Send + Sync + fmt::Debug {
@@ -71,6 +76,55 @@ struct OptimizerParams {
     epsilon: Option<f32>,
     weight_decay: Option<f32>,
     decay_rate: Option<f32>,
+}
+
+/// Model verisini doğrulayan yardımcı fonksiyon
+fn validate_model_data(model_data: &ModelData) -> Result<()> {
+    // Boş model kontrolü
+    if model_data.layers.is_empty() {
+        return Err(TurkError::ModelError("Boş model yüklenemez".to_string()));
+    }
+    
+    // Şema versiyonu kontrolü
+    if model_data.schema_version != "1.0" {
+        return Err(TurkError::ModelError(
+            format!("Desteklenmeyen model şema versiyonu: {}", model_data.schema_version)
+        ));
+    }
+    
+    // Optimizer tipi kontrolü
+    match model_data.optimizer_type.as_str() {
+        "sgd" | "adam" | "adamw" | "rmsprop" => {},
+        _ => return Err(TurkError::ModelError(
+            format!("Bilinmeyen optimizer tipi: {}", model_data.optimizer_type)
+        )),
+    }
+    
+    // Optimizer parametreleri kontrolü
+    let params = &model_data.optimizer_params;
+    if params.learning_rate <= 0.0 {
+        return Err(TurkError::ModelError(
+            format!("Geçersiz öğrenme oranı: {}", params.learning_rate)
+        ));
+    }
+    
+    // Katmanlar arası boyut tutarlılığı kontrolü
+    for i in 1..model_data.layers.len() {
+        let prev_layer = &model_data.layers[i-1];
+        let curr_layer = &model_data.layers[i];
+        
+        if curr_layer.layer_type != "dropout" && 
+           curr_layer.layer_type != "batch_norm" && 
+           prev_layer.output_size != curr_layer.input_size {
+            return Err(TurkError::ShapeMismatch(format!(
+                "Katmanlar arası boyut uyuşmazlığı: {} ({}) -> {} ({})",
+                prev_layer.layer_type, prev_layer.output_size, 
+                curr_layer.layer_type, curr_layer.input_size
+            )));
+        }
+    }
+    
+    Ok(())
 }
 
 impl Sequential {
@@ -151,30 +205,24 @@ impl Sequential {
         // Optimizer'ı al (compile kontrolünden sonra güvenli)
         let optimizer = self.optimizer.as_mut().unwrap();
         
-        // Paralelleştirilebilir işlemler için rayon kullanımı
-        let update_results: Vec<Result<()>> = self.layers
-            .par_iter_mut()
-            .map(|layer| {
-                // Ağırlık güncellemeleri
-                let weight_grads = layer.get_weight_grads();
-                let mut weights = layer.get_weights().clone();
-                optimizer.step(&mut weights, weight_grads)?;
-                layer.set_weights(weights)?;
-                
-                // Bias güncellemeleri
-                let bias_grads = layer.get_bias_grads();
-                let mut bias = layer.get_bias().clone();
-                optimizer.step(&mut bias, bias_grads)?;
-                layer.set_bias(bias)?;
-                
-                // Katman iç güncellemeleri
-                layer.update()
-            })
-            .collect();
-        
-        // Tüm sonuçları kontrol et, herhangi bir hata varsa döndür
-        for result in update_results {
-            result?;
+        // Her katmanı güncelleyelim
+        for layer in &mut self.layers {
+            // Ağırlık güncellemeleri
+            if let (Some(weights), Some(weight_grads)) = (layer.get_weights(), layer.get_weight_grads()) {
+                let mut weights_clone = weights.clone();
+                optimizer.step(&mut weights_clone, weight_grads)?;
+                layer.set_weights(weights_clone)?;
+            }
+            
+            // Bias güncellemeleri
+            if let (Some(bias), Some(bias_grads)) = (layer.get_bias(), layer.get_bias_grads()) {
+                let mut bias_clone = bias.clone();
+                optimizer.step(&mut bias_clone, bias_grads)?;
+                layer.set_bias(bias_clone)?;
+            }
+            
+            // Katman iç güncellemeleri
+            layer.update()?;
         }
         
         Ok(())
@@ -264,16 +312,27 @@ impl Sequential {
             ))
         )?;
         
+        // Güvenlik: dosya boyutu kontrolü
+        let metadata = file.metadata().map_err(|e| 
+            TurkError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                format!("Dosya metadata okunamadı: {}, Hata: {}", path, e)
+            ))
+        )?;
+        
+        if metadata.len() > 50_000_000 { // 50MB üst sınır
+            return Err(TurkError::IoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Dosya çok büyük ({}MB), maksimum 50MB destekleniyor", metadata.len() / 1_000_000)
+            )));
+        }
+        
         let reader = BufReader::new(file);
         let model_data: ModelData = serde_json::from_reader(reader)
             .map_err(|e| TurkError::SerializationError(e))?;
-            
-        // Şema versiyon kontrolü
-        if model_data.schema_version != "1.0" {
-            return Err(TurkError::ModelError(
-                format!("Desteklenmeyen model şema versiyonu: {}", model_data.schema_version)
-            ));
-        }
+        
+        // Model verisini doğrula
+        validate_model_data(&model_data)?;
 
         // Katmanları yeniden oluştur
         self.layers.clear();
@@ -358,6 +417,7 @@ impl Sequential {
         };
         
         self.compiled = true;
+        log::info!("Model başarıyla yüklendi: {}", path);
         Ok(())
     }
     
@@ -422,15 +482,18 @@ impl Sequential {
         let effective_batch_size = batch_size.min(n_samples);
         let n_batches = (n_samples + effective_batch_size - 1) / effective_batch_size;
         
-        let loss_fn = crate::loss::MSE::new();
+        let loss_fn: &dyn Loss = &crate::loss::MSE::default();
         
         for epoch in 0..epochs {
             let mut epoch_loss = 0.0;
             
-            // İndeksleri karıştır
             let mut indices: Vec<usize> = (0..n_samples).collect();
             let mut rng = rand::thread_rng();
-            rand::seq::SliceRandom::shuffle(&mut indices, &mut rng);
+            
+            for i in (1..indices.len()).rev() {
+                let j = rng.gen_range(0..=i);
+                indices.swap(i, j);
+            }
             
             for batch_idx in 0..n_batches {
                 let start_idx = batch_idx * effective_batch_size;
@@ -439,46 +502,37 @@ impl Sequential {
                 
                 let mut batch_loss = 0.0;
                 
-                // Her örnek için forward ve backward geçişi yap
                 for &idx in batch_indices {
-                    // Tek örneği al
-                    let x_sample = x.index_axis(Axis(0), idx).insert_axis(Axis(0));
-                    let y_true = y.index_axis(Axis(0), idx).insert_axis(Axis(0));
+                    let x_sample = x.index_axis(Axis(0), idx).insert_axis(Axis(0)).to_owned();
+                    let y_true = y.index_axis(Axis(0), idx).insert_axis(Axis(0)).to_owned();
                     
-                    // Forward pass
                     let y_pred = self.forward(&x_sample)?;
                     
-                    // Loss hesapla
-                    let loss_val = loss_fn.forward(&y_pred, &y_true)?;
+                    let loss_val = loss_fn.compute(&y_pred, &y_true)?;
                     batch_loss += loss_val;
                     
-                    // Backward pass
-                    let loss_grad = loss_fn.backward(&y_pred, &y_true)?;
+                    let loss_grad = loss_fn.gradient(&y_pred, &y_true)?;
                     self.backward(&loss_grad)?;
                 }
                 
-                // Batch sonunda ağırlık güncellemesi
                 self.update()?;
                 
-                // Batch loss ortalamasını al
                 batch_loss /= batch_indices.len() as f32;
                 epoch_loss += batch_loss;
             }
             
-            // Epoch loss ortalamasını al
             epoch_loss /= n_batches as f32;
             
-            // Doğrulama
             let validation_loss = if let Some((x_val, y_val)) = validation_data {
                 let mut val_loss = 0.0;
                 let n_val_samples = x_val.len_of(Axis(0));
                 
                 for i in 0..n_val_samples {
-                    let x_sample = x_val.index_axis(Axis(0), i).insert_axis(Axis(0));
-                    let y_true = y_val.index_axis(Axis(0), i).insert_axis(Axis(0));
+                    let x_sample = x_val.index_axis(Axis(0), i).insert_axis(Axis(0)).to_owned();
+                    let y_true = y_val.index_axis(Axis(0), i).insert_axis(Axis(0)).to_owned();
                     
                     let y_pred = self.forward(&x_sample)?;
-                    val_loss += loss_fn.forward(&y_pred, &y_true)?;
+                    val_loss += loss_fn.compute(&y_pred, &y_true)?;
                 }
                 
                 val_loss /= n_val_samples as f32;
@@ -489,7 +543,6 @@ impl Sequential {
             
             loss_history.push((epoch_loss, validation_loss));
             
-            // Eğitim durumunu yazdır
             if let Some(val_loss) = validation_loss {
                 log::info!("Epoch {}/{} - loss: {:.4} - val_loss: {:.4}", 
                     epoch + 1, epochs, epoch_loss, val_loss);
@@ -526,7 +579,7 @@ impl Sequential {
         &mut self, 
         x: &Array2<f32>, 
         y: &Array2<f32>,
-        metrics: &[&dyn crate::metrics::Metric]
+        metrics: &[&dyn Metric]
     ) -> Result<Vec<(String, f32)>> {
         let y_pred = self.predict(x)?;
         
@@ -538,6 +591,94 @@ impl Sequential {
         }
         
         Ok(results)
+    }
+
+    /// AST'den model oluşturur
+    ///
+    /// # Örnek
+    /// ```no_run
+    /// use turk_lang::parser::{ModelParser, Parser};
+    /// use turk_lang::ast::Program;
+    /// use turk_lang::model::Sequential;
+    /// 
+    /// let dsl = r#"
+    ///   Model mnist_model {
+    ///     Katman(784, 128, ReLU),
+    ///     Katman(128, 10, Softmax)
+    ///   }
+    /// "#;
+    /// 
+    /// let mut parser = ModelParser::new(dsl);
+    /// let program = parser.parse().expect("DSL ayrıştırma hatası");
+    /// let model = Sequential::from_ast(&program).expect("Model oluşturma hatası");
+    /// ```
+    pub fn from_ast(ast: &crate::ast::Program) -> Result<Self> {
+        use crate::ast::{Deyim, KatmanOzellikleri, OptimizerTipi, AktivasyonFonksiyonu};
+        use crate::layer::{Dense, Dropout, Activation};
+        use crate::optimizer::{Adam, SGD, AdamW};
+        use crate::parser::error::ParseError;
+        
+        let mut model = Self::new();
+        
+        let mut found_model = false;
+        for deyim in &ast.deyimler {
+            if let Deyim::ModelTanimi { isim: _, ozellikler: model_ozellikleri } = deyim {
+                found_model = true;
+                
+                for katman_ozellik in &model_ozellikleri.katmanlar {
+                    match katman_ozellik {
+                        KatmanOzellikleri { noron_sayisi, aktivasyon, dropout_rate, .. } => {
+                            let activation_enum = match aktivasyon {
+                                AktivasyonFonksiyonu::Relu => Activation::Relu,
+                                AktivasyonFonksiyonu::Sigmoid => Activation::Sigmoid,
+                                AktivasyonFonksiyonu::Tanh => Activation::Tanh,
+                                AktivasyonFonksiyonu::Softmax => Activation::Softmax,
+                            };
+                            
+                            model.add(Dense::new(
+                                model.layers.last().map_or(0, |l| l.output_size()),
+                                *noron_sayisi as usize,
+                                activation_enum
+                            ));
+                            
+                            if let Some(rate) = dropout_rate {
+                                if *rate > 0.0 {
+                                    model.add(Dropout::new(*rate as f32));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                let optimizer_tipi = &model_ozellikleri.optimizer;
+                match optimizer_tipi {
+                    OptimizerTipi::SGD(ogrenme_orani) => {
+                        model.compile(SGD::new(*ogrenme_orani as f32));
+                    },
+                    OptimizerTipi::Adam(ogrenme_orani) => {
+                        model.compile(Adam::new(*ogrenme_orani as f32));
+                    },
+                    OptimizerTipi::AdamW { lr, weight_decay, beta1: _, beta2: _ } => {
+                        model.compile(AdamW::new(*lr as f32, *weight_decay as f32));
+                    },
+                }
+                
+                break;
+            }
+        }
+        
+        if !found_model {
+            return Err(TurkError::ParseError(
+                ParseError::syntax_error("AST içinde ModelTanimi bulunamadı".to_string())
+            ));
+        }
+        
+        if model.optimizer.is_none() {
+            warn!("AST'den model oluşturuldu ancak optimizer belirtilmedi, varsayılan SGD (lr=0.01) kullanılıyor.");
+            model.compile(SGD::new(0.01));
+        }
+        
+        Ok(model)
     }
 }
 
@@ -581,7 +722,7 @@ mod tests {
     use ndarray::{Array2, arr2};
     use tempfile::tempdir;
     use std::path::PathBuf;
-    use crate::metrics::{Accuracy, MSE};
+    use crate::metrics::{Accuracy, MSE as MetricsMSE};
     
     fn create_test_model() -> Sequential {
         let mut model = Sequential::new();
@@ -622,15 +763,12 @@ mod tests {
         let model_path = dir.path().join("test_model.json");
         let path_str = model_path.to_str().unwrap();
         
-        // Model oluştur ve kaydet
         let mut model = create_test_model();
         model.save(path_str).unwrap();
         
-        // Modeli yükle
         let mut loaded = Sequential::new();
         loaded.load(path_str).unwrap();
         
-        // Yüklenen modeli test et
         let input = Array2::zeros((10, 1));
         let output = loaded.forward(&input).unwrap();
         assert_eq!(output.shape(), &[2, 1]);
@@ -665,7 +803,6 @@ mod tests {
              .add(Dense::new(3, 1, Activation::Sigmoid))
              .compile(SGD::new(0.1));
         
-        // XOR problemi için örnek veri
         let x = arr2(&[
             [0.0, 0.0],
             [0.0, 1.0],
@@ -680,13 +817,10 @@ mod tests {
             [0.0],
         ]);
         
-        // Eğitim
         let history = model.fit(&x, &y, 100, 1, None).unwrap();
         
-        // Son kaybın başlangıç kaybından düşük olduğunu kontrol et
         assert!(history.last().unwrap().0 < history.first().unwrap().0);
         
-        // Tahmin
         let y_pred = model.predict(&x).unwrap();
         assert_eq!(y_pred.shape(), y.shape());
     }
@@ -698,7 +832,6 @@ mod tests {
              .add(Dense::new(3, 1, Activation::Sigmoid))
              .compile(SGD::new(0.1));
         
-        // Örnek veri
         let x = arr2(&[
             [0.0, 0.0],
             [0.0, 1.0],
@@ -713,14 +846,11 @@ mod tests {
             [0.0],
         ]);
         
-        // Metrikler
-        let mse = MSE::new();
+        let mse = MetricsMSE::default();
         let accuracy = Accuracy::new(0.5);
         
-        // Değerlendirme
         let metrics = model.evaluate(&x, &y, &[&mse, &accuracy]).unwrap();
         
-        // En az iki metrik sonucu olmalı
         assert_eq!(metrics.len(), 2);
         assert_eq!(metrics[0].0, "MSE");
         assert_eq!(metrics[1].0, "Accuracy");
@@ -731,12 +861,18 @@ mod tests {
         let model = create_test_model();
         let summary = model.summary();
         
-        // Özet, model yapısı hakkında bilgi içermeli
         assert!(summary.contains("Sequential"));
         assert!(summary.contains("Dense"));
         assert!(summary.contains("Dropout"));
         assert!(summary.contains("Relu"));
         assert!(summary.contains("Softmax"));
         assert!(summary.contains("Optimizer"));
+    }
+
+    #[test]
+    fn test_model_compilation_from_ast() {
+        use crate::ast::{KatmanOzellikleri, OptimizerTipi};
+        use crate::layer::{Dense, Dropout, Activation};
+        use crate::optimizer::{Adam, SGD, AdamW};
     }
 } 

@@ -2,8 +2,6 @@ pub mod model_parser;
 pub mod expr_parser;
 pub mod error;
 
-pub use model_parser::ModelParser;
-pub use expr_parser::ExprParser;
 pub use error::{ParseError, Result};
 
 use crate::ast::Program;

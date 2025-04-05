@@ -1,4 +1,4 @@
-use ndarray::{Array1, Array2, Axis};
+use ndarray::{Array2, Axis};
 use crate::error::{Result, TurkError};
 use serde::{Serialize, Deserialize};
 

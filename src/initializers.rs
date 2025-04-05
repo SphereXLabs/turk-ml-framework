@@ -1,13 +1,11 @@
-use ndarray::{Array, Array2, Dim};
+use ndarray::{Array, Array2};
 use ndarray_rand::RandomExt;
-use ndarray_rand::rand_distr::{Normal, Uniform};
-use rand::prelude::*;
+use ndarray_rand::rand_distr::Normal;
 use serde::{Serialize, Deserialize};
 use crate::error::{Result, TurkError};
 
 /// Ağırlık başlangıç değerleri için trait
-#[derive(Debug)]
-pub trait Initializer: Send + Sync {
+pub trait Initializer: Send + Sync + std::fmt::Debug {
     fn initialize(&self, shape: &[usize]) -> Result<Array2<f32>>;
     fn name(&self) -> &'static str;
 }

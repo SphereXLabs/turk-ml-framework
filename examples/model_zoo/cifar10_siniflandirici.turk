@@ -1,0 +1,158 @@
+# CIFAR-10 Görüntü Sınıflandırma Modeli
+# Bu model, 32x32 piksellik CIFAR-10 veri setindeki 10 sınıfı ayırt edebilen bir CNN modelidir
+# Doğruluk: ~%85 (30 epok sonrasında)
+
+# Veri yükleme
+veriSeti CIFAR10VeriYukle {
+    kaynak = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
+    bolme = [0.8, 0.2]  # %80 eğitim, %20 test
+    egitim_boyutu = 50000
+    test_boyutu = 10000
+    siniflar = ["uçak", "araba", "kuş", "kedi", "geyik", "köpek", "kurbağa", "at", "gemi", "kamyon"]
+}
+
+# Veri ön işleme
+onIsle CIFAR10VeriYukle {
+    normalizasyon = [0, 255]  # Piksel değerlerini 0-1 arasına ölçeklendir
+    veri_artirma = {
+        yatay_cevirme = true,
+        donuslerme = 15,  # 15 dereceye kadar döndürme
+        yakınlaştırma = 0.1,  # %10 yakınlaştırma/uzaklaştırma
+        genişlik_kaydırma = 0.1,  # Yatay kaydırma
+        yükseklik_kaydırma = 0.1   # Dikey kaydırma
+    }
+}
+
+# CNN Modeli
+model CIFAR10Siniflandirici {
+    # Giriş şekli: 32x32x3 (RGB görüntü)
+    giris_sekli = [32, 32, 3]
+    
+    # 1. Konvolüsyon bloğu
+    katman Conv2D(filtreler=32, cekirdek_boyutu=[3, 3], aktivasyon=relu, padding="same")
+    katman Conv2D(filtreler=32, cekirdek_boyutu=[3, 3], aktivasyon=relu)
+    katman MaxPooling2D(havuz_boyutu=[2, 2])
+    katman Dropout(oran=0.25)
+    
+    # 2. Konvolüsyon bloğu
+    katman Conv2D(filtreler=64, cekirdek_boyutu=[3, 3], aktivasyon=relu, padding="same")
+    katman Conv2D(filtreler=64, cekirdek_boyutu=[3, 3], aktivasyon=relu)
+    katman MaxPooling2D(havuz_boyutu=[2, 2])
+    katman Dropout(oran=0.25)
+    
+    # 3. Konvolüsyon bloğu
+    katman Conv2D(filtreler=128, cekirdek_boyutu=[3, 3], aktivasyon=relu, padding="same")
+    katman Conv2D(filtreler=128, cekirdek_boyutu=[3, 3], aktivasyon=relu)
+    katman MaxPooling2D(havuz_boyutu=[2, 2])
+    katman Dropout(oran=0.25)
+    
+    # Düzleştirme ve tam bağlantılı katmanlar
+    katman Flatten()
+    katman Dense(girdi=2048, cikti=512, aktivasyon=relu)
+    katman BatchNorm()
+    katman Dropout(oran=0.5)
+    katman Dense(girdi=512, cikti=10, aktivasyon=softmax)
+    
+    # Eğitim yapılandırması
+    optimizer AdamW(ogrenme_orani=0.001, agirlik_azaltma=1e-4)
+    kayip KategorikCaprazEntropi()
+    metrik [Dogruluk(), KategorikF1Skoru()]
+}
+
+# Eğitim tanımı
+egit CIFAR10Siniflandirici {
+    veri = CIFAR10VeriYukle
+    epok = 30
+    yigin_boyutu = 64
+    dogrulama_bolme = 0.1
+    
+    # Öğrenme oranı programı
+    ogrenme_orani_programi = {
+        tip = "basamak_azaltma",
+        basamaklar = [15, 25],
+        faktör = 0.1
+    }
+    
+    # Erken durdurma
+    erken_durdurma = {
+        metrik = "dogrulama_dogruluk",
+        mod = "max",
+        sabir = 5
+    }
+    
+    # Checkpoint kaydetme
+    en_iyi_modeli_kaydet = true
+    checkpoint_dosyasi = "cifar10_egitimdeki_en_iyi.h5"
+}
+
+# Model değerlendirme
+degerlendir CIFAR10Siniflandirici {
+    veri = CIFAR10VeriYukle.test
+    metrik = [Dogruluk(), KategorikF1Skoru(), Kesinlik(), Duyarlilik()]
+    karistirmaMatrisi = true
+    roc_egri = true
+    sinif_raporu = true
+}
+
+# Tahmin yapma
+tahminEt CIFAR10Siniflandirici {
+    giris = "test_gorseller/"
+    cikti = "cifar10_tahminleri.json"
+    format = JSON
+    top_k = 3  # En yüksek olasılıklı 3 sınıfı döndür
+}
+
+# Model kaydetme
+kaydet CIFAR10Siniflandirici {
+    dosya = "cifar10_model.turk"
+    format = TURK
+}
+
+# ONNX formatında dışa aktarma
+kaydet CIFAR10Siniflandirici {
+    dosya = "cifar10_model.onnx"
+    format = ONNX
+}
+
+# TensorFlow Lite formatında dışa aktarma
+kaydet CIFAR10Siniflandirici {
+    dosya = "cifar10_model.tflite"
+    format = TFLITE
+    quantize = true  # Modeli 8-bit olarak niceleme
+}
+
+# Model görselleştirme
+gorselleştir CIFAR10Siniflandirici {
+    tip = "model_yapisi"
+    cikti = "cifar10_model_yapisi.png"
+    goster_sekiller = true
+    goster_parametreler = true
+}
+
+# Eğitim geçmişi görselleştirme
+gorselleştir CIFAR10Siniflandirici {
+    tip = "egitim_gecmisi"
+    x = "epok"
+    y = ["kayip", "dogrulama_kayip", "dogruluk", "dogrulama_dogruluk"]
+    baslik = "CIFAR-10 Eğitim Geçmişi"
+    etiketler = ["Eğitim Kaybı", "Doğrulama Kaybı", "Eğitim Doğruluğu", "Doğrulama Doğruluğu"]
+    cikti = "cifar10_egitim_gecmisi.png"
+}
+
+# Aktivasyon haritaları görselleştirme
+gorselleştir CIFAR10Siniflandirici {
+    tip = "aktivasyon_haritalari"
+    giris = "ornek_gorseller/araba.png"
+    katman = "conv2d_3"
+    cikti = "cifar10_aktivasyon_haritalari.png"
+    alt_ornek = 16  # 16 filtreyi göster
+}
+
+# Özellik görselleştirme
+gorselleştir CIFAR10Siniflandirici {
+    tip = "t_sne"
+    veri = CIFAR10VeriYukle.test
+    katman = "dense_1"
+    cikti = "cifar10_tsne.png"
+    ornek_sayisi = 500  # 500 görüntü için t-SNE
+} 

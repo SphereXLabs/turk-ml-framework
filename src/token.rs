@@ -144,6 +144,9 @@ pub enum Token {
     #[regex("[a-zA-Z_ğüşıöçĞÜŞİÖÇ][a-zA-Z0-9_ğüşıöçĞÜŞİÖÇ]*", |lex| lex.slice().to_string())]
     Degisken(String),
 
+    // Hatalı/Bilinmeyen token
+    Illegal,
+
     // Boşluk ve yorum satırları
     #[regex(r"[ \t\n\f]+", logos::skip)]
     #[regex(r"//[^\n]*", logos::skip)]

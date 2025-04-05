@@ -1,4 +1,4 @@
-use crate::ast::{Ifade, Deyim, IstatistikselIslemTipi, KarsilastirmaOperator};
+use crate::ast::{Ifade, Deyim, IstatistikselIslemTipi, KarsilastirmaOperator, Operator};
 use crate::token::Token;
 use super::error::{ParseError, Result};
 
@@ -33,15 +33,16 @@ impl ExprParser {
         while let Some((token, _)) = self.simdiki() {
             match token {
                 Token::Arti | Token::Eksi => {
-                    let op = self.ilerle().unwrap().0.clone();
+                    let op_token = self.ilerle().unwrap().0.clone();
                     let sag = self.carpma_parse()?;
+                    let operator = match op_token {
+                        Token::Arti => Operator::Toplama,
+                        Token::Eksi => Operator::Cikarma,
+                        _ => unreachable!(),
+                    };
                     sol = Ifade::IkiliIslem {
                         sol: Box::new(sol),
-                        islem: match op {
-                            Token::Arti => "+".to_string(),
-                            Token::Eksi => "-".to_string(),
-                            _ => unreachable!(),
-                        },
+                        operator,
                         sag: Box::new(sag),
                     };
                 }
@@ -58,16 +59,17 @@ impl ExprParser {
         while let Some((token, _)) = self.simdiki() {
             match token {
                 Token::Carpma | Token::Bolme | Token::Modulo => {
-                    let op = self.ilerle().unwrap().0.clone();
+                    let op_token = self.ilerle().unwrap().0.clone();
                     let sag = self.birli_parse()?;
+                    let operator = match op_token {
+                        Token::Carpma => Operator::Carpma,
+                        Token::Bolme => Operator::Bolme,
+                        Token::Modulo => Operator::ModOperator,
+                        _ => unreachable!(),
+                    };
                     sol = Ifade::IkiliIslem {
                         sol: Box::new(sol),
-                        islem: match op {
-                            Token::Carpma => "*".to_string(),
-                            Token::Bolme => "/".to_string(),
-                            Token::Modulo => "%".to_string(),
-                            _ => unreachable!(),
-                        },
+                        operator,
                         sag: Box::new(sag),
                     };
                 }
@@ -84,9 +86,10 @@ impl ExprParser {
                 Token::Eksi => {
                     self.ilerle();
                     let ifade = self.birli_parse()?;
-                    return Some(Ifade::TekliIslem {
-                        islem: "-".to_string(),
-                        ifade: Box::new(ifade),
+                    return Some(Ifade::IkiliIslem {
+                        sol: Box::new(Ifade::Sayi(0)),
+                        operator: Operator::Cikarma,
+                        sag: Box::new(ifade),
                     });
                 }
                 _ => {}
@@ -97,43 +100,53 @@ impl ExprParser {
     }
     
     fn birim_parse(&mut self) -> Option<Ifade> {
-        let token = self.simdiki()?.0.clone();
+        let (token, _literal) = self.simdiki()?.clone();
         
         match token {
             Token::Sayi(n) => {
                 self.ilerle();
                 Some(Ifade::Sayi(n))
             }
+            Token::Metin(s) => {
+                self.ilerle();
+                Some(Ifade::Metin(s))
+            }
+            Token::Dogru => {
+                self.ilerle();
+                Some(Ifade::Mantiksal(true))
+            }
+            Token::Yanlis => {
+                self.ilerle();
+                Some(Ifade::Mantiksal(false))
+            }
             Token::Degisken(isim) => {
                 self.ilerle();
-                if let Some((Token::AcParantez, _)) = self.simdiki() {
+                if self.simdiki().map_or(false, |(t, _)| t == &Token::AcParantez) {
                     self.ilerle();
-                    let mut parametreler = Vec::new();
+                    let mut argumanlar = Vec::new();
                     
-                    if let Some((Token::KapaParantez, _)) = self.simdiki() {
-                        self.ilerle();
-                    } else {
+                    if !self.simdiki().map_or(false, |(t, _)| t == &Token::KapaParantez) {
                         loop {
-                            let param = self.ifade_parse()?;
-                            parametreler.push(param);
+                            let arg = self.ifade_parse()?;
+                            argumanlar.push(arg);
                             
-                            if let Some((Token::Virgul, _)) = self.simdiki() {
+                            if self.simdiki().map_or(false, |(t, _)| t == &Token::Virgul) {
                                 self.ilerle();
                             } else {
                                 break;
                             }
                         }
+                    }
                         
-                        if let Some((Token::KapaParantez, _)) = self.simdiki() {
-                            self.ilerle();
-                        } else {
-                            return None;
-                        }
+                    if self.simdiki().map_or(false, |(t, _)| t == &Token::KapaParantez) {
+                         self.ilerle();
+                    } else {
+                        return None;
                     }
                     
                     Some(Ifade::FonksiyonCagrisi {
-                        isim,
-                        parametreler,
+                         fonksiyon: Box::new(Ifade::Degisken(isim)),
+                         argumanlar,
                     })
                 } else {
                     Some(Ifade::Degisken(isim))
@@ -143,13 +156,33 @@ impl ExprParser {
                 self.ilerle();
                 let ifade = self.ifade_parse()?;
                 
-                if let Some((Token::KapaParantez, _)) = self.simdiki() {
+                if self.simdiki().map_or(false, |(t, _)| t == &Token::KapaParantez) {
                     self.ilerle();
-                    Some(ifade)
+                    Some(Ifade::Parantez(Box::new(ifade)))
                 } else {
                     None
                 }
             }
+            Token::AcKoseli => {
+                 self.ilerle();
+                 let mut elemanlar = Vec::new();
+                 if !self.simdiki().map_or(false, |(t, _)| t == &Token::KapaKoseli) {
+                     loop {
+                         elemanlar.push(self.ifade_parse()?);
+                         if self.simdiki().map_or(false, |(t, _)| t == &Token::Virgul) {
+                             self.ilerle();
+                         } else {
+                             break;
+                         }
+                     }
+                 }
+                 if self.simdiki().map_or(false, |(t, _)| t == &Token::KapaKoseli) {
+                     self.ilerle();
+                     Some(Ifade::Dizi(elemanlar))
+                 } else {
+                     None
+                 }
+             }
             _ => None,
         }
     }
@@ -161,10 +194,10 @@ impl ExprParser {
             match token {
                 Token::EsitMi | Token::EsitDegilMi | Token::BuyukMu |
                 Token::KucukMu | Token::BuyukEsitMi | Token::KucukEsitMi => {
-                    let op = self.ilerle()?.0.clone();
+                    let op_token = self.ilerle()?.0.clone();
                     let sag = self.ifade_parse()?;
                     
-                    let operator = match op {
+                    let operator = match op_token {
                         Token::EsitMi => KarsilastirmaOperator::EsitMi,
                         Token::EsitDegilMi => KarsilastirmaOperator::EsitDegilMi,
                         Token::BuyukMu => KarsilastirmaOperator::BuyukMu,
@@ -174,7 +207,7 @@ impl ExprParser {
                         _ => unreachable!(),
                     };
                     
-                    return Some(Ifade::Karsilastirma {
+                    return Some(Ifade::KarsilastirmaIfadesi {
                         sol: Box::new(sol),
                         operator,
                         sag: Box::new(sag),
@@ -187,25 +220,26 @@ impl ExprParser {
         Some(sol)
     }
     
-    pub fn istatistiksel_islem_parse(&mut self) -> Option<Deyim> {
-        let islem_tipi = match self.simdiki()?.0 {
+    pub fn istatistiksel_islem_parse(&mut self) -> Result<Option<Deyim>> {
+        let (token, _) = self.simdiki().ok_or(ParseError::UnexpectedEOF)?.clone();
+        let islem_tipi = match token {
             Token::Ortalama => IstatistikselIslemTipi::Ortalama,
             Token::Medyan => IstatistikselIslemTipi::Medyan,
             Token::ModFonksiyon => IstatistikselIslemTipi::Mod,
             Token::StandartSapma => IstatistikselIslemTipi::StandartSapma,
-            Token::Varyans => IstatistikselIslemTipi::Varyans,
-            _ => return None,
+            Token::MinMax => IstatistikselIslemTipi::MinMax,
+            _ => return Err(ParseError::unexpected_token(token, "istatistiksel işlem token'ı".to_string())),
         };
         
         self.ilerle();
         self.tuket(Token::AcParantez, "'(' bekleniyor")?;
-        let ifade = self.ifade_parse()?;
+        let ifade = self.ifade_parse().ok_or_else(|| ParseError::syntax_error("İstatistiksel işlem için geçersiz ifade.".to_string()))?;
         self.tuket(Token::KapaParantez, "')' bekleniyor")?;
         
-        Some(Deyim::IstatistikselIslem {
+        Ok(Some(Deyim::IfadeDeyimi(Ifade::IstatistikselIslem {
             islem_tipi,
-            ifade: Box::new(ifade),
-        })
+            veri: Box::new(ifade),
+        })))
     }
     
     fn tuket(&mut self, beklenen: Token, hata_mesaji: &str) -> Result<()> {

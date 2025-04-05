@@ -1,6 +1,7 @@
-use crate::error::{Result, TurkError};
-use crate::initializers::{Initializer, Xavier, HeNormal, Zeros};
-use ndarray::{Array, Array2, Axis};
+use crate::{Result, TurkError};
+use turk_lang::initializers::{Initializer, HeNormal, Xavier, Zeros};
+use ndarray::prelude::*;
+use ndarray::Array2;
 use rand::{thread_rng, Rng};
 use serde::{Serialize, Deserialize};
 use std::fmt;
@@ -16,6 +17,21 @@ pub enum Activation {
     Linear,
     Elu(f32),
     Selu,
+}
+
+impl fmt::Display for Activation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Activation::Relu => write!(f, "ReLU"),
+            Activation::LeakyRelu(alpha) => write!(f, "LeakyReLU({})", alpha),
+            Activation::Sigmoid => write!(f, "Sigmoid"),
+            Activation::Tanh => write!(f, "Tanh"),
+            Activation::Softmax => write!(f, "Softmax"),
+            Activation::Linear => write!(f, "Linear"),
+            Activation::Elu(alpha) => write!(f, "ELU({})", alpha),
+            Activation::Selu => write!(f, "SELU"),
+        }
+    }
 }
 
 /// Layer trait'i - tüm katman türleri bu trait'i implemente etmelidir
@@ -103,18 +119,6 @@ pub trait Layer: fmt::Debug + Send + Sync {
     fn set_bias(&mut self, bias: Array2<f32>) -> Result<()>;
 }
 
-/// Makro: şekil kontrolü yapar
-macro_rules! check_shape {
-    ($input:expr, $expected:expr, $name:expr) => {
-        if $input.shape() != $expected.as_slice() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "{} katmanı için beklenen şekil: {:?}, alınan şekil: {:?}",
-                $name, $expected, $input.shape()
-            )));
-        }
-    };
-}
-
 /// Tam bağlantılı katman
 #[derive(Debug, Clone)]
 pub struct Dense {
@@ -134,11 +138,11 @@ pub struct Dense {
 impl Dense {
     /// Yeni bir tam bağlantılı katman oluşturur
     pub fn new(input_size: usize, output_size: usize, activation: Activation) -> Self {
-        let initializer = match activation {
+        let initializer: Box<dyn Initializer> = match activation {
             Activation::Relu | Activation::LeakyRelu(_) | Activation::Elu(_) | Activation::Selu => {
-                HeNormal::default()
+                Box::new(HeNormal::default())
             },
-            _ => Xavier::default(),
+            _ => Box::new(Xavier::default()),
         };
         
         let weights = initializer.initialize(&[input_size, output_size])
@@ -243,10 +247,12 @@ impl Dense {
             }
         }
     }
-}
 
-impl Layer for Dense {
-    fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
+    /// İleri yayılımı optimize edilmiş şekilde gerçekleştirir
+    ///
+    /// Bu metod, matris çarpımları için BLAS operasyonlarını kullanarak
+    /// ve büyük batch boyutları için paralelleştirme yaparak performansı artırır.
+    fn optimize_forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
         let batch_size = input.shape()[0];
         
         if input.shape()[1] != self.input_shape[1] {
@@ -260,11 +266,51 @@ impl Layer for Dense {
         self.input_shape[0] = batch_size;
         self.output_shape[0] = batch_size;
         
-        // z = x * W^T + b
-        self.z = input.dot(&self.weights) + &self.bias.t();
+        // Büyük batch'ler için paralelleştirme
+        if batch_size > 32 {
+            // Paralelleştirme için rayon kullan
+            use rayon::prelude::*;
+            
+            // Önce lineer dönüşüm (dot product) uygula
+            // Her satır için ayrı thread'de işlem yapılabilir
+            let batch_results: Vec<Array2<f32>> = (0..batch_size)
+                .into_par_iter()  // Parallel iterator
+                .map(|batch_idx| {
+                    // Tek bir örnek için işlem
+                    let single_input = input.slice(s![batch_idx..batch_idx+1, ..]);
+                    
+                    // Matris çarpımı
+                    let z = single_input.dot(&self.weights) + &self.bias.t();
+                    
+                    // Sonucu döndür
+                    z
+                })
+                .collect();
+            
+            // Sonuçları birleştir
+            let mut z = Array2::zeros((batch_size, self.output_shape[1]));
+            for (idx, batch_result) in batch_results.iter().enumerate() {
+                z.slice_mut(s![idx..idx+1, ..]).assign(batch_result);
+            }
+            
+            self.z = z;
+        } else {
+            // Küçük batch'ler için standart matris çarpımı
+            // BLAS operasyonları ndarray'in dot metodu tarafından kullanılır
+            self.z = input.dot(&self.weights) + &self.bias.t();
+        }
+        
+        // Aktivasyon fonksiyonunu uygula
         self.output = self.activate(&self.z);
         
         Ok(self.output.clone())
+    }
+}
+
+impl Layer for Dense {
+    fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
+        // Optimize edilmiş forward metodu kullan
+        self.optimize_forward(input)
     }
 
     fn backward(&mut self, grad: &Array2<f32>) -> Result<Array2<f32>> {
@@ -345,11 +391,11 @@ impl Layer for Dense {
     }
     
     fn reset(&mut self) {
-        let initializer = match self.activation {
+        let initializer: Box<dyn Initializer> = match self.activation {
             Activation::Relu | Activation::LeakyRelu(_) | Activation::Elu(_) | Activation::Selu => {
-                HeNormal::default()
+                Box::new(HeNormal::default())
             },
-            _ => Xavier::default(),
+            _ => Box::new(Xavier::default()),
         };
         
         if let Ok(weights) = initializer.initialize(&[self.input_size(), self.output_size()]) {
@@ -415,6 +461,8 @@ pub struct Dropout {
     output_shape: Vec<usize>,
     trainable: bool,
     training: bool,
+    input: Array2<f32>,
+    output: Array2<f32>,
 }
 
 impl Dropout {
@@ -429,6 +477,8 @@ impl Dropout {
             output_shape: vec![1, 1],
             trainable: false, // Dropout eğitilebilir parametre içermez
             training: true,   // Varsayılan olarak eğitim modunda
+            input: Array2::zeros((1, 1)),
+            output: Array2::zeros((1, 1)),
         }
     }
     
@@ -440,23 +490,28 @@ impl Dropout {
 
 impl Layer for Dropout {
     fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
-        let input_shape = input.shape();
-        self.input_shape = vec![input_shape[0], input_shape[1]];
-        self.output_shape = self.input_shape.clone();
-        
-        if !self.training {
-            // Test modunda dropout uygulanmaz
-            return Ok(input.clone());
+        self.input = input.clone();
+        self.input_shape = input.shape().to_vec();
+        self.output_shape = input.shape().to_vec();
+
+        if self.training {
+            let mut rng = thread_rng();
+            
+            // Yeni mask oluştur
+            let input_shape_array = [input.shape()[0], input.shape()[1]];
+            self.mask = Array::from_shape_fn(input_shape_array, |_| {
+                if rng.gen::<f32>() > self.rate { 1.0 / (1.0 - self.rate) } else { 0.0 }
+            });
+            
+            // Dropout mask uygula
+            let output = input * &self.mask;
+            self.output = output.clone();
+            Ok(output)
+        } else {
+            // Test modunda mask uygulanmaz
+            self.output = input.clone();
+            Ok(input.clone())
         }
-        
-        // Rastgele maske oluştur
-        let mut rng = thread_rng();
-        self.mask = Array::from_shape_fn(input_shape, |_| {
-            if rng.gen::<f32>() > self.rate { 1.0 / (1.0 - self.rate) } else { 0.0 }
-        });
-        
-        // Maskeyi uygula
-        Ok(input * &self.mask)
     }
     
     fn backward(&mut self, grad: &Array2<f32>) -> Result<Array2<f32>> {
@@ -498,11 +553,19 @@ impl Layer for Dropout {
     }
     
     fn input_size(&self) -> usize {
-        self.input_shape[1]
+        if self.input_shape.len() > 1 {
+            self.input_shape[1]
+        } else {
+            0 // veya uygun bir varsayılan değer
+        }
     }
     
     fn output_size(&self) -> usize {
-        self.output_shape[1]
+        if self.output_shape.len() > 1 {
+            self.output_shape[1]
+        } else {
+            0 // veya uygun bir varsayılan değer
+        }
     }
     
     fn param_count(&self) -> usize {
@@ -613,23 +676,18 @@ impl Layer for BatchNorm {
         self.output_shape[0] = batch_size;
         
         if self.training {
-            // Batch ortalaması ve varyansını hesapla
             self.mean = input.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
-            self.var = (&input - &self.mean).mapv(|x| x * x).mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
+            self.var = (*&input - &self.mean).mapv(|x| x * x).mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
             self.std = (&self.var + self.epsilon).mapv(f32::sqrt);
             
-            // Koşu istatistiklerini güncelle
             self.running_mean = &self.running_mean * self.momentum + &self.mean * (1.0 - self.momentum);
             self.running_var = &self.running_var * self.momentum + &self.var * (1.0 - self.momentum);
             
-            // Normalize et
             self.norm_input = (input - &self.mean) / &self.std;
         } else {
-            // Test modunda koşu istatistiklerini kullan
             self.norm_input = (input - &self.running_mean) / (&self.running_var + self.epsilon).mapv(f32::sqrt);
         }
         
-        // Gamma ve beta ile ölçekle ve kaydır
         Ok(&self.norm_input * &self.gamma + &self.beta)
     }
     
@@ -643,22 +701,25 @@ impl Layer for BatchNorm {
         
         // Gamma ve beta için gradyanları hesapla
         self.beta_grad = grad.sum_axis(Axis(0)).insert_axis(Axis(0));
-        self.gamma_grad = (grad * &self.norm_input).sum_axis(Axis(0)).insert_axis(Axis(0));
+        self.gamma_grad = (grad * &self.norm_input.clone()).sum_axis(Axis(0)).insert_axis(Axis(0));
         
         // Normalize edilmiş giriş için gradyan
-        let dnorm = grad * &self.gamma;
+        let dnorm = grad * &self.gamma.clone();
         
         // Varyans için gradyan
-        let dvar = (dnorm * &self.norm_input * -0.5 * (&self.std).mapv(|x| 1.0 / (x * x * x))).sum_axis(Axis(0)).insert_axis(Axis(0));
+        let dvar_term1 = dnorm.clone() * &(&self.input - &self.mean);
+        let dvar_term2 = -0.5 * (&self.std).mapv(|x| x.powi(-3));
+        let dvar = (dvar_term1 * dvar_term2).sum_axis(Axis(0)).insert_axis(Axis(0));
         
         // Ortalama için gradyan
-        let dmu1 = (dnorm * -1.0 / &self.std).sum_axis(Axis(0)).insert_axis(Axis(0));
-        let dmu2 = dvar * -2.0 * (&self.input - &self.mean).mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
+        let dmu1 = (dnorm.clone() * (-1.0 / &self.std)).sum_axis(Axis(0)).insert_axis(Axis(0));
+        let dmu2_term1 = -2.0 * &(&self.input - &self.mean);
+        let dmu2 = (dvar.clone() * dmu2_term1).sum_axis(Axis(0)).insert_axis(Axis(0)) / batch_size;
         let dmu = dmu1 + dmu2;
         
         // Giriş için gradyan
         let dx1 = dnorm / &self.std;
-        let dx2 = dvar * 2.0 * (&self.input - &self.mean) / batch_size;
+        let dx2 = dvar * (2.0 * &(&self.input - &self.mean)) / batch_size;
         let dx3 = dmu / batch_size;
         
         let dx = dx1 + dx2 + dx3;

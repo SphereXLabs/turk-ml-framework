@@ -1,5 +1,6 @@
-use crate::error::{Result, TurkError};
-use ndarray::{Array2, ArrayView2, Axis};
+use crate::{Result, TurkError};
+use ndarray::prelude::*;
+use ndarray::Array2;
 use serde::{Serialize, Deserialize};
 
 /// Kayıp fonksiyonu trait'i

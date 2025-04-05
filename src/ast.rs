@@ -153,6 +153,8 @@ pub enum Deyim {
     Tahmin { model: String, girdi: Ifade },
     Atama { isim: String, deger: Ifade },
     Ifade(Ifade),
+    VeriTanimi { isim: String, deger: Box<Ifade> },
+    Egitim { model: String, x_train: Box<Ifade>, y_train: Box<Ifade> },
 }
 
 #[derive(Debug)]
@@ -173,8 +175,8 @@ pub struct YapayZekaModeli {
     pub egitilmis: bool,
 }
 
+use crate::{Result, TurkError};
 use ndarray::Array2;
-use crate::Result;
 
 #[derive(Debug, Clone)]
 pub enum DegerTipi {
@@ -199,13 +201,13 @@ impl DegerTipi {
                                 if let DegerTipi::Sayi(x) = alt_eleman {
                                     data.push(*x);
                                 } else {
-                                    return Err(crate::TinyMLError::InvalidInput(
+                                    return Err(TurkError::InvalidInput(
                                         "Dizi elemanları sayı olmalı".to_string()
                                     ));
                                 }
                             }
                         }
-                        _ => return Err(crate::TinyMLError::InvalidInput(
+                        _ => return Err(TurkError::InvalidInput(
                             "Dizi elemanları sayı olmalı".to_string()
                         )),
                     }
@@ -219,9 +221,9 @@ impl DegerTipi {
                     1
                 };
                 
-                Ok(Array2::from_shape_vec((n_rows, n_cols), data)?)
+                Ok(Array2::from_shape_vec((n_rows, n_cols), data).map_err(|e| TurkError::NdarrayError(e))?)
             }
-            _ => Err(crate::TinyMLError::InvalidInput(
+            _ => Err(TurkError::InvalidInput(
                 "Sadece diziler Array2'ye dönüştürülebilir".to_string()
             )),
         }

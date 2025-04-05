@@ -1,6 +1,5 @@
 use crate::token::Token;
 use thiserror::Error;
-use std::fmt;
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -122,26 +121,5 @@ impl ParseError {
 
 pub type Result<T> = std::result::Result<T, ParseError>;
 
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParseError::SyntaxError(msg) => write!(f, "Sözdizimi hatası: {}", msg),
-            ParseError::UnexpectedToken { found, expected } => write!(f, "Beklenmeyen token: {:?}, beklenen: {}", found, expected),
-            ParseError::GecersizDeyim(token) => write!(f, "Geçersiz deyim: {:?}", token),
-            ParseError::MissingToken(expected) => write!(f, "Eksik token: {}", expected),
-            ParseError::UndefinedVariable(var) => write!(f, "Değişken tanımlı değil: {}", var),
-            ParseError::TypeError(msg) => write!(f, "Tür uyuşmazlığı: {}", msg),
-            ParseError::ModelConfigError(msg) => write!(f, "Model yapılandırma hatası: {}", msg),
-            ParseError::LayerConfigError(msg) => write!(f, "Katman yapılandırma hatası: {}", msg),
-            ParseError::OptimizerConfigError(msg) => write!(f, "Optimizer yapılandırma hatası: {}", msg),
-            ParseError::LossFunctionConfigError(msg) => write!(f, "Kayıp fonksiyonu yapılandırma hatası: {}", msg),
-            ParseError::DataConfigError(msg) => write!(f, "Veri yapılandırma hatası: {}", msg),
-            ParseError::InvalidArguments(msg) => write!(f, "Geçersiz argümanlar: {}", msg),
-            ParseError::NestedExpressionError(msg) => write!(f, "İç içe geçmiş ifade hatası: {}", msg),
-            ParseError::OperatorPrecedenceError(msg) => write!(f, "Operatör öncelik hatası: {}", msg),
-            ParseError::UnexpectedEOF => write!(f, "Beklenmeyen dosya sonu"),
-            ParseError::FileNotFound(path) => write!(f, "Dosya bulunamadı: {}", path),
-            ParseError::InternalError(msg) => write!(f, "İç hata: {}", msg),
-        }
-    }
-} 
+// Bu implementasyon thiserror tarafından otomatik olarak sağlanıyor.
+// impl fmt::Display for ParseError { ... } 

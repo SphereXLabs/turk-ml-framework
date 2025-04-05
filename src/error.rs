@@ -1,5 +1,4 @@
 use thiserror::Error;
-use std::fmt;
 
 #[derive(Debug, Error)]
 pub enum TurkError {
@@ -52,27 +51,4 @@ pub enum TurkError {
     BackpropagationError(String),
 }
 
-pub type Result<T> = std::result::Result<T, TurkError>;
-
-impl fmt::Display for TurkError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TurkError::InvalidLayer(msg) => write!(f, "Geçersiz katman tanımı: {}", msg),
-            TurkError::TrainingDiverged(loss) => write!(f, "Eğitim hatası: loss {} limiti aştı", loss),
-            TurkError::OptimizerError(msg) => write!(f, "Optimizer hatası: {}", msg),
-            TurkError::ShapeMismatch(msg) => write!(f, "Şekil uyuşmazlığı: {}", msg),
-            TurkError::ModelError(msg) => write!(f, "Model hatası: {}", msg),
-            TurkError::InvalidInput(msg) => write!(f, "Girdi hatası: {}", msg),
-            TurkError::ParseError(err) => write!(f, "Ayrıştırma hatası: {}", err),
-            TurkError::LexerError(msg) => write!(f, "Sözlüksel analiz hatası: {}", msg),
-            TurkError::TypeError(msg) => write!(f, "Tür hatası: {}", msg),
-            TurkError::IoError(err) => write!(f, "IO hatası: {}", err),
-            TurkError::SerializationError(err) => write!(f, "Serialization hatası: {}", err),
-            TurkError::NdarrayError(err) => write!(f, "Ndarray hatası: {}", err),
-            TurkError::DynamicLayerConfigError(msg) => write!(f, "Dinamik katman yapılandırma hatası: {}", msg),
-            TurkError::GpuComputeError(msg) => write!(f, "GPU hesaplama hatası: {}", msg),
-            TurkError::OutOfMemoryError(msg) => write!(f, "Bellek yetersiz: {}", msg),
-            TurkError::BackpropagationError(msg) => write!(f, "Ağ geri yayılım hatası: {}", msg),
-        }
-    }
-} 
+pub type Result<T> = std::result::Result<T, TurkError>; 

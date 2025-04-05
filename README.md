@@ -1,157 +1,146 @@
-# TURK Dili
+# TURK Dil Kütüphanesi 🇹🇷
 
-![CI Status](https://github.com/snnkr/turk-lang/actions/workflows/ci.yml/badge.svg)
-[![Crates.io](https://img.shields.io/crates/v/turk-lang.svg)](https://crates.io/crates/turk-lang)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Türkçe yapay zeka programlama dili ve makine öğrenmesi kütüphanesi.
 
-TURK, Türkçe diline özgü makine öğrenimi programlama dilidir. Yapay zeka ve derin öğrenme modellerini Türkçe sözdizimi kullanarak oluşturmanıza, eğitmenize ve değerlendirmenize olanak tanır.
+[![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-blue.svg)](LICENSE)
+[![Cargo: turk-lang](https://img.shields.io/badge/crates.io-turk--lang-orange)](https://crates.io/crates/turk-lang)
+[![Dokümanlar](https://img.shields.io/badge/docs.rs-turk--lang-blue)](https://docs.rs/turk-lang)
+[![CI/CD](https://github.com/snnkr/turk-lang/workflows/TURK%20Dil%20Kütüphanesi%20CI/CD/badge.svg)](https://github.com/snnkr/turk-lang/actions)
+[![Python Paketi](https://img.shields.io/badge/PyPI-turk--lang-blue)](https://pypi.org/project/turk-lang/)
+
+## Nedir?
+
+TURK, Türkçe komutlar kullanarak makine öğrenimi modelleri oluşturmanızı, eğitmenizi ve değerlendirmenizi sağlayan bir programlama dili ve kütüphanesidir. Rust programlama dili ile geliştirilmiş olup, yüksek performans ve güvenlik sunar.
 
 ## Özellikler
 
-- 🧠 Kolay anlaşılabilir Türkçe sözdizimi ile yapay sinir ağları oluşturma
-- 📊 Çeşitli katman tipleri (Dense, Dropout, BatchNorm, vb.)
-- 🔄 Farklı aktivasyon fonksiyonları (ReLU, Sigmoid, Tanh, Softmax)
-- 📈 Çeşitli optimizasyon algoritmaları (SGD, Adam, AdamW, RMSProp)
-- 🎯 Kapsamlı kayıp fonksiyonları (MSE, CrossEntropy)
-- 📏 Performans metrikleri (Accuracy, Precision, Recall, F1Score)
-- 💾 Model kaydetme ve yükleme desteği
-- 🚀 Rayon ile çoklu çekirdek paralelleştirme desteği
+- 🧠 **Türkçe DSL**: Türkçe komutlarla makine öğrenimi modelleri tanımlama
+- 🚀 **Yüksek Performans**: Rust ile yazılmış optimizasyonlar ve paralel işleme yeteneği
+- 🛡️ **Güvenlik**: Bellek güvenliği ve kapsamlı hata yönetimi
+- 📚 **Kapsamlı API**: Çeşitli model mimarileri, katmanlar ve optimizasyon algoritmaları
+- 🔌 **Entegrasyon**: Python ve JavaScript (WASM) desteği 
+- 🧩 **Genişletilebilirlik**: Kolay şekilde yeni bileşenler ekleyebilme
 
 ## Kurulum
 
-Cargo.toml dosyanıza ekleyin:
+### Rust ile Kullanım
+
+Projenize Cargo.toml dosyanıza ekleyin:
 
 ```toml
 [dependencies]
 turk-lang = "0.1.0"
+logos = "0.13.0"
+```
+
+### Python ile Kullanım
+
+```bash
+pip install turk-lang
+```
+
+### WASM ile Web Uygulamalarında Kullanım
+
+```bash
+npm install turk-lang
 ```
 
 ## Hızlı Başlangıç
 
-### Temel Kullanım
+### Rust ile Basit Model Örneği
 
 ```rust
-use turk_lang::{Sequential, Dense, Activation, Adam, Result};
-use ndarray::Array2;
+use turk_lang::{Sequential, Dense, Activation, Adam};
 
-fn main() -> Result<()> {
+fn main() -> turk_lang::Result<()> {
+    // Veriyi yükle ve hazırla
+    let (x_train, y_train) = veri_yukle()?;
+    
     // Model oluştur
     let mut model = Sequential::new();
     model.add(Dense::new(784, 128, Activation::Relu))
          .add(Dense::new(128, 10, Activation::Softmax))
          .compile(Adam::new(0.001));
     
-    // Model özetini göster
-    println!("{}", model.summary());
-    
-    // Veri hazırla (örnek)
-    let x_train = Array2::zeros((100, 784));
-    let y_train = Array2::zeros((100, 10));
-    
-    // Modeli eğit
+    // Eğit
     model.fit(&x_train, &y_train, 10, 32, None)?;
     
-    // Tahmin yap
-    let x_test = Array2::zeros((10, 784));
-    let predictions = model.predict(&x_test)?;
-    
-    // Modeli kaydet
+    // Kaydet
     model.save("model.json")?;
     
     Ok(())
 }
 ```
 
-### TURK DSL Sözdizimi ile Model Oluşturma
+### Python ile Kullanım
 
-```rust
-use turk_lang::{Parser, ModelParser, Result};
+```python
+import numpy as np
+from turk_lang import Sequential, Dense, Activation, Adam
 
-fn main() -> Result<()> {
-    let kod = r#"
-    Model mnist_siniflandirici {
-        Katman(784, 128, ReLU),
-        Katman(128, 64, ReLU),
-        Dropout(0.2),
-        Katman(64, 10, Softmax)
-    }
+# Veriyi yükle
+x_train = np.random.rand(1000, 10)
+y_train = np.random.rand(1000, 1)
+
+# Model oluştur
+model = Sequential()
+model.add(Dense(10, 5, Activation.relu()))
+model.add(Dense(5, 1, Activation.sigmoid()))
+model.compile(Adam(0.001))
+
+# Eğit ve değerlendir
+history = model.fit(x_train, y_train, epochs=10, batch_size=32)
+print(f"Son kayıp: {history[-1]['loss']}")
+```
+
+### TURK Dil Sözdizimi
+
+TURK dilini kullanarak yapay zeka modelini Türkçe sözdizimi ile şu şekilde tanımlayabilirsiniz:
+
+```
+model MnistSiniflandirici {
+    katman Dense(girdi=784, cikti=128, aktivasyon=relu)
+    katman Dropout(oran=0.2)
+    katman Dense(girdi=128, cikti=10, aktivasyon=softmax)
     
-    Veriler mnist_veri {
-        Egitim: "data/mnist_train.csv",
-        Test: "data/mnist_test.csv"
-    }
-    
-    Egit mnist_siniflandirici {
-        Optimizer: Adam(ogrenme_orani: 0.001),
-        KayipFonksiyonu: CrossEntropy,
-        EpochSayisi: 10,
-        BatchBoyutu: 64
-    }
-    "#;
-    
-    let mut parser = ModelParser::new(kod);
-    let program = parser.parse()?;
-    
-    // Program AST'sini kullanarak modeli oluştur ve eğit
-    // ...
-    
-    Ok(())
+    optimizer Adam(ogrenme_orani=0.001)
+    kayip KategorikCaprazEntropi()
+}
+
+egit MnistSiniflandirici {
+    veri = "mnist.csv"
+    epok = 10
+    yigin_boyutu = 32
 }
 ```
 
-## MNIST Örneği
+## Mimari
 
-TURK Dili ile MNIST veri setini sınıflandıran bir örnek:
+TURK, modüler bir yapıda tasarlanmıştır:
 
-```bash
-# Basit model ile MNIST sınıflandırıcı çalıştır
-$ cargo run --example mnist_classifier simple
+- **Parser**: Türkçe DSL kodunu işleyen ayrıştırıcı
+- **AST**: Ayrıştırılmış kodun soyut sözdizim ağacı
+- **Model**: Eğitim ve tahmin işlemleri için temel API
+- **Katmanlar**: Dense, Dropout, BatchNorm gibi çeşitli ağ katmanları
+- **Optimizerlar**: SGD, Adam, AdamW, RMSProp gibi optimizasyon algoritmaları
+- **Metrikler**: Doğruluk, kesinlik, geri çağırma gibi değerlendirme metrikleri
 
-# Orta düzey model ile MNIST sınıflandırıcı çalıştır
-$ cargo run --example mnist_classifier medium
+Detaylı mimari açıklaması için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasını inceleyebilirsiniz.
 
-# Gelişmiş model ile MNIST sınıflandırıcı çalıştır
-$ cargo run --example mnist_classifier advanced
-```
+## Örnek Uygulamalar
 
-## Katmanlar
+Örnek uygulamalar ve model zincirleri için [examples](examples) dizinini inceleyebilirsiniz:
 
-TURK Dili şu katmanları destekler:
-
-- **Dense**: Tam bağlantılı katman
-- **Dropout**: Aşırı öğrenmeyi önlemek için dropout katmanı
-- **BatchNorm**: Batch normalizasyon katmanı
-
-## Optimizerlar
-
-Şu optimizasyon algoritmaları mevcuttur:
-
-- **SGD**: Stokastik Gradient İniş
-- **Adam**: Adaptive Moment Estimation
-- **AdamW**: Ağırlık aşınmalı Adam
-- **RMSProp**: Root Mean Square Propagation
-
-## Performans
-
-TURK Dili, ndarray ve rayon kütüphanelerini kullanarak yüksek performanslı hesaplamalar sağlar. Çoklu çekirdek işlemcilerde paralelleştirme ile eğitim süreleri önemli ölçüde azaltılabilir.
-
-Performans değerlendirmeleri için:
-
-```bash
-$ cargo bench
-```
+- [MNIST Sınıflandırıcı](examples/mnist_classifier.rs)
+- [Film Yorumları Duygu Analizi](examples/model_zoo/duygu_analizi.turk)
+- [CIFAR-10 Görüntü Sınıflandırma](examples/model_zoo/cifar10_siniflandirici.turk)
 
 ## Katkıda Bulunma
 
-1. Bu depoyu fork edin
-2. Yeni bir özellik dalı oluşturun (`git checkout -b ozellik/yeni-ozellik`)
-3. Değişikliklerinizi commit edin (`git commit -am 'Yeni özellik ekle'`)
-4. Dalınızı push edin (`git push origin ozellik/yeni-ozellik`)
-5. Bir Pull Request oluşturun
+Katkılarınızı bekliyoruz! Lütfen [CONTRIBUTING.md](CONTRIBUTING.md) dosyasını inceleyerek katkıda bulunma sürecini öğrenin.
 
 ## Lisans
 
-Bu proje MIT Lisansı altında lisanslanmıştır - Detaylar için [LICENSE](LICENSE) dosyasına bakınız.
+Bu proje MIT Lisansı altında dağıtılmaktadır. Detaylar için [LICENSE](LICENSE) dosyasını inceleyebilirsiniz.
 
-## İletişim
 

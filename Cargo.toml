@@ -6,6 +6,19 @@ authors = ["Sinan Korkmaz <snnkr.sinan@gmail.com>"]
 description = "Türkçe yapay zeka programlama dili"
 license = "MIT"
 repository = "https://github.com/snnkr/turk-lang"
+readme = "README.md"
+keywords = ["turkish", "language", "machine-learning", "neural-network", "deep-learning"]
+categories = ["science", "mathematics", "artificial-intelligence"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+wasm = ["wasm-bindgen", "js-sys", "web-sys"]
+python = ["pyo3"]
+simd = []
+blas = ["ndarray-linalg"]
 
 [dependencies]
 ndarray = { version = "0.15", features = ["serde", "rayon"] }
@@ -22,13 +35,24 @@ regex = "1.10"
 lazy_static = "1.4"
 thiserror = "1.0"
 anyhow = "1.0"
-logos = { version = "0.13", features = ["derive"] }
+logos = "0.13.0"
 mnist = "0.5"
 plotters = "0.3"
 chrono = "0.4"
 csv = "1.2"
 indicatif = "0.17"
 colored = "2.0"
+
+# WASM desteği için isteğe bağlı bağımlılıklar
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", features = ["console"], optional = true }
+
+# Python binding için isteğe bağlı bağımlılıklar 
+pyo3 = { version = "0.19", features = ["extension-module"], optional = true }
+
+# BLAS/LAPACK desteği için isteğe bağlı bağımlılıklar
+ndarray-linalg = { version = "0.16", features = ["openblas-system"], optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
@@ -48,3 +72,11 @@ debug = false
 [profile.dev]
 opt-level = 0
 debug = true
+
+[[bench]]
+name = "benchmark"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
