@@ -16,6 +16,7 @@ pub enum Activation {
     Linear,
     Elu(f32),
     Selu,
+    Swish,
 }
 
 impl fmt::Display for Activation {
@@ -29,6 +30,7 @@ impl fmt::Display for Activation {
             Activation::Linear => write!(f, "Linear"),
             Activation::Elu(alpha) => write!(f, "ELU({})", alpha),
             Activation::Selu => write!(f, "SELU"),
+            Activation::Swish => write!(f, "Swish"),
         }
     }
 }
@@ -218,7 +220,8 @@ impl Dense {
                 x.mapv(|v| {
                     scale * if v > 0.0 { v } else { alpha * (v.exp() - 1.0) }
                 })
-            }
+            },
+            Activation::Swish => x.mapv(|v| v / (1.0 + (-v).exp())),
         }
     }
 
@@ -243,7 +246,16 @@ impl Dense {
                 x.mapv(|v| {
                     scale * if v > 0.0 { 1.0 } else { alpha * v.exp() }
                 })
-            }
+            },
+            Activation::Swish => {
+                // f(x) = x * sigmoid(x)
+                // f'(x) = f(x) + sigmoid(x) * (1 - f(x))
+                x.mapv(|v| {
+                    let sigmoid_v = 1.0 / (1.0 + (-v).exp());
+                    let swish_v = v * sigmoid_v;
+                    swish_v + sigmoid_v * (1.0 - swish_v)
+                })
+            },
         }
     }
 
@@ -442,6 +454,7 @@ impl fmt::Display for Dense {
             Activation::Elu(alpha) => return write!(f, "Dense({} -> {}, ELU(alpha={}))", 
                 self.input_shape[1], self.output_shape[1], alpha),
             Activation::Selu => "SELU",
+            Activation::Swish => "Swish",
         };
         
         write!(f, "Dense({} -> {}, {})", 

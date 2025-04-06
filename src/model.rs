@@ -440,7 +440,9 @@ impl Sequential {
                 }
             },
             "rmsprop" => {
-                Some(Box::new(crate::optimizer::RMSProp::new(params.learning_rate)))
+                Some(Box::new(crate::optimizer::RMSProp::with_decay(
+                    params.learning_rate, params.decay_rate.unwrap_or(0.9), params.epsilon.unwrap_or(1e-8)
+                )))
             },
             _ => return Err(TurkError::ModelError(
                 format!("Bilinmeyen optimizer tipi: {}", model_data.optimizer_type)
@@ -664,6 +666,8 @@ impl Sequential {
                                 AktivasyonFonksiyonu::Sigmoid => Activation::Sigmoid,
                                 AktivasyonFonksiyonu::Tanh => Activation::Tanh,
                                 AktivasyonFonksiyonu::Softmax => Activation::Softmax,
+                                AktivasyonFonksiyonu::LeakyRelu(alpha) => Activation::LeakyRelu(*alpha as f32),
+                                AktivasyonFonksiyonu::Swish => Activation::Swish,
                             };
                             
                             model.add(Dense::new(
@@ -683,14 +687,19 @@ impl Sequential {
                 
                 let optimizer_tipi = &model_ozellikleri.optimizer;
                 match optimizer_tipi {
-                    OptimizerTipi::SGD(ogrenme_orani) => {
+                    OptimizerTipi::SGD { lr: ogrenme_orani, .. } => {
                         model.compile(SGD::new(*ogrenme_orani as f32));
                     },
-                    OptimizerTipi::Adam(ogrenme_orani) => {
+                    OptimizerTipi::Adam { lr: ogrenme_orani, .. } => {
                         model.compile(Adam::new(*ogrenme_orani as f32));
                     },
                     OptimizerTipi::AdamW { lr, weight_decay, beta1: _, beta2: _ } => {
                         model.compile(AdamW::new(*lr as f32, *weight_decay as f32));
+                    },
+                    OptimizerTipi::RMSProp { lr, rho, epsilon } => {
+                        model.compile(crate::optimizer::RMSProp::with_decay(
+                            *lr as f32, *rho as f32, *epsilon as f32
+                        ));
                     },
                 }
                 

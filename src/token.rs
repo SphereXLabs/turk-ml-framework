@@ -51,6 +51,44 @@ pub enum Token {
     Kayip,
     #[token("Dogruluk")]
     Dogruluk,
+    #[token("Veri_Yukle")]
+    VeriYukle,
+    #[token("Veri_Bol")]
+    VeriBol,
+    #[token("Veri_Karistir")]
+    VeriKaristir,
+    #[token("Kaydet")]
+    Kaydet,
+    #[token("Yukle")]
+    Yukle,
+    #[token("Optimizer")]
+    Optimizer,
+    #[token("Dropout")]
+    Dropout,
+    #[token("BatchNorm")]
+    BatchNorm,
+    #[token("Degerlendir")]
+    Degerlendir,
+    #[token("Ozet")]
+    Ozet,
+
+    // Optimizer tipleri
+    #[token("SGD")]
+    SGD,
+    #[token("Adam")]
+    Adam,
+    #[token("AdamW")]
+    AdamW,
+    #[token("RMSProp")]
+    RMSProp,
+
+    // Kayıp fonksiyonları
+    #[token("MSE")]
+    MSE,
+    #[token("CrossEntropy")]
+    CrossEntropy,
+    #[token("BinaryCrossEntropy")]
+    BinaryCrossEntropy,
 
     // Aktivasyon fonksiyonları
     #[token("Sigmoid")]
@@ -59,8 +97,20 @@ pub enum Token {
     Tanh,
     #[token("Relu")]
     Relu,
+    #[token("LeakyRelu")]
+    LeakyRelu,
     #[token("Softmax")]
     Softmax,
+    #[token("Swish")]
+    Swish,
+
+    // Kernel başlatıcılar
+    #[token("Xavier")]
+    Xavier,
+    #[token("HeNormal")]
+    HeNormal,
+    #[token("RandomNormal")]
+    RandomNormal,
 
     // Operatörler
     #[token("+")]
@@ -119,6 +169,24 @@ pub enum Token {
     Virgul,
     #[token(";")]
     NoktaliVirgul,
+    #[token(":")]
+    IkiNokta,
+
+    // Model mimarileri
+    #[token("CNN")]
+    CNN,
+    #[token("RNN")]
+    RNN,
+    #[token("LSTM")]
+    LSTM,
+    #[token("GRU")]
+    GRU,
+    #[token("Transformer")]
+    Transformer,
+    #[token("Encoder")]
+    Encoder, 
+    #[token("Decoder")]
+    Decoder,
 
     // İstatistik fonksiyonları
     #[token("Ortalama")]
@@ -136,6 +204,18 @@ pub enum Token {
     #[token("Korelasyon")]
     Korelasyon,
 
+    // Veri işleme
+    #[token("Normallestir")]
+    Normallestir,
+    #[token("OneHotKodla")]
+    OneHotKodla,
+    #[token("CokluSinif")]
+    CokluSinif,
+    #[token("MetinVektorlestir")]
+    MetinVektorlestir,
+    #[token("ResimYukle")]
+    ResimYukle,
+    
     // Değerler
     #[regex("[0-9]+", |lex| lex.slice().parse::<i64>().unwrap())]
     Sayi(i64),
@@ -143,6 +223,19 @@ pub enum Token {
     Metin(String),
     #[regex("[a-zA-Z_ğüşıöçĞÜŞİÖÇ][a-zA-Z0-9_ğüşıöçĞÜŞİÖÇ]*", |lex| lex.slice().to_string())]
     Degisken(String),
+    #[regex(r"[0-9]+,[0-9]+", |lex| {
+        let parts: Vec<&str> = lex.slice().split(',').collect();
+        if parts.len() == 2 {
+            let tam_kisim = parts[0].parse::<i64>().unwrap_or(0);
+            let ondalik_kisim = parts[1].parse::<i64>().unwrap_or(0);
+            let ondalik_str = format!("0.{}", ondalik_kisim);
+            let ondalik_deger = ondalik_str.parse::<f64>().unwrap_or(0.0);
+            (tam_kisim as f64 + ondalik_deger) as i64
+        } else {
+            0
+        }
+    })]
+    OndalikSayi(i64),
 
     // Hatalı/Bilinmeyen token
     Illegal,

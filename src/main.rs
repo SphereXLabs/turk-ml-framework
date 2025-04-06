@@ -4,7 +4,7 @@ use turk_lang::ast::{Deyim, Ifade, Program, DegerTipi, AktivasyonFonksiyonu, Opt
 use turk_lang::token::Token;
 use turk_lang::model::Sequential;
 use turk_lang::layer::{Activation, Dense};
-use turk_lang::optimizer::{SGD, Adam, AdamW};
+use turk_lang::optimizer::SGD;
 use turk_lang::Result;
 use turk_lang::parser::model_parser::ModelParser;
 use turk_lang::TurkError;
@@ -91,6 +91,8 @@ impl Yorumlayici {
                         AktivasyonFonksiyonu::Sigmoid => Activation::Sigmoid,
                         AktivasyonFonksiyonu::Tanh => Activation::Tanh,
                         AktivasyonFonksiyonu::Softmax => Activation::Softmax,
+                        AktivasyonFonksiyonu::LeakyRelu(alpha) => Activation::LeakyRelu(alpha as f32),
+                        AktivasyonFonksiyonu::Swish => Activation::Swish,
                     };
                     
                     model.add(Dense::new(input_size, output_size, aktivasyon));
@@ -98,14 +100,23 @@ impl Yorumlayici {
                 
                 // Varsayılan yapılandırma değerlerini ayarla
                 let optimizer: Box<dyn turk_lang::optimizer::Optimizer> = match &ozellikler.optimizer {
-                    OptimizerTipi::SGD(lr) => {
-                        Box::new(SGD::new(*lr as f32))
+                    OptimizerTipi::SGD { lr, momentum, nesterov: _ } => {
+                        if let Some(momentum_val) = momentum {
+                            Box::new(turk_lang::optimizer::SGD::with_momentum(*lr as f32, *momentum_val as f32))
+                        } else {
+                            Box::new(turk_lang::optimizer::SGD::new(*lr as f32))
+                        }
                     },
-                    OptimizerTipi::Adam(lr) => {
-                        Box::new(Adam::new(*lr as f32))
+                    OptimizerTipi::Adam { lr, beta1, beta2, epsilon } => {
+                        Box::new(turk_lang::optimizer::Adam::with_betas(*lr as f32, *beta1 as f32, *beta2 as f32, *epsilon as f32))
                     },
                     OptimizerTipi::AdamW { lr, weight_decay, beta1, beta2 } => {
-                        Box::new(AdamW::with_betas(*lr as f32, *weight_decay as f32, *beta1 as f32, *beta2 as f32, 1e-8))
+                        Box::new(turk_lang::optimizer::AdamW::with_betas(*lr as f32, *weight_decay as f32, *beta1 as f32, *beta2 as f32, 1e-8))
+                    },
+                    OptimizerTipi::RMSProp { lr, rho, epsilon } => {
+                        Box::new(turk_lang::optimizer::RMSProp::with_decay(
+                            *lr as f32, *rho as f32, *epsilon as f32
+                        ))
                     },
                 };
                 
@@ -240,6 +251,73 @@ impl Yorumlayici {
             Deyim::Ifade(ifade) => {
                 println!("Ifade çalıştırıldı: {:?}", ifade);
                 let _ = self.ifade_yorumla(ifade.clone())?;
+                Ok(())
+            }
+            Deyim::ModelKaydetme { model, dosya_yolu } => {
+                eprintln!("Model kaydediliyor: {} -> {}", model, dosya_yolu);
+                
+                let model_ref = self.modeller.get(model)
+                    .ok_or_else(|| TurkError::InvalidInput(
+                        format!("Model bulunamadı: {}", model)
+                    ))?;
+                
+                model_ref.save(dosya_yolu)?;
+                eprintln!("Model başarıyla kaydedildi: {}", dosya_yolu);
+                Ok(())
+            }
+            Deyim::ModelYukleme { isim, dosya_yolu } => {
+                eprintln!("Model yükleniyor: {} <- {}", isim, dosya_yolu);
+                
+                let mut model = Sequential::new();
+                model.load(dosya_yolu)?;
+                
+                self.modeller.insert(isim.clone(), model);
+                eprintln!("Model başarıyla yüklendi: {}", isim);
+                Ok(())
+            }
+            Deyim::ModelDegerlendirme { model, test_verisi, test_etiketleri } => {
+                eprintln!("Model değerlendiriliyor: {}", model);
+                
+                let x_test = self.ifade_yorumla(test_verisi.clone())?.to_array()?;
+                let _y_test = self.ifade_yorumla(test_etiketleri.clone())?.to_array()?;
+                
+                let model_ref = self.modeller.get_mut(model)
+                    .ok_or_else(|| TurkError::InvalidInput(
+                        format!("Model bulunamadı: {}", model)
+                    ))?;
+                
+                // Basit bir doğruluk hesabı
+                let tahminler = model_ref.forward(&x_test)?;
+                // TODO: Gerçek metrik hesaplamaları
+                
+                eprintln!("Model değerlendirme sonuçları: {:?}", tahminler);
+                Ok(())
+            }
+            Deyim::ModelOzeti { model } => {
+                eprintln!("Model özeti gösteriliyor: {}", model);
+                
+                let model_ref = self.modeller.get(model)
+                    .ok_or_else(|| TurkError::InvalidInput(
+                        format!("Model bulunamadı: {}", model)
+                    ))?;
+                
+                eprintln!("{}", model_ref.summary());
+                Ok(())
+            }
+            Deyim::VeriGorsellestirme { .. } => {
+                eprintln!("Veri görselleştirme: Şu an desteklenmiyor");
+                Ok(())
+            }
+            Deyim::ImportDeyimi { .. } => {
+                eprintln!("Import deyimi: Şu an desteklenmiyor");
+                Ok(())
+            }
+            Deyim::TryCatch { .. } => {
+                eprintln!("Try-Catch deyimi: Şu an desteklenmiyor");
+                Ok(())
+            }
+            Deyim::LambdaTanimi { .. } => {
+                eprintln!("Lambda tanımı: Şu an desteklenmiyor");
                 Ok(())
             }
         }

@@ -587,10 +587,12 @@ impl TurkGui {
                             
                             for (_i, katman) in ozellikler.katmanlar.iter().enumerate() {
                                 let aktivasyon = match katman.aktivasyon {
-                                    AktivasyonFonksiyonu::Relu => "ReLU",
-                                    AktivasyonFonksiyonu::Sigmoid => "Sigmoid",
-                                    AktivasyonFonksiyonu::Tanh => "Tanh",
-                                    AktivasyonFonksiyonu::Softmax => "Softmax",
+                                    AktivasyonFonksiyonu::Relu => String::from("ReLU"),
+                                    AktivasyonFonksiyonu::Sigmoid => String::from("Sigmoid"),
+                                    AktivasyonFonksiyonu::Tanh => String::from("Tanh"),
+                                    AktivasyonFonksiyonu::Softmax => String::from("Softmax"),
+                                    AktivasyonFonksiyonu::LeakyRelu(alpha) => format!("LeakyReLU(α={})", alpha),
+                                    AktivasyonFonksiyonu::Swish => String::from("Swish"),
                                 };
                                 
                                 katmanlar.push(KatmanÖzellikleri {
@@ -599,17 +601,19 @@ impl TurkGui {
                                 });
                             }
                             
-                            let optimizer = match &ozellikler.optimizer {
-                                OptimizerTipi::SGD(lr) => format!("SGD (lr={})", lr),
-                                OptimizerTipi::Adam(lr) => format!("Adam (lr={})", lr),
-                                OptimizerTipi::AdamW { lr, weight_decay, beta1: _, beta2: _ } => 
-                                    format!("AdamW (lr={}, weight_decay={})", lr, weight_decay),
+                            let optimizer = match ozellikler.optimizer {
+                                OptimizerTipi::SGD { lr, .. } => format!("SGD (lr={})", lr),
+                                OptimizerTipi::Adam { lr, .. } => format!("Adam (lr={})", lr),
+                                OptimizerTipi::AdamW { lr, weight_decay, .. } => format!("AdamW (lr={}, weight_decay={})", lr, weight_decay),
+                                OptimizerTipi::RMSProp { lr, rho, .. } => format!("RMSProp (lr={}, rho={})", lr, rho),
                             };
                             
                             let kayıp_fonksiyonu = match ozellikler.kayip_fonksiyonu {
-                                turk_lang::ast::KayipFonksiyonu::MSE => "MSE",
-                                turk_lang::ast::KayipFonksiyonu::CrossEntropy => "Cross Entropy",
-                                turk_lang::ast::KayipFonksiyonu::BinaryCrossEntropy => "Binary Cross Entropy",
+                                turk_lang::ast::KayipFonksiyonu::MSE => String::from("MSE"),
+                                turk_lang::ast::KayipFonksiyonu::CrossEntropy => String::from("Cross Entropy"),
+                                turk_lang::ast::KayipFonksiyonu::BinaryCrossEntropy => String::from("Binary Cross Entropy"),
+                                turk_lang::ast::KayipFonksiyonu::HuberLoss(delta) => format!("Huber Loss (δ={})", delta),
+                                turk_lang::ast::KayipFonksiyonu::FocalLoss(gamma) => format!("Focal Loss (γ={})", gamma),
                             };
                             
                             self.modeller.push(ModelGörselleştirme {

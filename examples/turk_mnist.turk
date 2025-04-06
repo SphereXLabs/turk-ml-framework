@@ -1,0 +1,78 @@
+// TURK Dili MNIST El Yazısı Rakam Sınıflandırıcı
+// Bu örnek, MNIST veri setini kullanarak basit bir sinir ağı oluşturur ve eğitir.
+
+// Veriyi yükle
+Veri mnist = Veri_Yukle("mnist.csv")
+
+// Veriyi eğitim ve test olarak böl
+Veri egitim, test = Veri_Bol(mnist, oran=0.8, karistir=Dogru)
+
+// Veriyi normalize et
+egitim.x = Normallestir(egitim.x)
+test.x = Normallestir(test.x)
+
+// Etiketleri one-hot kodla
+egitim.y = OneHotKodla(egitim.y, sinif_sayisi=10)
+test.y = OneHotKodla(test.y, sinif_sayisi=10)
+
+// Model tanımla
+Model RakamSiniflandirici {
+    // Giriş katmanı (784 nöron - flatten 28x28 görüntü)
+    Katman(784, 128, aktivasyon=Relu)
+    Dropout(0.2)
+    BatchNorm()
+    
+    // Gizli katman
+    Katman(128, 64, aktivasyon=Relu)
+    Dropout(0.2)
+
+    // Çıkış katmanı (10 sınıf için)
+    Katman(64, 10, aktivasyon=Softmax)
+    
+    // Optimizer ve kayıp fonksiyonu
+    Optimizer = Adam(
+        ogrenme_orani=0.001,
+        beta1=0.9,
+        beta2=0.999
+    )
+    
+    Kayip = CrossEntropy
+    
+    // Eğitim parametreleri
+    Batch = 32
+    Epoch = 5
+}
+
+// Eğitim başlamadan önce model özetini göster
+Yazdir(RakamSiniflandirici.Ozet())
+
+// Modeli eğit
+Egit(
+    model = RakamSiniflandirici, 
+    veri = egitim.x, 
+    etiketler = egitim.y
+)
+
+// Modeli değerlendir
+sonuclar = Degerlendir(
+    model = RakamSiniflandirici,
+    veri = test.x,
+    etiketler = test.y
+)
+
+// Sonuçları yazdır
+Yazdir("Test doğruluğu:", sonuclar.dogruluk)
+Yazdir("Test kayıp değeri:", sonuclar.kayip)
+
+// Örnek bir tahmin yap
+ornek_veri = test.x[0]
+ornek_etiket = test.y[0]
+
+tahmin = Tahmin(RakamSiniflandirici, ornek_veri)
+tahmin_edilen_sinif = Ortalama(tahmin)
+
+Yazdir("Tahmin edilen sınıf:", tahmin_edilen_sinif)
+Yazdir("Gerçek sınıf:", ornek_etiket)
+
+// Modeli kaydet
+Kaydet(RakamSiniflandirici, "rakam_siniflandirici.turk") 

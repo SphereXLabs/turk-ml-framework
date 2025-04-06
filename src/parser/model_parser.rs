@@ -1,4 +1,4 @@
-use crate::ast::{Deyim, ModelOzellikleri, KatmanOzellikleri, Program, AktivasyonFonksiyonu, OptimizerTipi, KayipFonksiyonu};
+use crate::ast::{Deyim, ModelOzellikleri, KatmanOzellikleri, Program, AktivasyonFonksiyonu, OptimizerTipi, KayipFonksiyonu, KatmanTipi};
 use crate::token::Token;
 use super::error::{ParseError, Result};
 use super::expr_parser::ExprParser;
@@ -167,6 +167,7 @@ impl ModelParser {
                         self.expect(Token::KapaParantez)?;
                         
                         katmanlar.push(KatmanOzellikleri {
+                            katman_tipi: KatmanTipi::Yogun,
                             noron_sayisi, // Dereference edilmiş değer
                             aktivasyon,
                             kernel_initializer: None,
@@ -192,7 +193,11 @@ impl ModelParser {
                                     let ondalik_val = ondalik_str.parse::<f64>().unwrap_or(0.0);
                                     self.ilerle();
                                     
-                                    optimizer = Some(OptimizerTipi::SGD(oran_val + ondalik_val));
+                                    optimizer = Some(OptimizerTipi::SGD {
+                                        lr: oran_val + ondalik_val,
+                                        momentum: None,
+                                        nesterov: None,
+                                    });
                                 } else {
                                     return Err(ParseError::unexpected_token(
                                         self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
@@ -200,13 +205,467 @@ impl ModelParser {
                                     ));
                                 }
                             } else {
-                                optimizer = Some(OptimizerTipi::SGD(oran_val));
+                                // Tam sayı öğrenme oranı
+                                optimizer = Some(OptimizerTipi::SGD {
+                                    lr: oran_val,
+                                    momentum: None,
+                                    nesterov: None,
+                                });
                             }
+                        } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                            // OndalikSayi token tipi ile doğrudan ondalık sayı alma
+                            let oran_val = *oran as f64 / 100.0;
+                            self.ilerle();
+                            
+                            optimizer = Some(OptimizerTipi::SGD {
+                                lr: oran_val,
+                                momentum: None,
+                                nesterov: None,
+                            });
                         } else {
                             return Err(ParseError::unexpected_token(
                                 self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
-                                "öğrenme oranı (sayı)".to_string()
+                                "öğrenme oranı".to_string()
                             ));
+                        }
+                    }
+                    Token::Optimizer => {
+                        self.ilerle(); // "Optimizer" tüket
+                        self.expect(Token::Esittir)?;
+
+                        // Optimizer tipini kontrol et
+                        if let Some((token, _)) = self.simdiki() {
+                            match token {
+                                Token::SGD => {
+                                    self.ilerle();
+                                    // Parametreleri kontrol et
+                                    let mut lr = 0.01; // Varsayılan değer
+                                    let mut momentum = None;
+                                    let mut nesterov = None;
+                                    
+                                    if self.check(&Token::AcParantez) {
+                                        self.ilerle();
+                                        
+                                        // Parametreleri ayrıştır
+                                        while !self.check(&Token::KapaParantez) {
+                                            if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                                let param = param_name.clone();
+                                                self.ilerle();
+                                                
+                                                self.expect(Token::Esittir)?;
+                                                
+                                                match param.as_str() {
+                                                    "ogrenme_orani" | "lr" => {
+                                                        if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64;
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "öğrenme oranı değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "momentum" => {
+                                                        if let Some((Token::Sayi(mom), _)) = self.simdiki() {
+                                                            momentum = Some(*mom as f64 / 10.0); // 9 -> 0.9
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(mom), _)) = self.simdiki() {
+                                                            momentum = Some(*mom as f64 / 100.0);
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "momentum değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "nesterov" => {
+                                                        if let Some((token, _)) = self.simdiki() {
+                                                            match token {
+                                                                Token::Dogru => nesterov = Some(true),
+                                                                Token::Yanlis => nesterov = Some(false),
+                                                                _ => return Err(ParseError::unexpected_token(
+                                                                    token.clone(),
+                                                                    "Dogru veya Yanlis".to_string()
+                                                                )),
+                                                            }
+                                                            self.ilerle();
+                                                        }
+                                                    },
+                                                    _ => return Err(ParseError::unexpected_token(
+                                                        Token::Degisken(param),
+                                                        "geçerli bir SGD parametresi".to_string()
+                                                    )),
+                                                }
+                                                
+                                                // Virgül kontrolü
+                                                if self.check(&Token::Virgul) {
+                                                    self.ilerle();
+                                                }
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "parametre adı".to_string()
+                                                ));
+                                            }
+                                        }
+                                        
+                                        self.ilerle(); // KapaParantez token'ını tüket
+                                    }
+                                    
+                                    optimizer = Some(OptimizerTipi::SGD {
+                                        lr,
+                                        momentum,
+                                        nesterov,
+                                    });
+                                },
+                                Token::Adam => {
+                                    self.ilerle();
+                                    // Adam parametrelerini kontrol et
+                                    let mut lr = 0.001; // Varsayılan değer
+                                    let mut beta1 = 0.9; // Varsayılan
+                                    let mut beta2 = 0.999; // Varsayılan
+                                    let mut epsilon = 1e-8; // Varsayılan
+                                    
+                                    if self.check(&Token::AcParantez) {
+                                        self.ilerle();
+                                        
+                                        // Parametreleri ayrıştır
+                                        while !self.check(&Token::KapaParantez) {
+                                            if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                                let param = param_name.clone();
+                                                self.ilerle();
+                                                
+                                                self.expect(Token::Esittir)?;
+                                                
+                                                match param.as_str() {
+                                                    "ogrenme_orani" | "lr" => {
+                                                        if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64;
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "öğrenme oranı değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "beta1" => {
+                                                        if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                            beta1 = *b as f64 / 10.0; // 9 -> 0.9
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                            beta1 = *b as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "beta1 değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "beta2" => {
+                                                        if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                            beta2 = *b as f64 / 10.0; // 9 -> 0.9
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                            beta2 = *b as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "beta2 değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "epsilon" => {
+                                                        if let Some((Token::Sayi(e), _)) = self.simdiki() {
+                                                            epsilon = 1.0 / (10.0_f64.powi(*e as i32)); // 8 -> 1e-8
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(e), _)) = self.simdiki() {
+                                                            epsilon = *e as f64 / 1000.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "epsilon değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    _ => return Err(ParseError::unexpected_token(
+                                                        Token::Degisken(param),
+                                                        "geçerli bir Adam parametresi".to_string()
+                                                    )),
+                                                }
+                                                
+                                                // Virgül kontrolü
+                                                if self.check(&Token::Virgul) {
+                                                    self.ilerle();
+                                                }
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "parametre adı".to_string()
+                                                ));
+                                            }
+                                        }
+                                        
+                                        self.ilerle(); // KapaParantez token'ını tüket
+                                    }
+                                    
+                                    optimizer = Some(OptimizerTipi::Adam {
+                                        lr,
+                                        beta1,
+                                        beta2,
+                                        epsilon,
+                                    });
+                                },
+                                Token::AdamW => {
+                                    self.ilerle();
+                                    // AdamW parametrelerini kontrol et
+                                    let mut lr = 0.001; // Varsayılan değer
+                                    let mut weight_decay = 0.01; // Varsayılan
+                                    let mut beta1 = 0.9; // Varsayılan
+                                    let mut beta2 = 0.999; // Varsayılan
+                                    
+                                    if self.check(&Token::AcParantez) {
+                                        self.ilerle();
+                                        
+                                        // Parametreleri ayrıştır
+                                        while !self.check(&Token::KapaParantez) {
+                                            if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                                let param = param_name.clone();
+                                                self.ilerle();
+                                                
+                                                self.expect(Token::Esittir)?;
+                                                
+                                                match param.as_str() {
+                                                    "ogrenme_orani" | "lr" => {
+                                                        if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64;
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "öğrenme oranı değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "weight_decay" | "agirlik_azaltma" => {
+                                                        if let Some((Token::Sayi(wd), _)) = self.simdiki() {
+                                                            weight_decay = *wd as f64;
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(wd), _)) = self.simdiki() {
+                                                            weight_decay = *wd as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "weight_decay değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "beta1" => {
+                                                        if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                            beta1 = *b as f64 / 10.0; // 9 -> 0.9
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                            beta1 = *b as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "beta1 değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "beta2" => {
+                                                        if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                            beta2 = *b as f64 / 10.0; // 9 -> 0.9
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                            beta2 = *b as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "beta2 değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    _ => return Err(ParseError::unexpected_token(
+                                                        Token::Degisken(param),
+                                                        "geçerli bir AdamW parametresi".to_string()
+                                                    )),
+                                                }
+                                                
+                                                // Virgül kontrolü
+                                                if self.check(&Token::Virgul) {
+                                                    self.ilerle();
+                                                }
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "parametre adı".to_string()
+                                                ));
+                                            }
+                                        }
+                                        
+                                        self.ilerle(); // KapaParantez token'ını tüket
+                                    }
+                                    
+                                    optimizer = Some(OptimizerTipi::AdamW {
+                                        lr,
+                                        weight_decay,
+                                        beta1,
+                                        beta2,
+                                    });
+                                },
+                                Token::RMSProp => {
+                                    self.ilerle();
+                                    // RMSProp parametrelerini kontrol et
+                                    let mut lr = 0.001; // Varsayılan değer
+                                    let mut rho = 0.9; // Varsayılan
+                                    let mut epsilon = 1e-8; // Varsayılan
+                                    
+                                    if self.check(&Token::AcParantez) {
+                                        self.ilerle();
+                                        
+                                        // Parametreleri ayrıştır
+                                        while !self.check(&Token::KapaParantez) {
+                                            if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                                let param = param_name.clone();
+                                                self.ilerle();
+                                                
+                                                self.expect(Token::Esittir)?;
+                                                
+                                                match param.as_str() {
+                                                    "ogrenme_orani" | "lr" => {
+                                                        if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64;
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                            lr = *oran as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "öğrenme oranı değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "rho" | "bozulma_orani" => {
+                                                        if let Some((Token::Sayi(r), _)) = self.simdiki() {
+                                                            rho = *r as f64 / 10.0; // 9 -> 0.9
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(r), _)) = self.simdiki() {
+                                                            rho = *r as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "rho değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    "epsilon" => {
+                                                        if let Some((Token::Sayi(e), _)) = self.simdiki() {
+                                                            epsilon = 1.0 / (10.0_f64.powi(*e as i32)); // 8 -> 1e-8
+                                                            self.ilerle();
+                                                        } else if let Some((Token::OndalikSayi(e), _)) = self.simdiki() {
+                                                            epsilon = *e as f64 / 100.0;
+                                                            self.ilerle();
+                                                        } else {
+                                                            return Err(ParseError::unexpected_token(
+                                                                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                                "epsilon değeri".to_string()
+                                                            ));
+                                                        }
+                                                    },
+                                                    _ => return Err(ParseError::unexpected_token(
+                                                        Token::Degisken(param),
+                                                        "geçerli bir RMSProp parametresi".to_string()
+                                                    )),
+                                                }
+                                                
+                                                // Virgül kontrolü
+                                                if self.check(&Token::Virgul) {
+                                                    self.ilerle();
+                                                }
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "parametre adı".to_string()
+                                                ));
+                                            }
+                                        }
+                                        
+                                        self.ilerle(); // KapaParantez token'ını tüket
+                                    }
+                                    
+                                    optimizer = Some(OptimizerTipi::RMSProp {
+                                        lr,
+                                        rho,
+                                        epsilon,
+                                    });
+                                },
+                                Token::Metin(optimizer_name) => {
+                                    let optimizer_name_clone = optimizer_name.clone();
+                                    self.ilerle();
+                                    // Metin olarak verilen optimizer adını analiz et (geriye uyumluluk için)
+                                    match optimizer_name_clone.as_str() {
+                                        "sgd" => {
+                                            optimizer = Some(OptimizerTipi::SGD {
+                                                lr: 0.01,
+                                                momentum: None,
+                                                nesterov: None,
+                                            });
+                                        },
+                                        "adam" => {
+                                            optimizer = Some(OptimizerTipi::Adam {
+                                                lr: 0.001,
+                                                beta1: 0.9,
+                                                beta2: 0.999,
+                                                epsilon: 1e-8,
+                                            });
+                                        },
+                                        "adamw" => {
+                                            optimizer = Some(OptimizerTipi::AdamW {
+                                                lr: 0.001,
+                                                weight_decay: 0.01,
+                                                beta1: 0.9,
+                                                beta2: 0.999,
+                                            });
+                                        },
+                                        "rmsprop" => {
+                                            optimizer = Some(OptimizerTipi::RMSProp {
+                                                lr: 0.001,
+                                                rho: 0.9,
+                                                epsilon: 1e-8,
+                                            });
+                                        },
+                                        _ => return Err(ParseError::syntax_error(
+                                            format!("Bilinmeyen optimizer tipi: {}", optimizer_name_clone)
+                                        )),
+                                    }
+                                },
+                                _ => return Err(ParseError::unexpected_token(
+                                    token.clone(),
+                                    "geçerli bir optimizer (SGD, Adam, AdamW, RMSProp) veya metin değeri".to_string()
+                                )),
+                            }
+                        } else {
+                            return Err(ParseError::UnexpectedEOF);
                         }
                     }
                     Token::Kayip => {
@@ -292,7 +751,11 @@ impl ModelParser {
         }
         
         // Varsayılan değerler
-        let optimizer = optimizer.unwrap_or(OptimizerTipi::SGD(0.01));
+        let optimizer = optimizer.unwrap_or(OptimizerTipi::SGD {
+            lr: 0.01,
+            momentum: None,
+            nesterov: None,
+        });
         let kayip_fonksiyonu = kayip_fonksiyonu.unwrap_or(KayipFonksiyonu::MSE);
          // batch_boyutu ve epoch_sayisi için referans yerine değer kullanıldı
         let batch_boyutu = batch_boyutu.unwrap_or(32);
@@ -310,6 +773,8 @@ impl ModelParser {
                 kayip_fonksiyonu,
                 batch_boyutu,
                 epoch_sayisi,
+                metrikler: None,
+                erken_durdurma: None,
             },
         }))
     }
@@ -446,6 +911,458 @@ impl ModelParser {
             model,
             girdi: test_var,
         }))
+    }
+
+    pub fn parse_optimizer(&mut self) -> Result<OptimizerTipi> {
+        // Optimizer değerini al
+        let mut optimizer_val = OptimizerTipi::SGD {
+            lr: 0.01,
+            momentum: None,
+            nesterov: None,
+        };
+
+        if self.check(&Token::Optimizer) {
+            self.ilerle(); // "Optimizer" token'ını tüket
+            self.expect(Token::Esittir)?;
+            
+            if let Some((token, _)) = self.simdiki() {
+                match token {
+                    Token::Adam => {
+                        self.ilerle();
+                        // Adam parametrelerini kontrol et
+                        let mut lr = 0.001; // Varsayılan değer
+                        let mut beta1 = 0.9; // Varsayılan
+                        let mut beta2 = 0.999; // Varsayılan
+                        let mut epsilon = 1e-8; // Varsayılan
+                        
+                        if self.check(&Token::AcParantez) {
+                            self.ilerle();
+                            
+                            // Parametreleri ayrıştır
+                            while !self.check(&Token::KapaParantez) {
+                                if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                    let param = param_name.clone();
+                                    self.ilerle();
+                                    
+                                    self.expect(Token::Esittir)?;
+                                    
+                                    match param.as_str() {
+                                        "ogrenme_orani" | "lr" => {
+                                            if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64;
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "öğrenme oranı değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "beta1" => {
+                                            if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                beta1 = *b as f64 / 10.0; // 9 -> 0.9
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                beta1 = *b as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "beta1 değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "beta2" => {
+                                            if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                beta2 = *b as f64 / 10.0; // 9 -> 0.9
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                beta2 = *b as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "beta2 değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "epsilon" => {
+                                            if let Some((Token::Sayi(e), _)) = self.simdiki() {
+                                                epsilon = 1.0 / (10.0_f64.powi(*e as i32)); // 8 -> 1e-8
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(e), _)) = self.simdiki() {
+                                                epsilon = *e as f64 / 1000.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "epsilon değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        _ => return Err(ParseError::unexpected_token(
+                                            Token::Degisken(param),
+                                            "geçerli bir Adam parametresi".to_string()
+                                        )),
+                                    }
+                                    
+                                    // Virgül kontrolü
+                                    if self.check(&Token::Virgul) {
+                                        self.ilerle();
+                                    }
+                                } else {
+                                    return Err(ParseError::unexpected_token(
+                                        self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                        "parametre adı".to_string()
+                                    ));
+                                }
+                            }
+                            
+                            self.ilerle(); // KapaParantez token'ını tüket
+                        }
+                        
+                        return Ok(OptimizerTipi::Adam {
+                            lr,
+                            beta1,
+                            beta2,
+                            epsilon,
+                        });
+                    },
+                    Token::SGD => {
+                        self.ilerle();
+                        // SGD parametrelerini kontrol et
+                        let mut lr = 0.01; // Varsayılan değer
+                        let mut momentum = None;
+                        let mut nesterov = None;
+                        
+                        if self.check(&Token::AcParantez) {
+                            self.ilerle();
+                            
+                            // Parametreleri ayrıştır
+                            while !self.check(&Token::KapaParantez) {
+                                if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                    let param = param_name.clone();
+                                    self.ilerle();
+                                    
+                                    self.expect(Token::Esittir)?;
+                                    
+                                    match param.as_str() {
+                                        "ogrenme_orani" | "lr" => {
+                                            if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64;
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "öğrenme oranı değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "momentum" => {
+                                            if let Some((Token::Sayi(m), _)) = self.simdiki() {
+                                                momentum = Some(*m as f64 / 10.0); // 9 -> 0.9
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(m), _)) = self.simdiki() {
+                                                momentum = Some(*m as f64 / 100.0);
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "momentum değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "nesterov" => {
+                                            if let Some((Token::Dogru, _)) = self.simdiki() {
+                                                nesterov = Some(true);
+                                                self.ilerle();
+                                            } else if let Some((Token::Yanlis, _)) = self.simdiki() {
+                                                nesterov = Some(false);
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "nesterov değeri (true veya false)".to_string()
+                                                ));
+                                            }
+                                        },
+                                        _ => return Err(ParseError::unexpected_token(
+                                            Token::Degisken(param),
+                                            "geçerli bir SGD parametresi".to_string()
+                                        )),
+                                    }
+                                    
+                                    // Virgül kontrolü
+                                    if self.check(&Token::Virgul) {
+                                        self.ilerle();
+                                    }
+                                } else {
+                                    return Err(ParseError::unexpected_token(
+                                        self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                        "parametre adı".to_string()
+                                    ));
+                                }
+                            }
+                            
+                            self.ilerle(); // KapaParantez token'ını tüket
+                        }
+                        
+                        return Ok(OptimizerTipi::SGD {
+                            lr,
+                            momentum,
+                            nesterov,
+                        });
+                    },
+                    Token::AdamW => {
+                        self.ilerle();
+                        // AdamW parametrelerini kontrol et
+                        let mut lr = 0.001; // Varsayılan değer
+                        let mut weight_decay = 0.01; // Varsayılan
+                        let mut beta1 = 0.9; // Varsayılan
+                        let mut beta2 = 0.999; // Varsayılan
+                        
+                        if self.check(&Token::AcParantez) {
+                            self.ilerle();
+                            
+                            // Parametreleri ayrıştır
+                            while !self.check(&Token::KapaParantez) {
+                                if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                    let param = param_name.clone();
+                                    self.ilerle();
+                                    
+                                    self.expect(Token::Esittir)?;
+                                    
+                                    match param.as_str() {
+                                        "ogrenme_orani" | "lr" => {
+                                            if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64;
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "öğrenme oranı değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "weight_decay" | "agirlik_azaltma" => {
+                                            if let Some((Token::Sayi(wd), _)) = self.simdiki() {
+                                                weight_decay = *wd as f64;
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(wd), _)) = self.simdiki() {
+                                                weight_decay = *wd as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "weight_decay değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "beta1" => {
+                                            if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                beta1 = *b as f64 / 10.0; // 9 -> 0.9
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                beta1 = *b as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "beta1 değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "beta2" => {
+                                            if let Some((Token::Sayi(b), _)) = self.simdiki() {
+                                                beta2 = *b as f64 / 10.0; // 9 -> 0.9
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(b), _)) = self.simdiki() {
+                                                beta2 = *b as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "beta2 değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        _ => return Err(ParseError::unexpected_token(
+                                            Token::Degisken(param),
+                                            "geçerli bir AdamW parametresi".to_string()
+                                        )),
+                                    }
+                                    
+                                    // Virgül kontrolü
+                                    if self.check(&Token::Virgul) {
+                                        self.ilerle();
+                                    }
+                                } else {
+                                    return Err(ParseError::unexpected_token(
+                                        self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                        "parametre adı".to_string()
+                                    ));
+                                }
+                            }
+                            
+                            self.ilerle(); // KapaParantez token'ını tüket
+                        }
+                        
+                        return Ok(OptimizerTipi::AdamW {
+                            lr,
+                            weight_decay,
+                            beta1,
+                            beta2,
+                        });
+                    },
+                    Token::RMSProp => {
+                        self.ilerle();
+                        // RMSProp parametrelerini kontrol et
+                        let mut lr = 0.001; // Varsayılan değer
+                        let mut rho = 0.9; // Varsayılan
+                        let mut epsilon = 1e-8; // Varsayılan
+                        
+                        if self.check(&Token::AcParantez) {
+                            self.ilerle();
+                            
+                            // Parametreleri ayrıştır
+                            while !self.check(&Token::KapaParantez) {
+                                if let Some((Token::Degisken(param_name), _)) = self.simdiki() {
+                                    let param = param_name.clone();
+                                    self.ilerle();
+                                    
+                                    self.expect(Token::Esittir)?;
+                                    
+                                    match param.as_str() {
+                                        "ogrenme_orani" | "lr" => {
+                                            if let Some((Token::Sayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64;
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(oran), _)) = self.simdiki() {
+                                                lr = *oran as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "öğrenme oranı değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "rho" | "bozulma_orani" => {
+                                            if let Some((Token::Sayi(r), _)) = self.simdiki() {
+                                                rho = *r as f64 / 10.0; // 9 -> 0.9
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(r), _)) = self.simdiki() {
+                                                rho = *r as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "rho değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        "epsilon" => {
+                                            if let Some((Token::Sayi(e), _)) = self.simdiki() {
+                                                epsilon = 1.0 / (10.0_f64.powi(*e as i32)); // 8 -> 1e-8
+                                                self.ilerle();
+                                            } else if let Some((Token::OndalikSayi(e), _)) = self.simdiki() {
+                                                epsilon = *e as f64 / 100.0;
+                                                self.ilerle();
+                                            } else {
+                                                return Err(ParseError::unexpected_token(
+                                                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                                    "epsilon değeri".to_string()
+                                                ));
+                                            }
+                                        },
+                                        _ => return Err(ParseError::unexpected_token(
+                                            Token::Degisken(param),
+                                            "geçerli bir RMSProp parametresi".to_string()
+                                        )),
+                                    }
+                                    
+                                    // Virgül kontrolü
+                                    if self.check(&Token::Virgul) {
+                                        self.ilerle();
+                                    }
+                                } else {
+                                    return Err(ParseError::unexpected_token(
+                                        self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                        "parametre adı".to_string()
+                                    ));
+                                }
+                            }
+                            
+                            self.ilerle(); // KapaParantez token'ını tüket
+                        }
+                        
+                        return Ok(OptimizerTipi::RMSProp {
+                            lr,
+                            rho,
+                            epsilon,
+                        });
+                    },
+                    Token::Metin(optimizer_name) => {
+                        let optimizer_name_clone = optimizer_name.clone();
+                        self.ilerle();
+                        // Metin olarak verilen optimizer adını analiz et (geriye uyumluluk için)
+                        match optimizer_name_clone.as_str() {
+                            "sgd" => {
+                                optimizer_val = OptimizerTipi::SGD {
+                                    lr: 0.01,
+                                    momentum: None,
+                                    nesterov: None,
+                                };
+                            },
+                            "adam" => {
+                                optimizer_val = OptimizerTipi::Adam {
+                                    lr: 0.001,
+                                    beta1: 0.9,
+                                    beta2: 0.999,
+                                    epsilon: 1e-8,
+                                };
+                            },
+                            "adamw" => {
+                                optimizer_val = OptimizerTipi::AdamW {
+                                    lr: 0.001,
+                                    weight_decay: 0.01,
+                                    beta1: 0.9,
+                                    beta2: 0.999,
+                                };
+                            },
+                            "rmsprop" => {
+                                optimizer_val = OptimizerTipi::RMSProp {
+                                    lr: 0.001,
+                                    rho: 0.9,
+                                    epsilon: 1e-8,
+                                };
+                            },
+                            _ => return Err(ParseError::syntax_error(
+                                format!("Bilinmeyen optimizer tipi: {}", optimizer_name_clone)
+                            )),
+                        }
+                    },
+                    _ => return Err(ParseError::unexpected_token(
+                        token.clone(),
+                        "geçerli bir optimizer (SGD, Adam, AdamW, RMSProp) veya metin değeri".to_string()
+                    )),
+                }
+            } else {
+                return Err(ParseError::UnexpectedEOF);
+            }
+        }
+        
+        // Varsayılan değer
+        Ok(optimizer_val)
     }
 }
 

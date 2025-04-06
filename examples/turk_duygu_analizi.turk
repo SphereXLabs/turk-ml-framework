@@ -1,0 +1,88 @@
+// TURK Dili ile Türkçe Metin Duygu Analizi
+// Bu örnek, Türkçe metinleri olumlu veya olumsuz olarak sınıflandıran bir model oluşturur
+
+// Veriyi yükle - Örnek veri seti: Türkçe film yorumları
+Veri yorumlar = Veri_Yukle("turk_film_yorumlari.csv", format="csv")
+
+// Veriyi eğitim ve test olarak böl
+Veri egitim, test = Veri_Bol(yorumlar, oran=0.8, karistir=Dogru)
+
+// Metinleri vektörleştir - TF-IDF dönüşümü
+egitim.x = MetinVektorlestir(egitim.x, yontem="tfidf", max_ozellik=5000)
+test.x = MetinVektorlestir(test.x, yontem="tfidf", max_ozellik=5000)
+
+// Modeli tanımla
+Model DuyguAnalizi {
+    // Tek katman LSTM ağı
+    LSTM {
+        gizli_boyut = 64,
+        bidirectional = Dogru
+    }
+    
+    Dropout(0.3)
+    
+    // Çıkış katmanı (ikili sınıflandırma: olumlu/olumsuz)
+    Katman(64, 2, aktivasyon=Softmax)
+    
+    // Optimizer ve kayıp fonksiyonu
+    Optimizer = Adam(
+        ogrenme_orani=0.001,
+        beta1=0.9,
+        beta2=0.999
+    )
+    
+    Kayip = BinaryCrossEntropy
+    
+    // Eğitim parametreleri
+    Batch = 16
+    Epoch = 3
+}
+
+// Model özetini göster
+Yazdir(DuyguAnalizi.Ozet())
+
+// Modeli eğit
+Egit(
+    model = DuyguAnalizi,
+    veri = egitim.x,
+    etiketler = egitim.y
+)
+
+// Modeli değerlendir
+sonuclar = Degerlendir(
+    model = DuyguAnalizi,
+    veri = test.x,
+    etiketler = test.y
+)
+
+// Sonuçları yazdır
+Yazdir("Test doğruluğu:", sonuclar.dogruluk)
+Yazdir("Test F1 skoru:", sonuclar.f1)
+Yazdir("Test hassasiyeti:", sonuclar.hassasiyet)
+Yazdir("Test duyarlılığı:", sonuclar.duyarlilik)
+
+// Örnek yorumlar üzerinde tahmin yap
+ornek_yorumlar = [
+    "Film harika, oyuncular çok başarılıydı. Kesinlikle izlemelisiniz!",
+    "Vakit kaybı, senaryo zayıf ve oyunculuk berbattı.",
+    "Ortalama bir film, bazı sahneler güzeldi ama genel olarak sıkıcıydı.",
+    "Beklentimin üzerinde çıktı, özellikle görsel efektler etkileyiciydi."
+]
+
+// Vektörleştir
+ornek_vektorler = MetinVektorlestir(ornek_yorumlar, yontem="tfidf", max_ozellik=5000)
+
+// Tahmin yap
+tahminler = Tahmin(DuyguAnalizi, ornek_vektorler)
+
+// Sonuçları yazdır
+Yazdir("\nÖrnek Yorumlar Duygu Analizi:")
+Yazdir("===============================")
+
+Icin yorum, tahmin Icinde ornek_yorumlar, tahminler {
+    duygu = Eger tahmin[0] > tahmin[1] Eger "Olumlu" Degilse "Olumsuz"
+    Yazdir(yorum, "-->", duygu, "(", tahmin, ")")
+}
+
+// Modeli kaydet
+Kaydet(DuyguAnalizi, "duygu_analizi_modeli.turk") 

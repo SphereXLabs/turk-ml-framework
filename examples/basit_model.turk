@@ -1,0 +1,46 @@
+// TURK Dili Basit Model Örneği
+// Bu örnek, basit bir iki sınıflı sınıflandırma modeli oluşturur ve eğitir.
+
+// Model tanımla
+Model sinir_agi {
+    // Giriş katmanı (3 nöron)
+    Katman(3, aktivasyon=Relu)
+    
+    // Gizli katman
+    Katman(5, aktivasyon=Relu)
+    
+    // Çıkış katmanı (2 sınıf için)
+    Katman(2, aktivasyon=Softmax)
+    
+    // Optimizer ve kayıp fonksiyonu
+    OgrenmeOrani = 0.01
+    
+    Kayip = CrossEntropy
+    
+    // Eğitim parametreleri
+    Batch = 32
+    Epoch = 5
+}
+
+// Veri tanımla - One-hot encoded giriş (3 özellik)
+Veri x_train = [
+    [1, 0, 0], // Sınıf 1, Örnek 1
+    [0, 1, 0], // Sınıf 2, Örnek 1
+    [0, 0, 1]  // Sınıf 1, Örnek 2
+]
+
+// Etiketleri tanımla (2 sınıf)
+Veri y_train = [
+    [1, 0], // Sınıf 1
+    [0, 1], // Sınıf 2
+    [1, 0]  // Sınıf 1
+]
+
+// Modeli eğit
+Egit(sinir_agi, x_train, y_train)
+
+// Test verisi tanımla
+Veri test_verisi = [1, 0, 0]
+
+// Tahmin yap
+Tahmin(sinir_agi, test_verisi) 

@@ -1,0 +1,173 @@
+// TURK Dili ile Evrişimli Sinir Ağı (CNN) Örneği
+// Bu örnek, bir CNN kullanarak görüntüleri sınıflandıran bir model oluşturur
+
+// Veriyi yükle - CIFAR-10 veri seti (10 sınıflı görseller)
+Veri cifar = Veri_Yukle("cifar10.npz")
+
+// Veriyi eğitim ve test olarak böl
+Veri egitim, test = Veri_Bol(cifar, oran=0.8, karistir=Dogru)
+
+// Görüntüleri normalize et (0-1 aralığına getir)
+egitim.x = Normallestir(egitim.x, min=0, max=255)
+test.x = Normallestir(test.x, min=0, max=255)
+
+// Etiketleri one-hot kodla (10 sınıf)
+egitim.y = OneHotKodla(egitim.y, sinif_sayisi=10)
+test.y = OneHotKodla(test.y, sinif_sayisi=10)
+
+// CIFAR-10 sınıf isimleri
+sinif_isimleri = [
+    "Uçak", "Araba", "Kuş", "Kedi", "Geyik", 
+    "Köpek", "Kurbağa", "At", "Gemi", "Kamyon"
+]
+
+// CNN Model tanımı
+Model CIFAR_Siniflandirici {
+    // Evrişimli katmanlar (Convolution + Pooling)
+    
+    // İlk evrişim bloğu
+    Katman(
+        tip = "Evrisimli",
+        filtre_sayisi = 32,
+        filtre_boyutu = (3, 3),
+        aktivasyon = Relu,
+        padding = "same"
+    )
+    
+    Katman(
+        tip = "Havuzlama",
+        boyut = (2, 2),
+        tip = "max"
+    )
+    
+    // İkinci evrişim bloğu
+    Katman(
+        tip = "Evrisimli",
+        filtre_sayisi = 64,
+        filtre_boyutu = (3, 3),
+        aktivasyon = Relu,
+        padding = "same"
+    )
+    
+    Katman(
+        tip = "Havuzlama",
+        boyut = (2, 2),
+        tip = "max"
+    )
+    
+    // Üçüncü evrişim bloğu 
+    Katman(
+        tip = "Evrisimli",
+        filtre_sayisi = 128,
+        filtre_boyutu = (3, 3),
+        aktivasyon = Relu,
+        padding = "same"
+    )
+    
+    Katman(
+        tip = "Havuzlama",
+        boyut = (2, 2),
+        tip = "max"
+    )
+    
+    // Düzleştirme
+    Katman(tip = "Duzlestirme")
+    
+    // Tam bağlantılı katmanlar
+    Katman(512, aktivasyon=Relu)
+    Dropout(0.5)
+    
+    // Çıkış katmanı (10 sınıf)
+    Katman(10, aktivasyon=Softmax)
+    
+    // Optimizer ve kayıp fonksiyonu
+    Optimizer = Adam(
+        ogrenme_orani=0.0001,
+        beta1=0.9,
+        beta2=0.999
+    )
+    
+    Kayip = CrossEntropy
+    
+    // Eğitim parametreleri
+    Batch = 64
+    Epoch = 10
+}
+
+// Model özetini göster
+Yazdir(CIFAR_Siniflandirici.Ozet())
+
+// Eğitim ilerlemesini izleme ayarları
+izleme = {
+    erken_durdurma = 3,  // 3 epoch boyunca gelişme olmazsa durdur
+    metrikler = ["dogruluk", "kayip"],
+    grafik = Dogru,
+    kaydet_en_iyi = Dogru
+}
+
+// Modeli eğit
+Egit(
+    model = CIFAR_Siniflandirici,
+    veri = egitim.x,
+    etiketler = egitim.y,
+    izleme = izleme
+)
+
+// Modeli değerlendir
+sonuclar = Degerlendir(
+    model = CIFAR_Siniflandirici,
+    veri = test.x,
+    etiketler = test.y
+)
+
+// Sonuçları yazdır
+Yazdir("Test doğruluğu:", sonuclar.dogruluk)
+Yazdir("Test kaybı:", sonuclar.kayip)
+
+// Karışıklık matrisi oluştur ve görselleştir
+karisiklik_matrisi = Degerlendir(
+    model = CIFAR_Siniflandirici,
+    veri = test.x,
+    etiketler = test.y,
+    metrik = "karisiklik_matrisi"
+)
+
+// Karışıklık matrisini görselleştir
+VeriGorsellestir(
+    veri = karisiklik_matrisi,
+    grafik_tipi = "isı_haritası",
+    baslik = "CIFAR-10 Karışıklık Matrisi",
+    x_etiketleri = sinif_isimleri,
+    y_etiketleri = sinif_isimleri
+)
+
+// Rastgele 5 görüntü seçip tahmin yap
+rastgele_indeksler = [42, 73, 112, 195, 234]
+
+Yazdir("\nÖrnek Tahminler:")
+Yazdir("================")
+
+Icin i Icinde rastgele_indeksler {
+    ornek = test.x[i]
+    gercek_etiket = test.y[i]
+    
+    tahmin = Tahmin(CIFAR_Siniflandirici, ornek)
+    tahmin_indeks = Ortalama(tahmin)
+    
+    gercek_sinif = sinif_isimleri[gercek_etiket]
+    tahmin_sinif = sinif_isimleri[tahmin_indeks]
+    
+    dogru_mu = Eger gercek_sinif == tahmin_sinif Eger "✓" Degilse "✗"
+    
+    Yazdir("Örnek", i, ":", gercek_sinif, "->", tahmin_sinif, dogru_mu)
+    
+    // Görüntüyü ve tahmin sonuçlarını göster
+    VeriGorsellestir(
+        veri = ornek,
+        grafik_tipi = "görüntü",
+        baslik = "Tahmin: " + tahmin_sinif + " (Gerçek: " + gercek_sinif + ")"
+    )
+}
+
+// Modeli kaydet
+Kaydet(CIFAR_Siniflandirici, "cifar_cnn_modeli.turk") 
