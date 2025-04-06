@@ -1,3 +1,11 @@
+# ARCHITECTURE.md Taşındı
+
+Bu dokümantasyon dosyası `docs/ARCHITECTURE.md` konumuna taşınmıştır. Lütfen güncel mimari dökümantasyonuna aşağıdaki linkten erişin:
+
+[TURK Dil Kütüphanesi Mimari Dökümantasyonu](docs/ARCHITECTURE.md)
+
+Bu dosya yalnızca geri uyumluluk için korunmaktadır.
+
 # TURK Dil Kütüphanesi Mimari Dokümantasyonu
 
 Bu doküman, TURK dil kütüphanesinin genel mimari yapısını, bileşenlerini ve veri akışını açıklamaktadır.

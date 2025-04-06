@@ -1,8 +1,7 @@
-use ndarray::{Array, Array2};
-use ndarray_rand::RandomExt;
-use ndarray_rand::rand_distr::Normal;
-use serde::{Serialize, Deserialize};
+use ndarray::Array2;
 use crate::error::{Result, TurkError};
+use ndarray_rand::rand_distr::Normal;
+use ndarray_rand::RandomExt;
 
 /// Ağırlık başlangıç değerleri için trait
 pub trait Initializer: Send + Sync + std::fmt::Debug {
@@ -11,7 +10,7 @@ pub trait Initializer: Send + Sync + std::fmt::Debug {
 }
 
 /// Xavier/Glorot başlangıç değerleri
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Xavier {
     pub gain: f32,
 }
@@ -37,7 +36,7 @@ impl Initializer for Xavier {
         let dist = Normal::new(0.0, std_dev)
             .map_err(|e| TurkError::InvalidInput(format!("Normal dağılım oluşturulurken hata: {}", e)))?;
         
-        Ok(Array::random((shape[0], shape[1]), dist))
+        Ok(Array2::random((shape[0], shape[1]), dist))
     }
     
     fn name(&self) -> &'static str {
@@ -46,7 +45,7 @@ impl Initializer for Xavier {
 }
 
 /// He başlangıç değerleri (Kaiming He)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct HeNormal {
     pub gain: f32,
 }
@@ -71,7 +70,7 @@ impl Initializer for HeNormal {
         let dist = Normal::new(0.0, std_dev)
             .map_err(|e| TurkError::InvalidInput(format!("Normal dağılım oluşturulurken hata: {}", e)))?;
         
-        Ok(Array::random((shape[0], shape[1]), dist))
+        Ok(Array2::random((shape[0], shape[1]), dist))
     }
     
     fn name(&self) -> &'static str {
@@ -80,7 +79,7 @@ impl Initializer for HeNormal {
 }
 
 /// Sıfır başlangıç değerleri
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Zeros;
 
 impl Initializer for Zeros {
@@ -100,7 +99,7 @@ impl Initializer for Zeros {
 }
 
 /// Bir başlangıç değerleri
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Ones;
 
 impl Initializer for Ones {
@@ -120,7 +119,7 @@ impl Initializer for Ones {
 }
 
 /// Rastgele normal dağılım başlangıç değerleri
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RandomNormal {
     pub mean: f32,
     pub std_dev: f32,
@@ -146,7 +145,7 @@ impl Initializer for RandomNormal {
         let dist = Normal::new(self.mean, self.std_dev)
             .map_err(|e| TurkError::InvalidInput(format!("Normal dağılım oluşturulurken hata: {}", e)))?;
         
-        Ok(Array::random((shape[0], shape[1]), dist))
+        Ok(Array2::random((shape[0], shape[1]), dist))
     }
     
     fn name(&self) -> &'static str {

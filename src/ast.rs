@@ -157,7 +157,7 @@ pub enum Deyim {
     Egitim { model: String, x_train: Box<Ifade>, y_train: Box<Ifade> },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub deyimler: Vec<Deyim>,
 }

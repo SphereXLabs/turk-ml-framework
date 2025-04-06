@@ -1,7 +1,6 @@
-use crate::{Result, TurkError};
-use turk_lang::initializers::{Initializer, HeNormal, Xavier, Zeros};
-use ndarray::prelude::*;
-use ndarray::Array2;
+use crate::error::{Result, TurkError};
+use crate::initializers::{Initializer, HeNormal, Xavier, Zeros};
+use ndarray::{Array2, Axis, s};
 use rand::{thread_rng, Rng};
 use serde::{Serialize, Deserialize};
 use std::fmt;
@@ -499,7 +498,7 @@ impl Layer for Dropout {
             
             // Yeni mask oluştur
             let input_shape_array = [input.shape()[0], input.shape()[1]];
-            self.mask = Array::from_shape_fn(input_shape_array, |_| {
+            self.mask = Array2::from_shape_fn(input_shape_array, |_| {
                 if rng.gen::<f32>() > self.rate { 1.0 / (1.0 - self.rate) } else { 0.0 }
             });
             
@@ -676,14 +675,25 @@ impl Layer for BatchNorm {
         self.output_shape[0] = batch_size;
         
         if self.training {
-            self.mean = input.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
-            self.var = (*&input - &self.mean).mapv(|x| x * x).mean_axis(Axis(0)).unwrap().insert_axis(Axis(0));
-            self.std = (&self.var + self.epsilon).mapv(f32::sqrt);
-            
-            self.running_mean = &self.running_mean * self.momentum + &self.mean * (1.0 - self.momentum);
-            self.running_var = &self.running_var * self.momentum + &self.var * (1.0 - self.momentum);
-            
-            self.norm_input = (input - &self.mean) / &self.std;
+            // Option<T> kullanarak unwrap hatalarını önle
+            if let Some(mean) = input.mean_axis(Axis(0)) {
+                self.mean = mean.insert_axis(Axis(0));
+                
+                let centered = input - &self.mean;
+                if let Some(var) = centered.mapv(|x| x * x).mean_axis(Axis(0)) {
+                    self.var = var.insert_axis(Axis(0));
+                    self.std = (&self.var + self.epsilon).mapv(f32::sqrt);
+                    
+                    self.running_mean = &self.running_mean * self.momentum + &self.mean * (1.0 - self.momentum);
+                    self.running_var = &self.running_var * self.momentum + &self.var * (1.0 - self.momentum);
+                    
+                    self.norm_input = (input - &self.mean) / &self.std;
+                } else {
+                    return Err(TurkError::ModelError("Varyans hesaplanamadı".to_string()));
+                }
+            } else {
+                return Err(TurkError::ModelError("Ortalama hesaplanamadı".to_string()));
+            }
         } else {
             self.norm_input = (input - &self.running_mean) / (&self.running_var + self.epsilon).mapv(f32::sqrt);
         }
@@ -826,7 +836,7 @@ impl fmt::Display for BatchNorm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array;
+    use ndarray::Axis;
 
     #[test]
     fn test_dense_layer() {
@@ -884,13 +894,15 @@ mod tests {
         let output_train = batch_norm.forward(&input).unwrap();
         assert_eq!(output_train.shape(), &[5, 10]);
         
-        // Calculate mean and variance of output
-        let output_mean = output_train.mean_axis(Axis(0));
-        let output_var = output_train.var_axis(Axis(0), 0.0);
+        // Test that output is normalized (test one by one to avoid problem with array types)
+        let output_mean = output_train.mean_axis(Axis(0)).expect("Mean hesaplanamadı");
+        for i in 0..output_mean.shape()[0] {
+            assert!(output_mean[i].abs() < 1e-5);
+        }
         
-        // Mean should be close to 0 and variance close to 1
-        for mean in output_mean.iter() {
-            assert!(mean.abs() < 1e-5);
+        let output_var = output_train.var_axis(Axis(0), 0.0);
+        for i in 0..output_var.shape()[0] {
+            assert!((output_var[i] - 1.0).abs() < 1e-4);
         }
         
         // Forward pass (inference mode)

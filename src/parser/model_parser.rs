@@ -121,22 +121,46 @@ impl ModelParser {
                         
                         // Virgülden sonra aktivasyon fonksiyonu varsa
                         if self.check(&Token::Virgul) {
-                             self.ilerle(); // Virgülü tüket
-                            // Aktivasyon tipini al
-                            if let Some((token, _)) = self.simdiki() {
-                                match token {
-                                    Token::Sigmoid => aktivasyon = AktivasyonFonksiyonu::Sigmoid,
-                                    Token::Relu => aktivasyon = AktivasyonFonksiyonu::Relu,
-                                    Token::Tanh => aktivasyon = AktivasyonFonksiyonu::Tanh,
-                                    Token::Softmax => aktivasyon = AktivasyonFonksiyonu::Softmax,
-                                     _ => return Err(ParseError::unexpected_token(
-                                        token.clone(), 
-                                        "geçerli bir aktivasyon fonksiyonu (Relu, Sigmoid vb.)".to_string()
-                                    )),
+                            self.ilerle(); // Virgülü tüket
+                            
+                            // "Aktivasyon = Relu" formatını kontrol et
+                            if self.check(&Token::Aktivasyon) {
+                                self.ilerle(); // "Aktivasyon" token'ını tüket
+                                self.expect(Token::Esittir)?; // "=" işaretini tüket
+                                
+                                // Aktivasyon tipini al
+                                if let Some((token, _)) = self.simdiki() {
+                                    match token {
+                                        Token::Sigmoid => aktivasyon = AktivasyonFonksiyonu::Sigmoid,
+                                        Token::Relu => aktivasyon = AktivasyonFonksiyonu::Relu,
+                                        Token::Tanh => aktivasyon = AktivasyonFonksiyonu::Tanh,
+                                        Token::Softmax => aktivasyon = AktivasyonFonksiyonu::Softmax,
+                                        _ => return Err(ParseError::unexpected_token(
+                                            token.clone(), 
+                                            "geçerli bir aktivasyon fonksiyonu (Relu, Sigmoid vb.)".to_string()
+                                        )),
+                                    }
+                                    self.ilerle(); // Aktivasyon token'ını tüket
+                                } else {
+                                    return Err(ParseError::UnexpectedEOF);
                                 }
-                                self.ilerle(); // Aktivasyon token'ını tüket
                             } else {
-                                return Err(ParseError::UnexpectedEOF);
+                                // Doğrudan aktivasyon fonksiyonu geldiyse (eski format)
+                                if let Some((token, _)) = self.simdiki() {
+                                    match token {
+                                        Token::Sigmoid => aktivasyon = AktivasyonFonksiyonu::Sigmoid,
+                                        Token::Relu => aktivasyon = AktivasyonFonksiyonu::Relu,
+                                        Token::Tanh => aktivasyon = AktivasyonFonksiyonu::Tanh,
+                                        Token::Softmax => aktivasyon = AktivasyonFonksiyonu::Softmax,
+                                        _ => return Err(ParseError::unexpected_token(
+                                            token.clone(), 
+                                            "geçerli bir aktivasyon fonksiyonu (Relu, Sigmoid vb.)".to_string()
+                                        )),
+                                    }
+                                    self.ilerle(); // Aktivasyon token'ını tüket
+                                } else {
+                                    return Err(ParseError::UnexpectedEOF);
+                                }
                             }
                         }
                         
@@ -154,12 +178,32 @@ impl ModelParser {
                         self.ilerle(); // "OgrenmeOrani" tüket
                         self.expect(Token::Esittir)?;
                         
+                        // Virgüllerle ondalık sayı desteği
                         if let Some((Token::Sayi(oran), _)) = self.simdiki() {
-                             let oran_val = *oran as f64; // Dereference ve cast
+                            let oran_val = *oran as f64; // Dereference ve cast
                             self.ilerle();
-                            optimizer = Some(OptimizerTipi::SGD(oran_val));
+                            
+                            // Virgül ve ikinci sayı varsa (0,1 formatını desteklemek için)
+                            if self.check(&Token::Virgul) {
+                                self.ilerle(); // Virgülü tüket
+                                
+                                if let Some((Token::Sayi(ondalik), _)) = self.simdiki() {
+                                    let ondalik_str = format!("0.{}", ondalik);
+                                    let ondalik_val = ondalik_str.parse::<f64>().unwrap_or(0.0);
+                                    self.ilerle();
+                                    
+                                    optimizer = Some(OptimizerTipi::SGD(oran_val + ondalik_val));
+                                } else {
+                                    return Err(ParseError::unexpected_token(
+                                        self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                                        "virgülden sonra ondalık kısım".to_string()
+                                    ));
+                                }
+                            } else {
+                                optimizer = Some(OptimizerTipi::SGD(oran_val));
+                            }
                         } else {
-                             return Err(ParseError::unexpected_token(
+                            return Err(ParseError::unexpected_token(
                                 self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
                                 "öğrenme oranı (sayı)".to_string()
                             ));
@@ -169,19 +213,39 @@ impl ModelParser {
                         self.ilerle(); // "Kayip" tüket
                         self.expect(Token::Esittir)?;
                         
-                        if let Some((Token::Degisken(tip), _)) = self.simdiki() {
-                            let tip_str = tip.clone();
-                            self.ilerle();
-                            match tip_str.as_str() {
-                                "CrossEntropy" => kayip_fonksiyonu = Some(KayipFonksiyonu::CrossEntropy),
-                                "MSE" => kayip_fonksiyonu = Some(KayipFonksiyonu::MSE),
-                                "BinaryCrossEntropy" => kayip_fonksiyonu = Some(KayipFonksiyonu::BinaryCrossEntropy),
-                                 _ => return Err(ParseError::syntax_error(
-                                    format!("Geçersiz kayıp fonksiyonu: {}", tip_str)
+                        if let Some((token, _)) = self.simdiki() {
+                            match token {
+                                Token::Degisken(tip) => {
+                                    let tip_str = tip.clone();
+                                    self.ilerle();
+                                    match tip_str.as_str() {
+                                        "CrossEntropy" => kayip_fonksiyonu = Some(KayipFonksiyonu::CrossEntropy),
+                                        "MSE" => kayip_fonksiyonu = Some(KayipFonksiyonu::MSE),
+                                        "BinaryCrossEntropy" => kayip_fonksiyonu = Some(KayipFonksiyonu::BinaryCrossEntropy),
+                                        _ => return Err(ParseError::syntax_error(
+                                            format!("Geçersiz kayıp fonksiyonu: {}", tip_str)
+                                        )),
+                                    }
+                                },
+                                Token::Metin(tip) => {
+                                    let tip_str = tip.clone();
+                                    self.ilerle();
+                                    match tip_str.as_str() {
+                                        "cross_entropy" => kayip_fonksiyonu = Some(KayipFonksiyonu::CrossEntropy),
+                                        "mse" => kayip_fonksiyonu = Some(KayipFonksiyonu::MSE),
+                                        "binary_cross_entropy" => kayip_fonksiyonu = Some(KayipFonksiyonu::BinaryCrossEntropy),
+                                        _ => return Err(ParseError::syntax_error(
+                                            format!("Geçersiz kayıp fonksiyonu: {}", tip_str)
+                                        )),
+                                    }
+                                },
+                                _ => return Err(ParseError::unexpected_token(
+                                    token.clone(),
+                                    "kayıp fonksiyonu ismi (CrossEntropy, MSE vb.) veya \"cross_entropy\" gibi bir metin".to_string()
                                 )),
                             }
                         } else {
-                             return Err(ParseError::unexpected_token(
+                            return Err(ParseError::unexpected_token(
                                 self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
                                 "kayıp fonksiyonu ismi (CrossEntropy, MSE vb.)".to_string()
                             ));
@@ -266,10 +330,18 @@ impl ModelParser {
         
         self.expect(Token::Esittir)?;
         
-        // ExprParser'dan ifadeyi alırken hata kontrolü yap
+        // ExprParser'ı doğru konuma getirelim ve manuel olarak dizi ifadesini parse edelim
+        self.expr_parser = ExprParser::new(self.tokens.clone());
+        self.expr_parser.set_current(self.current);
+        
+        // Dizi ifadesini parse et
         let deger = match self.expr_parser.ifade_parse() {
-            Some(ifade) => ifade,
-             None => return Err(ParseError::syntax_error("Veri tanımı için geçersiz ifade.".to_string())),
+            Some(ifade) => {
+                // ExprParser'ın ilerlediği konumu ModelParser'a aktar
+                self.current = self.expr_parser.get_current();
+                ifade
+            },
+            None => return Err(ParseError::syntax_error("Veri tanımı için geçersiz ifade.".to_string())),
         };
         
         Ok(Some(Deyim::VeriTanimi {
@@ -283,6 +355,7 @@ impl ModelParser {
         
         self.expect(Token::AcParantez)?;
         
+        // Model adını al
         let model = if let Some((Token::Degisken(model), _)) = self.simdiki() {
             let model_str = model.clone();
             self.ilerle();
@@ -294,53 +367,43 @@ impl ModelParser {
             ));
         };
         
-        let mut x_train = None;
-        let mut y_train = None;
+        // Virgül olmalı
+        self.expect(Token::Virgul)?;
         
-        // Parametreleri oku (x=..., y=...)
-        while !self.check(&Token::KapaParantez) {
-             // Virgülü atla (ilk parametreden önce veya parametreler arasında)
-            if self.check(&Token::Virgul) {
-                self.ilerle();
-            }
-            
-            if let Some((Token::Degisken(param_isim), _)) = self.simdiki() {
-                let param_isim_str = param_isim.clone();
-                self.ilerle();
-                
-                self.expect(Token::Esittir)?;
-                
-                let deger = match self.expr_parser.ifade_parse() {
-                    Some(ifade) => ifade,
-                    None => return Err(ParseError::syntax_error(
-                        format!("Eğitim parametresi '{}' için geçersiz ifade.", param_isim_str)
-                    )),
-                };
-                
-                match param_isim_str.as_str() {
-                    "x" => x_train = Some(deger),
-                    "y" => y_train = Some(deger),
-                     _ => return Err(ParseError::invalid_arguments(
-                        format!("Bilinmeyen eğitim parametresi: {}", param_isim_str)
-                    )),
-                }
-            } else {
-                 return Err(ParseError::unexpected_token(
-                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
-                    "eğitim parametresi (x veya y)".to_string()
-                ));
-            }
-        }
+        // Eğitim verisini al
+        let x_train_var = if let Some((Token::Degisken(var_name), _)) = self.simdiki() {
+            let var_name_str = var_name.clone();
+            self.ilerle();
+            self.expr_parser.degisken_ifade(var_name_str)
+        } else {
+            return Err(ParseError::unexpected_token(
+                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                "eğitim verisi değişkeni".to_string()
+            ));
+        };
         
+        // Virgül olmalı
+        self.expect(Token::Virgul)?;
+        
+        // Etiket verisini al
+        let y_train_var = if let Some((Token::Degisken(var_name), _)) = self.simdiki() {
+            let var_name_str = var_name.clone();
+            self.ilerle();
+            self.expr_parser.degisken_ifade(var_name_str)
+        } else {
+            return Err(ParseError::unexpected_token(
+                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                "etiket verisi değişkeni".to_string()
+            ));
+        };
+        
+        // Kapanan parantez
         self.expect(Token::KapaParantez)?;
-        
-        let x_train = x_train.ok_or_else(|| ParseError::MissingToken("'x' eğitim verisi eksik".to_string()))?;
-        let y_train = y_train.ok_or_else(|| ParseError::MissingToken("'y' etiket verisi eksik".to_string()))?;
         
         Ok(Some(Deyim::Egitim {
             model,
-            x_train: Box::new(x_train),
-            y_train: Box::new(y_train),
+            x_train: Box::new(x_train_var),
+            y_train: Box::new(y_train_var),
         }))
     }
     
@@ -349,6 +412,7 @@ impl ModelParser {
         
         self.expect(Token::AcParantez)?;
         
+        // Model adını al
         let model = if let Some((Token::Degisken(model), _)) = self.simdiki() {
             let model_str = model.clone();
             self.ilerle();
@@ -360,49 +424,27 @@ impl ModelParser {
             ));
         };
         
-        let mut x_test = None;
+        // Virgül olmalı
+        self.expect(Token::Virgul)?;
         
-        // Parametreleri oku (x=...)
-        while !self.check(&Token::KapaParantez) {
-             if self.check(&Token::Virgul) {
-                self.ilerle();
-            }
-            
-            if let Some((Token::Degisken(param_isim), _)) = self.simdiki() {
-                let param_isim_str = param_isim.clone();
-                self.ilerle();
-                
-                self.expect(Token::Esittir)?;
-                
-                let deger = match self.expr_parser.ifade_parse() {
-                    Some(ifade) => ifade,
-                     None => return Err(ParseError::syntax_error(
-                        format!("Tahmin parametresi '{}' için geçersiz ifade.", param_isim_str)
-                    )),
-                };
-                
-                if param_isim_str == "x" {
-                    x_test = Some(deger);
-                } else {
-                    return Err(ParseError::invalid_arguments(
-                        format!("Bilinmeyen tahmin parametresi: {}", param_isim_str)
-                    ));
-                }
-            } else {
-                return Err(ParseError::unexpected_token(
-                    self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
-                    "tahmin parametresi (x)".to_string()
-                ));
-            }
-        }
+        // Test verisini al
+        let test_var = if let Some((Token::Degisken(var_name), _)) = self.simdiki() {
+            let var_name_str = var_name.clone();
+            self.ilerle();
+            self.expr_parser.degisken_ifade(var_name_str)
+        } else {
+            return Err(ParseError::unexpected_token(
+                self.simdiki().map(|(t,_)| t.clone()).unwrap_or(Token::Illegal),
+                "test verisi değişkeni".to_string()
+            ));
+        };
         
+        // Kapanan parantez
         self.expect(Token::KapaParantez)?;
-        
-        let x_test = x_test.ok_or_else(|| ParseError::MissingToken("'x' test verisi eksik".to_string()))?;
         
         Ok(Some(Deyim::Tahmin {
             model,
-            girdi: x_test,
+            girdi: test_var,
         }))
     }
 }

@@ -1,397 +1,272 @@
-use ndarray::{Array2, Axis};
+use ndarray::Array2;
 use crate::error::{Result, TurkError};
-use serde::{Serialize, Deserialize};
 
-/// Performans metriği trait'i
+/// Metrik trait'i - tüm metrikler bu trait'i implemente etmelidir
 pub trait Metric: Send + Sync {
-    fn compute(&self, y_true: &Array2<f32>, y_pred: &Array2<f32>) -> Result<f32>;
-    fn name(&self) -> &'static str;
+    /// Metrik adını döndürür
+    fn name(&self) -> &str;
+    
+    /// Metrik değerini hesaplar
+    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32>;
 }
 
-/// Doğruluk (Accuracy) ölçümü
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Doğruluk (Accuracy) metriği
+#[derive(Debug, Default)]
 pub struct Accuracy;
 
+impl Accuracy {
+    /// Yeni bir doğruluk metriği oluşturur
+    pub fn new() -> Self {
+        Self
+    }
+}
+
 impl Metric for Accuracy {
-    fn compute(&self, y_true: &Array2<f32>, y_pred: &Array2<f32>) -> Result<f32> {
-        if y_true.shape() != y_pred.shape() {
+    fn name(&self) -> &str {
+        "accuracy"
+    }
+    
+    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
+        if y_pred.shape() != y_true.shape() {
             return Err(TurkError::ShapeMismatch(format!(
-                "Gerçek ve tahmin edilen çıktıların şekilleri uyuşmuyor: {:?} vs {:?}",
-                y_true.shape(), y_pred.shape()
+                "Doğruluk hesaplaması için şekiller uyuşmuyor: {:?} != {:?}",
+                y_pred.shape(),
+                y_true.shape()
             )));
         }
         
-        let true_classes: Vec<usize> = y_true
-            .axis_iter(Axis(1))
-            .map(|row| row.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0)
-            .collect();
+        let mut correct = 0;
+        let mut total = 0;
+        
+        for ((_pred, _true_), (pred_row, true_row)) in y_pred.iter().zip(y_true.iter())
+            .zip(y_pred.rows().into_iter().zip(y_true.rows().into_iter())) {
+            let pred_class = pred_row.iter()
+                .position(|&x| x == *pred_row.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap())
+                .unwrap();
+            let true_class = true_row.iter()
+                .position(|&x| x == *true_row.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap())
+                .unwrap();
             
-        let pred_classes: Vec<usize> = y_pred
-            .axis_iter(Axis(1))
-            .map(|row| row.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0)
-            .collect();
-            
-        let correct = true_classes.iter().zip(pred_classes.iter()).filter(|&(a, b)| a == b).count();
-        let total = y_true.shape()[0];
+            if pred_class == true_class {
+                correct += 1;
+            }
+            total += 1;
+        }
         
         Ok(correct as f32 / total as f32)
     }
-    
-    fn name(&self) -> &'static str {
-        "accuracy"
-    }
 }
 
-/// Hassasiyet (Precision) ölçümü
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Hassasiyet (Precision) metriği
+#[derive(Debug, Default)]
 pub struct Precision {
-    pub average: String, // 'micro', 'macro', 'weighted', veya 'None' (belirli bir sınıf için)
-    pub class_idx: Option<usize>, // 'None' olmadığında, belirli bir sınıfın indeksi
+    threshold: f32,
 }
 
-impl Default for Precision {
-    fn default() -> Self {
-        Self {
-            average: "macro".to_string(),
-            class_idx: None,
-        }
+impl Precision {
+    /// Yeni bir hassasiyet metriği oluşturur
+    pub fn new(threshold: f32) -> Self {
+        Self { threshold }
     }
 }
 
 impl Metric for Precision {
-    fn compute(&self, y_true: &Array2<f32>, y_pred: &Array2<f32>) -> Result<f32> {
-        if y_true.shape() != y_pred.shape() {
+    fn name(&self) -> &str {
+        "precision"
+    }
+    
+    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
+        if y_pred.shape() != y_true.shape() {
             return Err(TurkError::ShapeMismatch(format!(
-                "Gerçek ve tahmin edilen çıktıların şekilleri uyuşmuyor: {:?} vs {:?}",
-                y_true.shape(), y_pred.shape()
+                "Hassasiyet hesaplaması için şekiller uyuşmuyor: {:?} != {:?}",
+                y_pred.shape(),
+                y_true.shape()
             )));
         }
         
-        let n_classes = y_true.shape()[1];
-        let mut class_precision = Vec::new();
+        let mut true_positives = 0;
+        let mut false_positives = 0;
         
-        let true_classes: Vec<usize> = y_true
-            .axis_iter(Axis(1))
-            .map(|row| row.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0)
-            .collect();
-            
-        let pred_classes: Vec<usize> = y_pred
-            .axis_iter(Axis(1))
-            .map(|row| row.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0)
-            .collect();
-            
-        // Belirli bir sınıf için hassasiyet hesaplama
-        if let Some(idx) = self.class_idx {
-            if idx >= n_classes {
-                return Err(TurkError::InvalidInput(format!(
-                    "Geçersiz sınıf indeksi: {}. Toplam sınıf sayısı: {}", idx, n_classes
-                )));
-            }
-            
-            let true_positives = true_classes.iter().zip(pred_classes.iter())
-                .filter(|&(t, p)| *t == idx && *p == idx).count() as f32;
-                
-            let predicted_positives = pred_classes.iter().filter(|&&p| p == idx).count() as f32;
-            
-            return if predicted_positives > 0.0 {
-                Ok(true_positives / predicted_positives)
-            } else {
-                Ok(0.0)
-            };
-        }
-        
-        // Tüm sınıflar için hassasiyet hesaplama
-        for i in 0..n_classes {
-            let true_positives = true_classes.iter().zip(pred_classes.iter())
-                .filter(|&(t, p)| *t == i && *p == i).count() as f32;
-                
-            let predicted_positives = pred_classes.iter().filter(|&&p| p == i).count() as f32;
-            
-            let precision = if predicted_positives > 0.0 {
-                true_positives / predicted_positives
-            } else {
-                0.0
-            };
-            
-            class_precision.push(precision);
-        }
-        
-        // Ortalama hesaplama
-        match self.average.as_str() {
-            "micro" => {
-                let total_true_positives: f32 = (0..n_classes).map(|i| {
-                    true_classes.iter().zip(pred_classes.iter())
-                        .filter(|&(t, p)| *t == i && *p == i).count() as f32
-                }).sum();
-                
-                let total_predicted_positives: f32 = pred_classes.len() as f32;
-                
-                if total_predicted_positives > 0.0 {
-                    Ok(total_true_positives / total_predicted_positives)
+        for (pred, true_) in y_pred.iter().zip(y_true.iter()) {
+            if *pred >= self.threshold {
+                if *true_ >= self.threshold {
+                    true_positives += 1;
                 } else {
-                    Ok(0.0)
+                    false_positives += 1;
                 }
-            },
-            "macro" => {
-                let avg_precision: f32 = class_precision.iter().sum::<f32>() / n_classes as f32;
-                Ok(avg_precision)
-            },
-            "weighted" => {
-                let class_counts: Vec<f32> = (0..n_classes).map(|i| {
-                    true_classes.iter().filter(|&&t| t == i).count() as f32
-                }).collect();
-                
-                let total_samples: f32 = class_counts.iter().sum();
-                
-                let weighted_precision: f32 = class_precision.iter().enumerate()
-                    .map(|(i, &p)| p * (class_counts[i] / total_samples))
-                    .sum();
-                    
-                Ok(weighted_precision)
-            },
-            _ => Err(TurkError::InvalidInput(format!(
-                "Geçersiz ortalama tipi: {}. 'micro', 'macro' veya 'weighted' olmalı.", self.average
-            )))
+            }
         }
-    }
-    
-    fn name(&self) -> &'static str {
-        "precision"
+        
+        let precision = if true_positives + false_positives > 0 {
+            true_positives as f32 / (true_positives + false_positives) as f32
+        } else {
+            0.0
+        };
+        
+        Ok(precision)
     }
 }
 
-/// Duyarlılık (Recall) ölçümü
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Duyarlılık (Recall) metriği
+#[derive(Debug, Default)]
 pub struct Recall {
-    pub average: String, // 'micro', 'macro', 'weighted', veya 'None' (belirli bir sınıf için)
-    pub class_idx: Option<usize>, // 'None' olmadığında, belirli bir sınıfın indeksi
+    threshold: f32,
 }
 
-impl Default for Recall {
-    fn default() -> Self {
-        Self {
-            average: "macro".to_string(),
-            class_idx: None,
-        }
+impl Recall {
+    /// Yeni bir duyarlılık metriği oluşturur
+    pub fn new(threshold: f32) -> Self {
+        Self { threshold }
     }
 }
 
 impl Metric for Recall {
-    fn compute(&self, y_true: &Array2<f32>, y_pred: &Array2<f32>) -> Result<f32> {
-        if y_true.shape() != y_pred.shape() {
+    fn name(&self) -> &str {
+        "recall"
+    }
+    
+    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
+        if y_pred.shape() != y_true.shape() {
             return Err(TurkError::ShapeMismatch(format!(
-                "Gerçek ve tahmin edilen çıktıların şekilleri uyuşmuyor: {:?} vs {:?}",
-                y_true.shape(), y_pred.shape()
+                "Duyarlılık hesaplaması için şekiller uyuşmuyor: {:?} != {:?}",
+                y_pred.shape(),
+                y_true.shape()
             )));
         }
         
-        let n_classes = y_true.shape()[1];
-        let mut class_recall = Vec::new();
+        let mut true_positives = 0;
+        let mut false_negatives = 0;
         
-        let true_classes: Vec<usize> = y_true
-            .axis_iter(Axis(1))
-            .map(|row| row.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0)
-            .collect();
-            
-        let pred_classes: Vec<usize> = y_pred
-            .axis_iter(Axis(1))
-            .map(|row| row.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0)
-            .collect();
-            
-        // Belirli bir sınıf için duyarlılık hesaplama
-        if let Some(idx) = self.class_idx {
-            if idx >= n_classes {
-                return Err(TurkError::InvalidInput(format!(
-                    "Geçersiz sınıf indeksi: {}. Toplam sınıf sayısı: {}", idx, n_classes
-                )));
-            }
-            
-            let true_positives = true_classes.iter().zip(pred_classes.iter())
-                .filter(|&(t, p)| *t == idx && *p == idx).count() as f32;
-                
-            let actual_positives = true_classes.iter().filter(|&&t| t == idx).count() as f32;
-            
-            return if actual_positives > 0.0 {
-                Ok(true_positives / actual_positives)
-            } else {
-                Ok(0.0)
-            };
-        }
-        
-        // Tüm sınıflar için duyarlılık hesaplama
-        for i in 0..n_classes {
-            let true_positives = true_classes.iter().zip(pred_classes.iter())
-                .filter(|&(t, p)| *t == i && *p == i).count() as f32;
-                
-            let actual_positives = true_classes.iter().filter(|&&t| t == i).count() as f32;
-            
-            let recall = if actual_positives > 0.0 {
-                true_positives / actual_positives
-            } else {
-                0.0
-            };
-            
-            class_recall.push(recall);
-        }
-        
-        // Ortalama hesaplama
-        match self.average.as_str() {
-            "micro" => {
-                let total_true_positives: f32 = (0..n_classes).map(|i| {
-                    true_classes.iter().zip(pred_classes.iter())
-                        .filter(|&(t, p)| *t == i && *p == i).count() as f32
-                }).sum();
-                
-                let total_actual_positives: f32 = true_classes.len() as f32;
-                
-                if total_actual_positives > 0.0 {
-                    Ok(total_true_positives / total_actual_positives)
+        for (pred, true_) in y_pred.iter().zip(y_true.iter()) {
+            if *true_ >= self.threshold {
+                if *pred >= self.threshold {
+                    true_positives += 1;
                 } else {
-                    Ok(0.0)
+                    false_negatives += 1;
                 }
-            },
-            "macro" => {
-                let avg_recall: f32 = class_recall.iter().sum::<f32>() / n_classes as f32;
-                Ok(avg_recall)
-            },
-            "weighted" => {
-                let class_counts: Vec<f32> = (0..n_classes).map(|i| {
-                    true_classes.iter().filter(|&&t| t == i).count() as f32
-                }).collect();
-                
-                let total_samples: f32 = class_counts.iter().sum();
-                
-                let weighted_recall: f32 = class_recall.iter().enumerate()
-                    .map(|(i, &r)| r * (class_counts[i] / total_samples))
-                    .sum();
-                    
-                Ok(weighted_recall)
-            },
-            _ => Err(TurkError::InvalidInput(format!(
-                "Geçersiz ortalama tipi: {}. 'micro', 'macro' veya 'weighted' olmalı.", self.average
-            )))
+            }
         }
-    }
-    
-    fn name(&self) -> &'static str {
-        "recall"
+        
+        let recall = if true_positives + false_negatives > 0 {
+            true_positives as f32 / (true_positives + false_negatives) as f32
+        } else {
+            0.0
+        };
+        
+        Ok(recall)
     }
 }
 
-/// F1 Skoru ölçümü
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// F1-Score metriği
+#[derive(Debug, Default)]
 pub struct F1Score {
-    pub average: String, // 'micro', 'macro', 'weighted', veya 'None' (belirli bir sınıf için)
-    pub class_idx: Option<usize>, // 'None' olmadığında, belirli bir sınıfın indeksi
+    threshold: f32,
 }
 
-impl Default for F1Score {
-    fn default() -> Self {
-        Self {
-            average: "macro".to_string(),
-            class_idx: None,
-        }
+impl F1Score {
+    /// Yeni bir F1-Score metriği oluşturur
+    pub fn new(threshold: f32) -> Self {
+        Self { threshold }
     }
 }
 
 impl Metric for F1Score {
-    fn compute(&self, y_true: &Array2<f32>, y_pred: &Array2<f32>) -> Result<f32> {
-        let precision = Precision {
-            average: self.average.clone(),
-            class_idx: self.class_idx,
-        };
-        
-        let recall = Recall {
-            average: self.average.clone(),
-            class_idx: self.class_idx,
-        };
-        
-        let p = precision.compute(y_true, y_pred)?;
-        let r = recall.compute(y_true, y_pred)?;
-        
-        if p + r > 0.0 {
-            Ok(2.0 * p * r / (p + r))
-        } else {
-            Ok(0.0)
-        }
+    fn name(&self) -> &str {
+        "f1_score"
     }
     
-    fn name(&self) -> &'static str {
-        "f1_score"
+    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
+        let precision = Precision::new(self.threshold).compute(y_pred, y_true)?;
+        let recall = Recall::new(self.threshold).compute(y_pred, y_true)?;
+        
+        let f1_score = if precision + recall > 0.0 {
+            2.0 * (precision * recall) / (precision + recall)
+        } else {
+            0.0
+        };
+        
+        Ok(f1_score)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array;
-    
+    use ndarray::arr2;
+
     #[test]
-    fn test_accuracy_perfect() {
-        let y_true = Array::from_shape_vec((3, 3), vec![
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0,
-        ]).unwrap();
+    fn test_accuracy() {
+        let y_pred = arr2(&[
+            [0.7, 0.2, 0.1],
+            [0.1, 0.8, 0.1],
+            [0.2, 0.3, 0.5],
+        ]);
         
-        let y_pred = Array::from_shape_vec((3, 3), vec![
-            0.9, 0.05, 0.05,
-            0.05, 0.9, 0.05,
-            0.05, 0.05, 0.9,
-        ]).unwrap();
+        let y_true = arr2(&[
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]);
         
-        let metric = Accuracy;
-        let result = metric.compute(&y_true, &y_pred).unwrap();
+        let accuracy = Accuracy::new();
+        let result = accuracy.compute(&y_pred, &y_true).unwrap();
         assert_eq!(result, 1.0);
     }
-    
+
     #[test]
-    fn test_accuracy_imperfect() {
-        let y_true = Array::from_shape_vec((3, 3), vec![
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0,
-        ]).unwrap();
+    fn test_precision() {
+        let y_pred = arr2(&[
+            [0.8, 0.2],
+            [0.3, 0.7],
+            [0.4, 0.6],
+        ]);
         
-        let y_pred = Array::from_shape_vec((3, 3), vec![
-            0.9, 0.05, 0.05,
-            0.7, 0.2, 0.1,
-            0.05, 0.05, 0.9,
-        ]).unwrap();
+        let y_true = arr2(&[
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+        ]);
         
-        let metric = Accuracy;
-        let result = metric.compute(&y_true, &y_pred).unwrap();
-        assert_eq!(result, 2.0 / 3.0);
+        let precision = Precision::new(0.5);
+        let result = precision.compute(&y_pred, &y_true).unwrap();
+        assert_eq!(result, 0.5);
     }
-    
+
     #[test]
-    fn test_precision_recall_f1() {
-        let y_true = Array::from_shape_vec((5, 3), vec![
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0,
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-        ]).unwrap();
+    fn test_recall() {
+        let y_pred = arr2(&[
+            [0.8, 0.2],
+            [0.3, 0.7],
+            [0.4, 0.6],
+        ]);
         
-        let y_pred = Array::from_shape_vec((5, 3), vec![
-            0.9, 0.05, 0.05,
-            0.7, 0.2, 0.1,
-            0.05, 0.05, 0.9,
-            0.6, 0.3, 0.1,
-            0.1, 0.6, 0.3,
-        ]).unwrap();
+        let y_true = arr2(&[
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+        ]);
         
-        let precision = Precision::default();
-        let recall = Recall::default();
-        let f1 = F1Score::default();
+        let recall = Recall::new(0.5);
+        let result = recall.compute(&y_pred, &y_true).unwrap();
+        assert_eq!(result, 0.5);
+    }
+
+    #[test]
+    fn test_f1_score() {
+        let y_pred = arr2(&[
+            [0.8, 0.2],
+            [0.3, 0.7],
+            [0.4, 0.6],
+        ]);
         
-        let p = precision.compute(&y_true, &y_pred).unwrap();
-        let r = recall.compute(&y_true, &y_pred).unwrap();
-        let f = f1.compute(&y_true, &y_pred).unwrap();
+        let y_true = arr2(&[
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+        ]);
         
-        assert!(p >= 0.0 && p <= 1.0);
-        assert!(r >= 0.0 && r <= 1.0);
-        assert!(f >= 0.0 && f <= 1.0);
+        let f1_score = F1Score::new(0.5);
+        let result = f1_score.compute(&y_pred, &y_true).unwrap();
+        assert_eq!(result, 0.5);
     }
 } 

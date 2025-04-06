@@ -23,6 +23,18 @@ impl ExprParser {
         self.tokens.get(self.current - 1)
     }
     
+    pub fn get_current(&self) -> usize {
+        self.current
+    }
+    
+    pub fn set_current(&mut self, position: usize) {
+        self.current = position;
+    }
+    
+    pub fn degisken_ifade(&self, isim: String) -> Ifade {
+        Ifade::Degisken(isim)
+    }
+    
     pub fn ifade_parse(&mut self) -> Option<Ifade> {
         self.toplama_parse()
     }

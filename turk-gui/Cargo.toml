@@ -1,0 +1,19 @@
+[package]
+name = "turk-gui"
+version = "0.1.0"
+edition = "2021"
+authors = ["TURK Dil Topluluğu <TurkDilModeli@gmail.com>"]
+description = "TURK Programlama Dili için grafik kullanıcı arayüzü"
+repository = "https://github.com/NeonChipher/turk-ml-framework"
+license = "MIT"
+
+[dependencies]
+eframe = "0.25.0"
+egui = "0.25.0"
+egui_extras = "0.25.0"
+egui_plot = "0.25.0"
+poll-promise = "0.3.0"
+rfd = "0.12.0"
+turk-lang = { path = "../" }
+logos = "0.13.0"
+env_logger = "0.10.0"

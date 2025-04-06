@@ -1,15 +1,15 @@
 use anyhow::Result;
 use mnist::{MnistBuilder, Mnist};
-use ndarray::{Array, Array2, Axis};
+use ndarray::{Array2, s};
 use std::time::Instant;
-use indicatif::{ProgressBar, ProgressStyle};
 use colored::*;
 use turk_lang::{
     Sequential, Dense, Dropout, BatchNorm, Activation, 
-    SGD, Adam, AdamW, RMSProp, 
-    Layer, Optimizer, Loss, MSE, CrossEntropy,
-    metrics::Accuracy
+    Adam,
+    metrics::Accuracy,
 };
+use env_logger;
+use log::info;
 
 fn main() -> Result<()> {
     // Log seviyesini ayarla
@@ -78,37 +78,21 @@ fn main() -> Result<()> {
     // Model özetini göster
     println!("{}", model.summary());
     
-    // Modeli eğit
-    println!("\n{}", "Model eğitimi başlıyor...".green());
-    let start = Instant::now();
-    
     // Hiperparametreler
-    let epochs = 10;
+    let epochs = 5;
     let batch_size = 32;
     
-    // İlerleme çubuğu
-    let pb = ProgressBar::new((epochs * (train_data.shape()[0] / batch_size)) as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} batches ({eta})")
-        .unwrap()
-        .progress_chars("#>-"));
+    // Modeli eğit
+    info!("Model eğitimi başlatılıyor...");
+    let history = model.fit(
+        &train_data, 
+        &train_labels,
+        epochs, 
+        batch_size,
+        Some((&val_data, &val_labels))
+    ).unwrap();
     
-    // Eğitim geri çağırma fonksiyonu
-    let progress_callback = move |_epoch: usize, batch: usize, _loss: f32| {
-        pb.inc(1);
-        if batch % 100 == 0 {
-            pb.println(format!("Epoch {}, Batch {}, Loss: {:.4}", _epoch + 1, batch + 1, _loss));
-        }
-    };
-    
-    let history = model.fit_with_callback(
-        &train_data, &train_labels, 
-        epochs, batch_size, 
-        Some((&val_data, &val_labels)),
-        Some(&progress_callback)
-    )?;
-    
-    pb.finish_with_message("Eğitim tamamlandı!");
+    info!("Eğitim tamamlandı!");
     
     println!("Eğitim süresi: {:.2}s", start.elapsed().as_secs_f32());
     
@@ -128,7 +112,7 @@ fn main() -> Result<()> {
     let start = Instant::now();
     
     // Accuracy metriki oluştur
-    let accuracy = Accuracy::new(0.5);
+    let accuracy = Accuracy::new();
     
     // Değerlendirme
     let metrics = model.evaluate(&val_data, &val_labels, &[&accuracy])?;
@@ -183,21 +167,11 @@ fn flatten_images(images: &ndarray::Array3<f32>) -> Array2<f32> {
     let n_samples = images.shape()[0];
     let mut flattened = Array2::<f32>::zeros((n_samples, 784));
     
-    // Rayon ile paralel işlem
-    use rayon::prelude::*;
-    
-    (0..n_samples).into_par_iter().for_each(|i| {
+    // Tek thread kullanarak güvenli bir şekilde işlem yapalım
+    for i in 0..n_samples {
         let img_flat = images.slice(s![i, .., ..]).to_owned().into_shape((784,)).unwrap();
-        
-        // Güvenli bir şekilde thread-safe erişim olmadığı için 
-        // her thread kendi sonucunu döndürür ve sonra birleştiririz
-        let mut local_result = Array1::<f32>::zeros(784);
-        local_result.assign(&img_flat);
-        
-        // Bu eşzamanlı erişim sorunu yaratmaz
-        // çünkü her thread farklı bir satıra erişiyor
-        flattened.slice_mut(s![i, ..]).assign(&local_result);
-    });
+        flattened.slice_mut(s![i, ..]).assign(&img_flat);
+    }
     
     flattened
 }
@@ -235,4 +209,3 @@ fn get_argmax(array: &Array2<f32>) -> usize {
 
 // Yardımcı tiplemeler
 type Array1<T> = ndarray::Array1<T>;
-type Callback = dyn Fn(usize, usize, f32) -> ();

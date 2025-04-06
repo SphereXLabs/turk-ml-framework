@@ -1,17 +1,10 @@
-mod ast;
-mod parser;
-mod token;
-mod model;
-mod layer;
-mod optimizer;
-mod loss;
-
 use logos::Logos;
 use std::collections::HashMap;
-use crate::ast::{Deyim, Ifade, Program, DegerTipi};
-use crate::token::Token;
-use crate::model::Sequential;
-use crate::layer::{Activation, Dense};
+use turk_lang::ast::{Deyim, Ifade, Program, DegerTipi, AktivasyonFonksiyonu, OptimizerTipi};
+use turk_lang::token::Token;
+use turk_lang::model::Sequential;
+use turk_lang::layer::{Activation, Dense};
+use turk_lang::optimizer::{SGD, Adam, AdamW};
 use turk_lang::Result;
 use turk_lang::parser::model_parser::ModelParser;
 use turk_lang::TurkError;
@@ -41,9 +34,40 @@ impl Yorumlayici {
     fn deyim_yorumla(&mut self, deyim: &Deyim) -> Result<()> {
         match deyim {
             Deyim::DegiskenTanimi { isim, deger } => {
-                let deger = self.ifade_yorumla(deger)?;
+                let deger = self.ifade_yorumla(deger.clone())?;
+                let deger_klon = deger.clone();
                 self.degiskenler.insert(isim.clone(), deger);
-                eprintln!("Değişken tanımlandı: {} = {:?}", isim, deger);
+                eprintln!("Değişken tanımlandı: {} = {:?}", isim, deger_klon);
+                Ok(())
+            }
+            Deyim::VeriTanimi { isim, deger } => {
+                let deger = self.ifade_yorumla(*deger.clone())?;
+                let deger_klon = deger.clone();
+                self.degiskenler.insert(isim.clone(), deger);
+                eprintln!("Veri tanımlandı: {} = {:?}", isim, deger_klon);
+                Ok(())
+            }
+            Deyim::Egitim { model, x_train, y_train } => {
+                eprintln!("Model eğitimi başlatılıyor: {}", model);
+                
+                // Önce verileri hazırlayalım
+                let x_train_data = self.ifade_yorumla(*x_train.clone())?.to_array()?;
+                let y_train_data = self.ifade_yorumla(*y_train.clone())?.to_array()?;
+                
+                // Sonra modeli alalım
+                let model_ref = self.modeller.get_mut(model)
+                    .ok_or_else(|| TurkError::InvalidInput(
+                        format!("Model bulunamadı: {}", model)
+                    ))?;
+                
+                // Model derlenmediyse, varsayılan optimizer ile derle
+                if !model_ref.is_compiled() {
+                    model_ref.compile_boxed(Box::new(SGD::new(0.01)));
+                }
+                
+                // Sonra eğit
+                model_ref.fit(&x_train_data, &y_train_data, 10, 32, None)?;
+                eprintln!("Model eğitimi tamamlandı: {}", model);
                 Ok(())
             }
             Deyim::ModelTanimi { isim, ozellikler } => {
@@ -55,29 +79,38 @@ impl Yorumlayici {
                 // Katmanları oluştur
                 for (i, katman) in ozellikler.katmanlar.iter().enumerate() {
                     let input_size = if i == 0 {
-                        ozellikler.giris_boyutu
+                        katman.noron_sayisi as usize // İlk katmanın nöron sayısı giriş boyutu olur
                     } else {
-                        ozellikler.katmanlar[i-1].noron_sayisi
+                        ozellikler.katmanlar[i-1].noron_sayisi as usize
                     };
                     
-                    let output_size = if i == ozellikler.katmanlar.len() - 1 {
-                        ozellikler.cikis_boyutu
-                    } else {
-                        katman.noron_sayisi
-                    };
+                    let output_size = katman.noron_sayisi as usize;
                     
-                    let aktivasyon = match katman.aktivasyon.as_str() {
-                        "relu" => Activation::Relu,
-                        "sigmoid" => Activation::Sigmoid,
-                        "tanh" => Activation::Tanh,
-                        "softmax" => Activation::Softmax,
-                        _ => return Err(TurkError::InvalidInput(
-                            format!("Geçersiz aktivasyon fonksiyonu: {}", katman.aktivasyon)
-                        )),
+                    let aktivasyon = match katman.aktivasyon {
+                        AktivasyonFonksiyonu::Relu => Activation::Relu,
+                        AktivasyonFonksiyonu::Sigmoid => Activation::Sigmoid,
+                        AktivasyonFonksiyonu::Tanh => Activation::Tanh,
+                        AktivasyonFonksiyonu::Softmax => Activation::Softmax,
                     };
                     
                     model.add(Dense::new(input_size, output_size, aktivasyon));
                 }
+                
+                // Varsayılan yapılandırma değerlerini ayarla
+                let optimizer: Box<dyn turk_lang::optimizer::Optimizer> = match &ozellikler.optimizer {
+                    OptimizerTipi::SGD(lr) => {
+                        Box::new(SGD::new(*lr as f32))
+                    },
+                    OptimizerTipi::Adam(lr) => {
+                        Box::new(Adam::new(*lr as f32))
+                    },
+                    OptimizerTipi::AdamW { lr, weight_decay, beta1, beta2 } => {
+                        Box::new(AdamW::with_betas(*lr as f32, *weight_decay as f32, *beta1 as f32, *beta2 as f32, 1e-8))
+                    },
+                };
+                
+                // Modeli derle
+                model.compile_boxed(optimizer);
                 
                 self.modeller.insert(isim.clone(), model);
                 eprintln!("Model başarıyla tanımlandı: {}", isim);
@@ -86,40 +119,65 @@ impl Yorumlayici {
             Deyim::ModelEgitimi { model, egitim_verisi, etiketler } => {
                 eprintln!("Model eğitimi başlatılıyor: {}", model);
                 
+                // Önce verileri hazırlayalım
+                let x_train = self.ifade_yorumla(egitim_verisi.clone())?.to_array()?;
+                let y_train = self.ifade_yorumla(etiketler.clone())?.to_array()?;
+                
+                // Sonra modeli alalım
                 let model_ref = self.modeller.get_mut(model)
                     .ok_or_else(|| TurkError::InvalidInput(
                         format!("Model bulunamadı: {}", model)
                     ))?;
                 
-                let x_train = self.ifade_yorumla(egitim_verisi)?.to_array()?;
-                let y_train = self.ifade_yorumla(etiketler)?.to_array()?;
+                // Model derlenmediyse, varsayılan optimizer ile derle
+                if !model_ref.is_compiled() {
+                    model_ref.compile_boxed(Box::new(SGD::new(0.01)));
+                }
                 
-                model_ref.fit(&x_train, &y_train, 10, 32)?;
+                // Sonra eğit
+                model_ref.fit(&x_train, &y_train, 10, 32, None)?;
                 eprintln!("Model eğitimi tamamlandı: {}", model);
                 Ok(())
             }
             Deyim::Tahmin { model, girdi } => {
                 eprintln!("Tahmin yapılıyor: {}", model);
                 
-                let model_ref = self.modeller.get(model)
+                let mut x = self.ifade_yorumla(girdi.clone())?.to_array()?;
+                
+                // Eğer giriş tek boyutlu ise (n,) şeklinde, onu (1,n) şekline dönüştür
+                if x.shape()[0] == 1 && x.shape()[1] != 1 {
+                    // Zaten doğru şekilde (1,n)
+                } else if x.ndim() == 2 && x.shape()[1] == 1 {
+                    // (n,1) şeklinde, transpoze et
+                    x = x.t().to_owned();
+                } else {
+                    // Tek örnek olarak yeniden şekillendir
+                    let n_cols = x.len();
+                    x = x.into_shape((1, n_cols))
+                        .map_err(|e| TurkError::NdarrayError(e.into()))?;
+                }
+                
+                let model_ref = self.modeller.get_mut(model)
                     .ok_or_else(|| TurkError::InvalidInput(
                         format!("Model bulunamadı: {}", model)
                     ))?;
                 
-                let x = self.ifade_yorumla(girdi)?.to_array()?;
                 let tahmin = model_ref.forward(&x)?;
                 
                 eprintln!("Tahmin sonucu: {:?}", tahmin);
                 Ok(())
             }
             Deyim::Atama { isim, deger } => {
-                let deger = self.ifade_yorumla(deger)?;
-                self.degiskenler.insert(isim, deger.clone());
+                let deger = self.ifade_yorumla(deger.clone())?;
+                self.degiskenler.insert(isim.clone(), deger);
                 Ok(())
             }
-            Deyim::IfadeDeyimi(ifade) => self.ifade_yorumla(ifade),
+            Deyim::IfadeDeyimi(ifade) => {
+                let _ = self.ifade_yorumla(ifade.clone())?;
+                Ok(())
+            },
             Deyim::EgerDeyimi { kosul, govde, degilse_govde } => {
-                let kosul_degeri = self.ifade_yorumla(kosul)?;
+                let kosul_degeri = self.ifade_yorumla(kosul.clone())?;
                 match kosul_degeri {
                     DegerTipi::Mantiksal(true) => {
                         for deyim in govde.iter() {
@@ -135,7 +193,7 @@ impl Yorumlayici {
                         }
                         Ok(())
                     }
-                    _ => Err("Koşul ifadesi mantıksal bir değer döndürmeli".to_string())
+                    _ => Err(TurkError::InvalidInput("Koşul ifadesi mantıksal bir değer döndürmeli".to_string()))
                 }
             }
             Deyim::DonguDeyimi { kosul, govde } => {
@@ -147,7 +205,7 @@ impl Yorumlayici {
                 Ok(())
             }
             Deyim::IcinDongusu { degisken, dizi, govde } => {
-                let dizi_degeri = self.ifade_yorumla(dizi)?;
+                let dizi_degeri = self.ifade_yorumla(dizi.clone())?;
                 if let DegerTipi::Dizi(elemanlar) = dizi_degeri {
                     for eleman in elemanlar {
                         self.degiskenler.insert(degisken.clone(), eleman);
@@ -157,7 +215,7 @@ impl Yorumlayici {
                     }
                     Ok(())
                 } else {
-                    Err("Döngü için dizi bekleniyor".to_string())
+                    Err(TurkError::InvalidInput("Döngü için dizi bekleniyor".to_string()))
                 }
             }
             Deyim::KirDeyimi => Ok(()),
@@ -176,24 +234,26 @@ impl Yorumlayici {
                 Ok(())
             }
             Deyim::DondurDeyimi(deger) => {
-                self.ifade_yorumla(deger)
+                let _ = self.ifade_yorumla(deger.clone())?;
+                Ok(())
             }
             Deyim::Ifade(ifade) => {
                 println!("Ifade çalıştırıldı: {:?}", ifade);
-                self.ifade_yorumla(ifade)
+                let _ = self.ifade_yorumla(ifade.clone())?;
+                Ok(())
             }
         }
     }
 
     fn ifade_yorumla(&mut self, ifade: Ifade) -> Result<DegerTipi> {
         match ifade {
-            Ifade::Sayi(n) => Ok(DegerTipi::Sayi(n)),
+            Ifade::Sayi(n) => Ok(DegerTipi::Sayi(n as f32)),
             Ifade::Metin(s) => Ok(DegerTipi::Metin(s)),
             Ifade::Mantiksal(b) => Ok(DegerTipi::Mantiksal(b)),
             Ifade::Degisken(isim) => {
                 self.degiskenler.get(&isim)
                     .cloned()
-                    .ok_or_else(|| TurkError::UndefinedVariable(isim))
+                    .ok_or_else(|| TurkError::InvalidInput(format!("Tanımlanmamış değişken: {}", isim)))
             }
             Ifade::Dizi(elemanlar) => {
                 let mut deger_listesi = Vec::new();
@@ -221,9 +281,9 @@ impl Yorumlayici {
                             return Err(TurkError::InvalidInput("Egit fonksiyonu 3 argüman bekliyor".to_string()));
                         }
                         
-                        let model = self.ifade_yorumla(argumanlar[0].clone())?;
-                        let egitim_verisi = self.ifade_yorumla(argumanlar[1].clone())?;
-                        let etiketler = self.ifade_yorumla(argumanlar[2].clone())?;
+                        let _model = self.ifade_yorumla(argumanlar[0].clone())?;
+                        let _egitim_verisi = self.ifade_yorumla(argumanlar[1].clone())?;
+                        let _etiketler = self.ifade_yorumla(argumanlar[2].clone())?;
                         
                         Ok(DegerTipi::Birim)
                     }
@@ -240,10 +300,10 @@ fn main() -> Result<()> {
     info!("TURK Yorumlayıcı Başlatıldı");
     let kaynak = r#"
         Model sinir_agi {
-            Katman(784, Aktivasyon = Relu)
-            Katman(128, Aktivasyon = Relu)
-            Katman(10, Aktivasyon = Softmax)
-            OgrenmeOrani = 1
+            Katman(3, Aktivasyon = Relu)
+            Katman(5, Aktivasyon = Relu)
+            Katman(2, Aktivasyon = Softmax)
+            OgrenmeOrani = 0,1
             Kayip = "cross_entropy"
             Batch = 32
             Epoch = 5
@@ -266,17 +326,14 @@ fn main() -> Result<()> {
             }
             Err(e) => {
                 eprintln!("Lexer hatası: {:?}", e);
-                return Err(Box::new(TurkError::LexerError(format!("{:?}", e))));
+                return Err(TurkError::LexerError(format!("{:?}", e)));
             }
         }
     }
     println!("Token'lar üretildi, toplam: {}", tokens.len());
 
     let mut parser = ModelParser::new(tokens);
-    let program = parser.parse().map_err(|e| {
-        eprintln!("Parser hatası: {}", e);
-        Box::new(e) as Box<dyn std::error::Error>
-    })?;
+    let program = parser.parse()?;
 
     println!("Program başarıyla ayrıştırıldı:");
     for deyim in &program.deyimler {

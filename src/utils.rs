@@ -164,4 +164,11 @@ mod tests {
         assert_eq!(matrix[[0, 1]], 0.0);
         assert_eq!(matrix[[1, 0]], 0.0);
     }
+
+    #[test]
+    fn test_crate_import() {
+        use crate::Zeros;
+        let _z = Zeros;
+        assert!(true);
+    }
 } 

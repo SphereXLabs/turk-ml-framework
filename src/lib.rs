@@ -17,18 +17,21 @@ pub mod python;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
-pub use crate::ast::{Deyim, Ifade, Program, YapayZekaModeli, DegerTipi};
-pub use crate::error::{TurkError, Result};
-pub use crate::initializers::{Initializer, Xavier, HeNormal, Zeros, Ones, RandomNormal};
-pub use crate::layer::{Dense, Activation, Layer, Dropout, BatchNorm};
-pub use crate::loss::{Loss, CrossEntropy, MSE};
-pub use crate::metrics::{Metric, Accuracy, Precision, Recall, F1Score};
-pub use crate::model::{Sequential, Model};
-pub use crate::optimizer::{Optimizer, SGD, Adam, AdamW, RMSProp};
-pub use crate::parser::Parser;
-pub use crate::preprocessing::{StandardScaler, MinMaxScaler, Normalizer};
-pub use crate::token::Token;
-pub use crate::utils::{one_hot_encode, normalize, train_test_split, accuracy, confusion_matrix};
+// Re-export items using the module name directly
+pub use ast::{Deyim, Ifade, Program, YapayZekaModeli, DegerTipi};
+pub use error::{TurkError, Result};
+pub use initializers::{Initializer, Xavier, HeNormal, Zeros, Ones, RandomNormal};
+pub use layer::{Dense, Activation, Layer, Dropout, BatchNorm};
+pub use loss::{Loss, CrossEntropy, MSE};
+pub use metrics::{Metric, Accuracy, Precision, Recall, F1Score};
+pub use model::{Sequential, Model};
+pub use optimizer::{Optimizer, SGD, Adam, AdamW, RMSProp};
+pub use parser::Parser;
+pub use parser::model_parser::ModelParser;
+pub use parser::expr_parser::ExprParser;
+pub use preprocessing::{StandardScaler, MinMaxScaler, Normalizer};
+pub use token::Token;
+pub use utils::{one_hot_encode, normalize, train_test_split, accuracy, confusion_matrix};
 
 /// Versiyon bilgisi
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -5,7 +5,7 @@ Türkçe yapay zeka programlama dili ve makine öğrenmesi kütüphanesi.
 [![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-blue.svg)](LICENSE)
 [![Cargo: turk-lang](https://img.shields.io/badge/crates.io-turk--lang-orange)](https://crates.io/crates/turk-lang)
 [![Dokümanlar](https://img.shields.io/badge/docs.rs-turk--lang-blue)](https://docs.rs/turk-lang)
-[![CI/CD](https://github.com/snnkr/turk-lang/workflows/TURK%20Dil%20Kütüphanesi%20CI/CD/badge.svg)](https://github.com/snnkr/turk-lang/actions)
+[![CI/CD](https://github.com/NeonChipher/turk-ml-framework/workflows/TURK%20Dil%20Kütüphanesi%20CI/CD/badge.svg)](https://github.com/NeonChipher/turk-ml-framework/actions)
 [![Python Paketi](https://img.shields.io/badge/PyPI-turk--lang-blue)](https://pypi.org/project/turk-lang/)
 
 ## Nedir?
@@ -18,6 +18,7 @@ TURK, Türkçe komutlar kullanarak makine öğrenimi modelleri oluşturmanızı,
 - 🚀 **Yüksek Performans**: Rust ile yazılmış optimizasyonlar ve paralel işleme yeteneği
 - 🛡️ **Güvenlik**: Bellek güvenliği ve kapsamlı hata yönetimi
 - 📚 **Kapsamlı API**: Çeşitli model mimarileri, katmanlar ve optimizasyon algoritmaları
+- 🎨 **Görsel Arayüz**: Modelleri görselleştiren ve test etmeyi kolaylaştıran GUI aracı
 - 🔌 **Entegrasyon**: Python ve JavaScript (WASM) desteği 
 - 🧩 **Genişletilebilirlik**: Kolay şekilde yeni bileşenler ekleyebilme
 
@@ -30,7 +31,6 @@ Projenize Cargo.toml dosyanıza ekleyin:
 ```toml
 [dependencies]
 turk-lang = "0.1.0"
-logos = "0.13.0"
 ```
 
 ### Python ile Kullanım
@@ -39,10 +39,15 @@ logos = "0.13.0"
 pip install turk-lang
 ```
 
-### WASM ile Web Uygulamalarında Kullanım
+### GUI Aracını Kurma
+
+GUI aracını çalıştırmak için:
 
 ```bash
-npm install turk-lang
+# Rust kurulu olmalıdır
+git clone https://github.com/NeonChipher/turk-ml-framework.git
+cd turk-ml-framework
+cargo run --bin turk-gui
 ```
 
 ## Hızlı Başlangıç
@@ -72,47 +77,54 @@ fn main() -> turk_lang::Result<()> {
 }
 ```
 
-### Python ile Kullanım
-
-```python
-import numpy as np
-from turk_lang import Sequential, Dense, Activation, Adam
-
-# Veriyi yükle
-x_train = np.random.rand(1000, 10)
-y_train = np.random.rand(1000, 1)
-
-# Model oluştur
-model = Sequential()
-model.add(Dense(10, 5, Activation.relu()))
-model.add(Dense(5, 1, Activation.sigmoid()))
-model.compile(Adam(0.001))
-
-# Eğit ve değerlendir
-history = model.fit(x_train, y_train, epochs=10, batch_size=32)
-print(f"Son kayıp: {history[-1]['loss']}")
-```
-
 ### TURK Dil Sözdizimi
 
 TURK dilini kullanarak yapay zeka modelini Türkçe sözdizimi ile şu şekilde tanımlayabilirsiniz:
 
 ```
-model MnistSiniflandirici {
-    katman Dense(girdi=784, cikti=128, aktivasyon=relu)
-    katman Dropout(oran=0.2)
-    katman Dense(girdi=128, cikti=10, aktivasyon=softmax)
-    
-    optimizer Adam(ogrenme_orani=0.001)
-    kayip KategorikCaprazEntropi()
+Model mnist_model {
+    Katman(784, Aktivasyon=Relu)
+    Katman(128, Aktivasyon=Relu)
+    Katman(64, Aktivasyon=Relu)
+    Katman(10, Aktivasyon=Softmax)
+    OgrenmeOrani=0,001
+    Optimizer="Adam"
+    Kayip="categorical_crossentropy"
+    Batch=64
+    Epoch=10
 }
 
-egit MnistSiniflandirici {
-    veri = "mnist.csv"
-    epok = 10
-    yigin_boyutu = 32
+VeriSeti mnist {
+    Kaynak="mnist"
+    EgitimOran=0.8
+    TestOran=0.2
 }
+
+Egit(mnist_model, mnist.egitim_x, mnist.egitim_y)
+Degerlendir(mnist_model, mnist.test_x, mnist.test_y)
+
+Kaydet(mnist_model, "mnist_model.json")
 ```
+
+## GUI Arayüzü
+
+TURK dili için geliştirdiğimiz grafik arayüz aracı şunları sağlar:
+
+- 📝 Türkçe makine öğrenimi kodu yazma ve düzenleme
+- 🔄 Anında kod ayrıştırma ve hata kontrolü
+- 📊 Model mimarilerini görsel olarak inceleme
+- 🚀 Modelleri doğrudan arayüzden eğitme ve test etme
+- 📋 Örnek kodlara kolay erişim
+
+GUI aracının özellikleri:
+
+- Basit ve kullanıcı dostu arayüz
+- Koyu ve açık tema desteği
+- Kodun gerçek zamanlı ayrıştırılması
+- Ağ mimarisinin ağaç diyagramı olarak görselleştirilmesi
+- Katman detaylarının ve model parametrelerinin gösterimi
+
+![TURK GUI](docs/images/turk_gui_screenshot.png)
 
 ## Mimari
 
@@ -125,7 +137,7 @@ TURK, modüler bir yapıda tasarlanmıştır:
 - **Optimizerlar**: SGD, Adam, AdamW, RMSProp gibi optimizasyon algoritmaları
 - **Metrikler**: Doğruluk, kesinlik, geri çağırma gibi değerlendirme metrikleri
 
-Detaylı mimari açıklaması için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasını inceleyebilirsiniz.
+Detaylı mimari açıklaması için [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) dosyasını inceleyebilirsiniz.
 
 ## Örnek Uygulamalar
 
@@ -134,6 +146,22 @@ Detaylı mimari açıklaması için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasın
 - [MNIST Sınıflandırıcı](examples/mnist_classifier.rs)
 - [Film Yorumları Duygu Analizi](examples/model_zoo/duygu_analizi.turk)
 - [CIFAR-10 Görüntü Sınıflandırma](examples/model_zoo/cifar10_siniflandirici.turk)
+
+## Destek ve İletişim
+
+- 🌐 [Resmi Web Sitesi](https://turk-lang.org)
+- 📝 [GitHub Issues](https://github.com/NeonChipher/turk-ml-framework/issues)
+- 📧 [E-posta İletişim](mailto:TurkDilModeli@gmail.com)
+
+## Yol Haritası
+
+- [x] Temel makine öğrenimi fonksiyonları
+- [x] Grafik arayüz geliştirme
+- [ ] Derin öğrenme modellerinin genişletilmesi (CNN, RNN)
+- [ ] Dil tasarımının iyileştirilmesi
+- [ ] Web tabanlı eğitme ve test etme ortamı
+- [ ] Doğal dil işleme için özel kütüphaneler
+- [ ] Çoklu GPU ve dağıtık eğitim desteği
 
 ## Katkıda Bulunma
 
@@ -144,3 +172,4 @@ Katkılarınızı bekliyoruz! Lütfen [CONTRIBUTING.md](CONTRIBUTING.md) dosyas�
 Bu proje MIT Lisansı altında dağıtılmaktadır. Detaylar için [LICENSE](LICENSE) dosyasını inceleyebilirsiniz.
 
 
+""""""""""
