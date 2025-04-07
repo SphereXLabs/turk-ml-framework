@@ -1,110 +1,83 @@
 [package]
-name = "turk-lang"
+name = "turk"
 version = "0.1.0"
-authors = ["TURK Dil Topluluğu <TurkDilModeli@gmail.com>"]
 edition = "2021"
-description = "Türkçe yapay zeka programlama dili ve makine öğrenmesi kütüphanesi"
+authors = ["SphereX <turkdilmodeli@gmail.com>"]
+description = "Türkçe yapay sinir ağı kütüphanesi"
 license = "MIT"
-repository = "https://github.com/NeonChipher/turk-ml-framework"
-readme = "README.md"
-keywords = ["türkçe", "yapay-zeka", "makine-öğrenmesi", "dil", "eğitim"]
-categories = ["science", "mathematics", "machine-learning"]
+repository = "https://github.com/snnkr/turk"
+# Sadece kütüphane olarak derleme yapmak için default-features
+default-run = "turk"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+name = "turk"
+path = "src/lib.rs"
 
-# Çalıştırılabilir programlar
+# Binary hedeflerini geçici olarak devre dışı bırakalım
+# ileride düzeltilecek
 [[bin]]
-name = "turk-cli"
+name = "turk"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [[bin]]
-name = "turk-gui"
+name = "turk_gui"
 path = "src/bin/turk_gui.rs"
+required-features = ["gui"]
 
+# Özellikleri tanımlayalım
 [features]
 default = []
-wasm = ["wasm-bindgen", "js-sys", "web-sys"]
-python = ["pyo3"]
-simd = []
-blas = ["ndarray-linalg"]
+cli = []
+gui = ["eframe", "poll-promise", "rfd"]
 
 [dependencies]
-ndarray = { version = "0.15.6", features = ["serde", "rayon"] }
-rand = "0.8.5"
+ndarray = { version = "0.15", features = ["serde", "rayon"] }
+ndarray-rand = "0.14"
+ndarray-stats = "0.5"
+rand = "0.8"
+rand_distr = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-env_logger = "0.10.0"
+env_logger = "0.9"
 log = "0.4"
-rayon = "1.7"
-regex = "1.9"
+rayon = "1.5"
+regex = "1.5"
 lazy_static = "1.4"
 thiserror = "1.0"
 anyhow = "1.0"
-logos = "0.13.0"
-mnist = "0.5.0"
-ndarray-rand = "0.14.0"
-ndarray-stats = "0.5.1"
-rand_distr = "0.4.3"
-plotters = "0.3.5"
-chrono = "0.4.26"
-csv = "1.2"
-indicatif = "0.17.4"
+logos = "0.12"
+mnist = "0.5"
+plotters = "0.3"
+chrono = "0.4"
+csv = "1.1"
+indicatif = "0.16"
 colored = "2.0"
-winapi = { version = "0.3.9", features = ["winuser", "winbase"] }
+itertools = "0.14.0"
 
-# GUI Bağımlılıkları
-egui = { version = "0.23.0", optional = true }
-eframe = { version = "0.23.0", optional = true }
-rfd = { version = "0.11.4", optional = true }
-egui_extras = { version = "0.23.0", optional = true }
-egui_plot = { version = "0.23.0", optional = true }
+# GUI için gerekli olan kütüphaneler, isteğe bağlı
+eframe = { version = "0.22.0", optional = true }
 poll-promise = { version = "0.3.0", optional = true }
-
-# WASM desteği için isteğe bağlı bağımlılıklar
-wasm-bindgen = { version = "0.2", optional = true }
-js-sys = { version = "0.3", optional = true }
-web-sys = { version = "0.3", features = ["console"], optional = true }
-
-# Python binding için isteğe bağlı bağımlılıklar 
-pyo3 = { version = "0.19", features = ["extension-module"], optional = true }
-
-# BLAS/LAPACK desteği için isteğe bağlı bağımlılıklar
-ndarray-linalg = { version = "0.16", features = ["openblas-system"], optional = true }
-
-# Her bir hedef için özellikler
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Sadece native için gerekli bağımlılıklar
-eframe = { version = "0.23.0" }
-egui = "0.23.0"
-egui_extras = "0.23.0"
-egui_plot = "0.23.0"
-rfd = "0.11.4"
-poll-promise = "0.3.0"
+rfd = { version = "0.11.0", optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-tempfile = "3.7"
-pretty_assertions = "1.4"
+criterion = "0.3"
+tempfile = "3.2"
+pretty_assertions = "0.7"
 
-[[example]]
-name = "mnist_classifier"
-path = "examples/mnist_classifier.rs"
+[[bench]]
+name = "benchmarks"
+harness = false
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-debug = false
 
 [profile.dev]
-opt-level = 1
+opt-level = 0
 debug = true
 
-[[bench]]
-name = "benchmark"
-harness = false
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+[[example]]
+name = "mnist_classifier"
+path = "examples/mnist_classifier.rs"
