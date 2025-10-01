@@ -140,22 +140,42 @@ TURK'u genişletmek için şu adımları izleyin:
 Örnek: Yeni bir optimizer ekleme:
 
 ```rust
+use ndarray::Array2;
+use turk::{Optimizer, Result};
+
+#[derive(Clone, Debug)]
 pub struct MyOptimizer {
     learning_rate: f32,
-    // diğer parametreler
+}
+
+impl MyOptimizer {
+    pub fn new(learning_rate: f32) -> Self {
+        Self { learning_rate }
+    }
 }
 
 impl Optimizer for MyOptimizer {
-    fn new(learning_rate: f32) -> Self {
-        MyOptimizer { learning_rate }
-    }
-    
-    fn update(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
+    fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
         // Optimizasyon algoritmasını uygula
+        *params -= &(grads * self.learning_rate);
         Ok(())
     }
-    
-    // Diğer metodlar...
+
+    fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
+    fn optimizer_type(&self) -> &'static str {
+        "my_optimizer"
+    }
+
+    fn clone_box(&self) -> Box<dyn Optimizer> {
+        Box::new(self.clone())
+    }
+
+    fn reset_state_for(&mut self, _param_name: &str) {}
+
+    fn reset_state(&mut self) {}
 }
 ```
 
