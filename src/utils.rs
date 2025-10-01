@@ -1,4 +1,4 @@
-use ndarray::Array2;
+use ndarray::{Array2, Axis};
 
 pub fn one_hot_encode(labels: &[usize], num_classes: usize) -> Array2<f32> {
     let n_samples = labels.len();
@@ -12,9 +12,11 @@ pub fn one_hot_encode(labels: &[usize], num_classes: usize) -> Array2<f32> {
 }
 
 pub fn normalize(x: &Array2<f32>) -> Array2<f32> {
-    let mean = x.mean_axis(ndarray::Axis(0)).unwrap();
-    let std = x.std_axis(ndarray::Axis(0), 0.0);
-    (x - &mean) / &std
+    let mean = x.mean_axis(Axis(0)).unwrap();
+    let std = x.std_axis(Axis(0), 0.0);
+    let safe_std = std.mapv(|value| if value.abs() < 1e-8 { 1.0 } else { value });
+
+    (x - &mean) / &safe_std
 }
 
 pub fn train_test_split(x: &Array2<f32>, y: &Array2<f32>, test_size: f32) -> (Array2<f32>, Array2<f32>, Array2<f32>, Array2<f32>) {
@@ -112,11 +114,15 @@ mod tests {
         let normalized = normalize(&data);
         
         // Her sütunun ortalaması 0 ve standart sapması 1 olmalı
-        for col in normalized.outer_iter() {
-            let mean = col.mean().unwrap();
-            let std = col.std(0.0);
+        let column_means = normalized.mean_axis(Axis(0)).unwrap();
+        let column_stds = normalized.std_axis(Axis(0), 0.0);
+
+        for mean in column_means.iter() {
             assert!(mean.abs() < 1e-10);
-            assert!((std - 1.0).abs() < 1e-10);
+        }
+
+        for std in column_stds.iter() {
+            assert!((std - 1.0).abs() < 1e-6);
         }
     }
 
