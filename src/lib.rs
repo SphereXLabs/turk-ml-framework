@@ -39,7 +39,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Kütüphane bilgilerini döndürür
 pub fn library_info() -> String {
     format!(
-        "TURK Dili v{}\nTürkçe yapay zeka programlama dili\n\nÖzellikler:\n- Katmanlar: Dense, Dropout, BatchNorm\n- Optimizerlar: SGD, Adam, AdamW, RMSProp\n- Python Binding: {}\n- WASM Desteği: {}", 
+        "TURK Dili v{}\nTürkçe yapay zeka programlama dili\n\nÖzellikler:\n- Katmanlar: Dense, Dropout, BatchNorm\n- Optimizer'lar: SGD, Adam, AdamW, RMSProp\n- Python Binding: {}\n- WASM Desteği: {}",
         VERSION,
         cfg!(feature = "python"),
         cfg!(feature = "wasm")
