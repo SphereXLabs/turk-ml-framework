@@ -140,22 +140,43 @@ TURK'u genişletmek için şu adımları izleyin:
 Örnek: Yeni bir optimizer ekleme:
 
 ```rust
+#[derive(Debug, Clone)]
 pub struct MyOptimizer {
     learning_rate: f32,
     // diğer parametreler
 }
 
-impl Optimizer for MyOptimizer {
-    fn new(learning_rate: f32) -> Self {
-        MyOptimizer { learning_rate }
+impl MyOptimizer {
+    pub fn new(learning_rate: f32) -> Self {
+        Self { learning_rate }
     }
-    
-    fn update(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
+}
+
+impl Optimizer for MyOptimizer {
+    fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
         // Optimizasyon algoritmasını uygula
         Ok(())
     }
-    
-    // Diğer metodlar...
+
+    fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
+    fn optimizer_type(&self) -> &'static str {
+        "my_optimizer"
+    }
+
+    fn clone_box(&self) -> Box<dyn Optimizer> {
+        Box::new(self.clone())
+    }
+
+    fn reset_state_for(&mut self, _param_name: &str) {
+        // Opsiyonel state temizliği
+    }
+
+    fn reset_state(&mut self) {
+        // Tüm state'i temizle
+    }
 }
 ```
 
