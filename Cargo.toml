@@ -40,7 +40,7 @@ cli = ["full", "clap"]
 gui = ["full", "eframe", "egui_plot", "poll-promise", "rfd"]
 # TÜRK Çekirdeği — yerel kişisel yapay zeka ekosistemi ve sistem otomasyonu
 # Not: windows-sys yalnızca Windows hedefinde bağlanır (aşağıdaki target bağımlılığı).
-turk_sistem = ["gui", "dep:sysinfo", "dep:tokio", "dep:reqwest", "chrono", "turk_ses"]
+turk_sistem = ["gui", "dep:sysinfo", "dep:tokio", "dep:reqwest", "dep:windows-sys", "chrono", "turk_ses"]
 turk_ses = ["dep:cpal", "dep:hound"]
 parallel = []
 gpu = []
@@ -65,7 +65,6 @@ log = "0.4.17"
 # env_logger'ı en son sürüme güncelle
 env_logger = "0.10.0"
 thiserror = "1.0.38"
-anyhow = "1.0.69"
 
 # Paralel işleme
 rayon = "1.7.0"
@@ -101,9 +100,9 @@ cpal = { version = "0.15", optional = true }
 hound = { version = "3.5", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
-# Windows-only: Linux/macOS CI'de windows-sys çekilmesin
+# Windows-only (optional): Linux/macOS CI'de çekilmez; turk_sistem özelliği ile açılır
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"], optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"

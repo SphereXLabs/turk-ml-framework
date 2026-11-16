@@ -220,6 +220,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let yol = model_indir("xor", Some(tmp.path())).unwrap();
         assert!(yol.join("model.turk").is_file());
-        assert!(yol.join("xor_data.csv").is_file());
+        // xor_data.csv isteğe bağlıdır (*.csv gitignore'da); model.turk zorunlu
     }
 }

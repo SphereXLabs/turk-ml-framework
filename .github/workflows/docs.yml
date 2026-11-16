@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   RUSTDOCFLAGS: -D warnings
@@ -20,7 +23,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Dokümantasyonu Derle
-        # --all-features YOK: GUI/ALSA Linux runner'da gerekmez
         run: cargo doc --no-deps
 
       - name: İndeks Sayfası Ekle

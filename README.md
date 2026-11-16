@@ -1,6 +1,6 @@
 # TÜRK - Türkçe Yapay Zeka Dili
 
-[![Rust CI](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/rust.yml/badge.svg)](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/rust.yml)
+[![CI](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/ci.yml/badge.svg)](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/ci.yml)
 [![Documentation](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/docs.yml/badge.svg)](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/docs.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

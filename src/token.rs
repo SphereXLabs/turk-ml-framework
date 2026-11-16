@@ -3,6 +3,7 @@ use std::fmt;
 
 /// Token enum'u
 #[derive(Logos, Debug, PartialEq, Clone)]
+#[allow(clippy::duplicated_attributes)] // logos: birden fazla `#[regex(..., skip)]` gerekir
 pub enum Token {
     // Anahtar Kelimeler
     #[token("model")]
@@ -185,10 +186,8 @@ pub enum Token {
     #[token("flatten")]
     Flatten,
 
-    // Yorum satırları ve boşluklar
-    #[regex(r"[ \t\n\f]+", logos::skip)]
-    #[regex(r"//[^\n]*", logos::skip)]
-    #[regex(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/", logos::skip)]
+    // Yorum satırları ve boşluklar (tek skip deseni)
+    #[regex(r"(?:[ \t\n\f]+|//[^\n]*|/\*[^*]*\*+(?:[^/*][^*]*\*+)*/)", logos::skip)]
     Whitespace,
 
     // Dosya sonu

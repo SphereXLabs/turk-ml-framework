@@ -1038,7 +1038,7 @@ impl Sequential {
             self.update()?;
 
             // Debug: Her 10 batch'te veya son batch'te ilerlemeyi göster
-            if batch_idx % 10 == 0 || batch_idx == batch_count - 1 {
+            if batch_idx.is_multiple_of(10) || batch_idx == batch_count - 1 {
                 debug!(
                     "Batch {}/{} işlendi, batch kaybı: {:.6}",
                     batch_idx + 1,
@@ -1264,7 +1264,7 @@ impl Sequential {
             self.update()?;
 
             batch_count += 1;
-            if batch_count == 1 || batch_count % 10 == 0 {
+            if batch_count == 1 || batch_count.is_multiple_of(10) {
                 debug!("Streaming batch {batch_count} işlendi, kayıp: {batch_loss:.6}");
             }
         }
