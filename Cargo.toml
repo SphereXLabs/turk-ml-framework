@@ -39,7 +39,8 @@ full = ["plotters", "indicatif", "colored", "chrono"]
 cli = ["full", "clap"]
 gui = ["full", "eframe", "egui_plot", "poll-promise", "rfd"]
 # TÜRK Çekirdeği — yerel kişisel yapay zeka ekosistemi ve sistem otomasyonu
-turk_sistem = ["gui", "dep:sysinfo", "dep:tokio", "dep:windows-sys", "dep:reqwest", "chrono", "turk_ses"]
+# Not: windows-sys yalnızca Windows hedefinde bağlanır (aşağıdaki target bağımlılığı).
+turk_sistem = ["gui", "dep:sysinfo", "dep:tokio", "dep:reqwest", "chrono", "turk_ses"]
 turk_ses = ["dep:cpal", "dep:hound"]
 parallel = []
 gpu = []
@@ -96,10 +97,13 @@ rfd = { version = "0.11.0", optional = true }
 # TÜRK Sistem — yerel donanım ve asenkron süreç kütüphaneleri
 sysinfo = { version = "0.30", optional = true }
 tokio = { version = "1.0", features = ["full"], optional = true }
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"], optional = true }
 cpal = { version = "0.15", optional = true }
 hound = { version = "3.5", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+
+# Windows-only: Linux/macOS CI'de windows-sys çekilmesin
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]
 criterion = "0.5.1"

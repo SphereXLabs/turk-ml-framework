@@ -77,7 +77,12 @@ pub fn komut_ayristir(komut: &str, satir_no: usize) -> Result<DslKomut> {
     }
     if let Some(icerik) = fonksiyon_ici(ham, "onnx_disa_aktar", satir_no)? {
         let dosya = tirnakli_dosya_yolu(&icerik).ok_or_else(|| {
-            konumlu_hata_msg(ham, satir_no, ham.find('(').unwrap_or(0) + 1, "onnx_disa_aktar(\"dosya.onnx.json\") bekleniyor")
+            konumlu_hata_msg(
+                ham,
+                satir_no,
+                ham.find('(').unwrap_or(0) + 1,
+                "onnx_disa_aktar(\"dosya.onnx.json\") bekleniyor",
+            )
         })?;
         return Ok(DslKomut::OnnxDisaAktar { dosya });
     }
@@ -95,7 +100,12 @@ pub fn komut_ayristir(komut: &str, satir_no: usize) -> Result<DslKomut> {
     if ham.to_uppercase().starts_with("VERI_YUKLE") {
         let icerik = ham
             .split_once(':')
-            .map(|(_, r)| r.trim().trim_start_matches('(').trim_end_matches(')').to_string())
+            .map(|(_, r)| {
+                r.trim()
+                    .trim_start_matches('(')
+                    .trim_end_matches(')')
+                    .to_string()
+            })
             .unwrap_or_default();
         return Ok(DslKomut::VeriYukle { icerik });
     }
@@ -134,10 +144,20 @@ pub fn parantez_dengesi_kontrol(komut: &str, satir_no: usize) -> Result<()> {
     }
 
     if string_icinde {
-        return konumlu_hata_void(komut, satir_no, komut.len().saturating_sub(1), "Kapatılmamış string");
+        return konumlu_hata_void(
+            komut,
+            satir_no,
+            komut.len().saturating_sub(1),
+            "Kapatılmamış string",
+        );
     }
     if derinlik > 0 {
-        return konumlu_hata_void(komut, satir_no, komut.len().saturating_sub(1), "Kapatılmamış '(' parantezi");
+        return konumlu_hata_void(
+            komut,
+            satir_no,
+            komut.len().saturating_sub(1),
+            "Kapatılmamış '(' parantezi",
+        );
     }
     if derinlik < 0 {
         return konumlu_hata_void(komut, satir_no, 0, "Parantez dengesi bozuk");
@@ -152,11 +172,7 @@ pub fn hata_satirini_goster(ham_satir: &str, sutun: usize, mesaj: &str) -> Strin
     format!("Satır hatası — {mesaj}\n  {ham_satir}\n  {caret}")
 }
 
-fn fonksiyon_ici<'a>(
-    komut: &'a str,
-    ad: &str,
-    satir_no: usize,
-) -> Result<Option<String>> {
+fn fonksiyon_ici(komut: &str, ad: &str, satir_no: usize) -> Result<Option<String>> {
     let prefix = format!("{ad}(");
     if !komut.starts_with(&prefix) {
         return Ok(None);
@@ -182,12 +198,12 @@ fn tirnakli_dosya_yolu(icerik: &str) -> Option<String> {
     }
 }
 
-fn zoo_arg_parse(
-    icerik: &str,
-    ham: &str,
-    satir_no: usize,
-) -> Result<(String, Option<String>)> {
-    let parcalar: Vec<&str> = icerik.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+fn zoo_arg_parse(icerik: &str, ham: &str, satir_no: usize) -> Result<(String, Option<String>)> {
+    let parcalar: Vec<&str> = icerik
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     if parcalar.is_empty() {
         return Err(konumlu_hata_msg(
             ham,
@@ -207,29 +223,17 @@ fn byte_to_sutun(komut: &str, byte_idx: usize) -> usize {
     komut[..byte_idx.min(komut.len())].chars().count() + 1
 }
 
-fn konumlu_hata(
-    komut: &str,
-    satir_no: usize,
-    byte_idx: usize,
-    mesaj: &str,
-) -> Result<DslKomut> {
+fn konumlu_hata(komut: &str, satir_no: usize, byte_idx: usize, mesaj: &str) -> Result<DslKomut> {
     Err(konumlu_hata_msg(komut, satir_no, byte_idx, mesaj))
 }
 
-fn konumlu_hata_void(
-    komut: &str,
-    satir_no: usize,
-    byte_idx: usize,
-    mesaj: &str,
-) -> Result<()> {
+fn konumlu_hata_void(komut: &str, satir_no: usize, byte_idx: usize, mesaj: &str) -> Result<()> {
     Err(konumlu_hata_msg(komut, satir_no, byte_idx, mesaj))
 }
 
 fn konumlu_hata_msg(komut: &str, satir_no: usize, byte_idx: usize, mesaj: &str) -> TurkError {
     let sutun = byte_to_sutun(komut, byte_idx);
-    TurkError::SyntaxError(format!(
-        "Satır {satir_no}, sütun {sutun}: {mesaj}"
-    ))
+    TurkError::SyntaxError(format!("Satır {satir_no}, sütun {sutun}: {mesaj}"))
 }
 
 #[cfg(test)]

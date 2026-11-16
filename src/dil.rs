@@ -1,18 +1,18 @@
-use crate::model::{EarlyStopping, Sequential};
-use crate::cihaz::{Cihaz, cihaz_listesi_metin};
-use crate::model_zoo::{model_bilgi_metin, model_indir, zoo_listesi_metin};
-use crate::optimizer::{SGD, Adam, AdamW, RMSProp};
-use crate::layer::Dense;
 use crate::aktivasyon::Activation;
-use crate::error::{TurkError, Result};
+use crate::cihaz::{cihaz_listesi_metin, Cihaz};
+use crate::error::{Result, TurkError};
+use crate::initializers::{GlorotUniform, Zeros};
 use crate::katman_kayit::KatmanKayit;
+use crate::layer::Dense;
 use crate::loss::create_loss;
+use crate::model::{EarlyStopping, Sequential};
+use crate::model_zoo::{model_bilgi_metin, model_indir, zoo_listesi_metin};
+use crate::optimizer::{Adam, AdamW, RMSProp, SGD};
 use crate::veri::CsvVeriAkisi;
+use log::{debug, info, warn};
 use std::any::Any;
 use std::collections::HashMap;
-use log::{info, warn, debug};
 use std::fmt::Debug;
-use crate::initializers::{GlorotUniform, Zeros};
 
 /// Türkçe DSL değer türleri
 #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@ impl Value {
             _ => Err(TurkError::TypeError("Sayı değil".into())),
         }
     }
-    
+
     #[allow(dead_code)]
     fn as_text(&self) -> Result<String> {
         match self {
@@ -48,9 +48,9 @@ impl Value {
         }
     }
     #[allow(dead_code)]
-    fn as_model(&self) -> Result<&Box<dyn ModelExt>> {
+    fn as_model(&self) -> Result<&dyn ModelExt> {
         match self {
-            Value::Model(model) => Ok(model),
+            Value::Model(model) => Ok(model.as_ref()),
             _ => Err(TurkError::TypeError("Model değil".into())),
         }
     }
@@ -73,11 +73,11 @@ impl ModelExt for Sequential {
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    
+
     fn clone_box(&self) -> Box<dyn ModelExt> {
         Box::new(self.clone())
     }
@@ -90,9 +90,13 @@ pub type YukluVeri = CsvVeriAkisi;
 #[derive(Debug, Clone)]
 pub enum EgitimIlerleme {
     /// CSV satir indeksleme ilerlemesi (MNIST gibi buyuk dosyalar)
-    Indeksleme { satir: usize },
+    Indeksleme {
+        satir: usize,
+    },
     /// Ara durum (veri indeksleme, model kurulumu vb.)
-    Durum { mesaj: String },
+    Durum {
+        mesaj: String,
+    },
     Epoch {
         epoch: usize,
         toplam: usize,
@@ -164,9 +168,8 @@ impl TurkDil {
         }
 
         let onceki_cwd = std::env::current_dir().ok();
-        std::env::set_current_dir(&yol).map_err(|e| {
-            TurkError::IOError(format!("Model dizinine geçilemedi: {e}"))
-        })?;
+        std::env::set_current_dir(&yol)
+            .map_err(|e| TurkError::IOError(format!("Model dizinine geçilemedi: {e}")))?;
 
         let sonuc = (|| {
             if let Some(csv) = csv_yolu {
@@ -204,7 +207,7 @@ impl TurkDil {
 
         sonuc
     }
-    
+
     /// Türkçe DSL komutunu çalıştırır
     pub fn calistir(&mut self, komut: &str) -> Result<Value> {
         self.calistir_satir(komut, 1)
@@ -238,7 +241,11 @@ impl TurkDil {
         let parsed = crate::dsl_parser::komut_ayristir(komut, satir_no)?;
         debug!(
             "Komut {}: {}",
-            if kontrol_modu { "kontrol" } else { "çalıştırma" },
+            if kontrol_modu {
+                "kontrol"
+            } else {
+                "çalıştırma"
+            },
             komut
         );
 
@@ -251,9 +258,7 @@ impl TurkDil {
             crate::dsl_parser::DslKomut::KatmanEkle { icerik } => {
                 self.katman_ekle_icerik(icerik.as_str())
             }
-            crate::dsl_parser::DslKomut::Derle { icerik } => {
-                self.derle_icerik(icerik.as_str())
-            }
+            crate::dsl_parser::DslKomut::Derle { icerik } => self.derle_icerik(icerik.as_str()),
             crate::dsl_parser::DslKomut::ModelBilgisi => self.model_bilgisi_komutu(),
             crate::dsl_parser::DslKomut::Egit { icerik } => {
                 if kontrol_modu {
@@ -317,9 +322,10 @@ impl TurkDil {
 
     /// Katman türü, `KatmanKayit::varsayilan()` üzerinden çözülür.
     fn katman_ekle_icerik(&mut self, katman_str: &str) -> Result<Value> {
-        let model = self.model.as_mut().ok_or_else(|| {
-            TurkError::RuntimeError("Önce model oluşturmalısınız".into())
-        })?;
+        let model = self
+            .model
+            .as_mut()
+            .ok_or_else(|| TurkError::RuntimeError("Önce model oluşturmalısınız".into()))?;
 
         info!("Katman ekleniyor: {katman_str}");
 
@@ -330,7 +336,7 @@ impl TurkDil {
         // (sadece boyutu bilinen katmanlar için — 0 dönenler atlanır)
         if let Some(onceki) = model.layers.last() {
             let beklenen = onceki.output_size();
-            let gelen    = katman.input_size();
+            let gelen = katman.input_size();
             if beklenen != 0 && gelen != 0 && gelen != beklenen {
                 return Err(TurkError::ShapeMismatch(format!(
                     "Katman boyut uyumsuzluğu!\n  \
@@ -343,13 +349,14 @@ impl TurkDil {
 
         info!(
             "Katman eklendi: {} (girdi={}, çıktı={})",
-            katman.layer_type(), katman.input_size(), katman.output_size()
+            katman.layer_type(),
+            katman.input_size(),
+            katman.output_size()
         );
         model.add_boxed(katman);
-        return Ok(Value::None);
-
+        Ok(Value::None)
     }
-    
+
     /// Derleme komutunu işler.
     ///
     /// ```text
@@ -358,9 +365,10 @@ impl TurkDil {
     /// derle(optimizer=adam, loss=mse, ogrenme_orani=0.05)
     /// ```
     fn derle_icerik(&mut self, icerik: &str) -> Result<Value> {
-        let model = self.model.as_mut().ok_or_else(|| {
-            TurkError::RuntimeError("Önce model oluşturmalısınız".into())
-        })?;
+        let model = self
+            .model
+            .as_mut()
+            .ok_or_else(|| TurkError::RuntimeError("Önce model oluşturmalısınız".into()))?;
 
         let params = derle_parametreleri_parse(icerik)?;
         let optimizer = optimizer_olustur(&params.optimizer, params.ogrenme_orani)?;
@@ -384,18 +392,19 @@ impl TurkDil {
 
         Ok(Value::None)
     }
-    
+
     /// Model bilgisi komutunu işler — katman zinciri, parametre sayısı, optimizer/loss.
     fn model_bilgisi_komutu(&mut self) -> Result<Value> {
-        let model = self.model.as_ref().ok_or_else(|| {
-            TurkError::RuntimeError("Önce model oluşturmalısınız".into())
-        })?;
+        let model = self
+            .model
+            .as_ref()
+            .ok_or_else(|| TurkError::RuntimeError("Önce model oluşturmalısınız".into()))?;
 
         let bilgi = model.summary();
         println!("{bilgi}");
         Ok(Value::Text(bilgi))
     }
-    
+
     /// Eğitim komutunu işler.
     ///
     /// Sözdizimi:
@@ -413,22 +422,27 @@ impl TurkDil {
                 "Eğitim verisi yüklenmemiş. Önce veri_yukle() komutunu kullanın.".into(),
             )
         })?;
-        let veri = self.veri_setleri.get(&veri_ismi).ok_or_else(|| {
-            TurkError::DataError(format!("Veri seti bulunamadı: {veri_ismi}"))
-        })?.clone();
+        let veri = self
+            .veri_setleri
+            .get(&veri_ismi)
+            .ok_or_else(|| TurkError::DataError(format!("Veri seti bulunamadı: {veri_ismi}")))?
+            .clone();
 
         if p.devam_et {
             let kayit_yolu = self.kaydet_yolu.clone().unwrap_or_else(|| {
-                warn!("devam_et=true verildi ancak kaydet_yolu bilinmiyor; \
-                       'xor_model.json' varsayılanı kullanılıyor.");
+                warn!(
+                    "devam_et=true verildi ancak kaydet_yolu bilinmiyor; \
+                       'xor_model.json' varsayılanı kullanılıyor."
+                );
                 "xor_model.json".to_string()
             });
 
             if std::path::Path::new(&kayit_yolu).exists() {
                 info!("▶ Checkpoint yükleniyor: '{kayit_yolu}'");
-                let model = self.model.as_mut().ok_or_else(|| {
-                    TurkError::RuntimeError("Model henüz oluşturulmamış".into())
-                })?;
+                let model = self
+                    .model
+                    .as_mut()
+                    .ok_or_else(|| TurkError::RuntimeError("Model henüz oluşturulmamış".into()))?;
                 model.load(&kayit_yolu)?;
                 info!("Checkpoint başarıyla yüklendi — eğitime kaldığı yerden devam ediliyor.");
             } else {
@@ -459,14 +473,15 @@ impl TurkDil {
         }
 
         let checkpoint_yolu = {
-            let temel = self.kaydet_yolu.clone().unwrap_or_else(|| "model.json".into());
+            let temel = self
+                .kaydet_yolu
+                .clone()
+                .unwrap_or_else(|| "model.json".into());
             let temel = temel.trim_end_matches(".json");
             format!("{temel}_en_iyi.json")
         };
 
-        let validation_data = veri
-            .val_veri()
-            .map(|(x, y)| (x.clone(), y.clone()));
+        let validation_data = veri.val_veri().map(|(x, y)| (x.clone(), y.clone()));
 
         let mut early_stopping = p
             .sabir
@@ -556,7 +571,7 @@ impl TurkDil {
 
         const GECMIS_DOSYA: &str = "egitim_gecmisi.json";
         match history.dosyaya_kaydet(GECMIS_DOSYA) {
-            Ok(_)  => info!("Eğitim geçmişi '{GECMIS_DOSYA}' dosyasına kaydedildi."),
+            Ok(_) => info!("Eğitim geçmişi '{GECMIS_DOSYA}' dosyasına kaydedildi."),
             Err(e) => warn!("Eğitim geçmişi kaydedilemedi: {e}"),
         }
 
@@ -572,9 +587,10 @@ impl TurkDil {
                 "Eğitim verisi yüklenmemiş. Önce veri_yukle() komutunu kullanın.".into(),
             )
         })?;
-        let veri = self.veri_setleri.get(&veri_ismi).ok_or_else(|| {
-            TurkError::DataError(format!("Veri seti bulunamadı: {veri_ismi}"))
-        })?;
+        let veri = self
+            .veri_setleri
+            .get(&veri_ismi)
+            .ok_or_else(|| TurkError::DataError(format!("Veri seti bulunamadı: {veri_ismi}")))?;
 
         let model = self.model.as_ref().ok_or_else(|| {
             TurkError::RuntimeError("Önce model oluşturmalı ve derlemelisiniz".into())
@@ -606,15 +622,15 @@ impl TurkDil {
             p.batch_size,
             veri.kaynak(),
             p.sabir.map(|s| format!(", sabir={s}")).unwrap_or_default(),
-            p.devam_et.then_some(", devam_et=true").unwrap_or("")
+            if p.devam_et { ", devam_et=true" } else { "" }
         );
         Ok(Value::None)
     }
 
     fn kaydet_on_kontrol_icerik(&self, icerik: &str) -> Result<Value> {
-        self.model.as_ref().ok_or_else(|| {
-            TurkError::RuntimeError("Kaydedilecek model bulunmuyor".into())
-        })?;
+        self.model
+            .as_ref()
+            .ok_or_else(|| TurkError::RuntimeError("Kaydedilecek model bulunmuyor".into()))?;
         dosya_yolu_icerikten(icerik)?;
         Ok(Value::None)
     }
@@ -625,9 +641,9 @@ impl TurkDil {
     }
 
     fn onnx_on_kontrol(&self, dosya: &str) -> Result<Value> {
-        self.model.as_ref().ok_or_else(|| {
-            TurkError::RuntimeError("Dışa aktarılacak model bulunmuyor".into())
-        })?;
+        self.model
+            .as_ref()
+            .ok_or_else(|| TurkError::RuntimeError("Dışa aktarılacak model bulunmuyor".into()))?;
         if dosya.is_empty() {
             return Err(TurkError::SyntaxError(
                 "onnx_disa_aktar: dosya yolu boş olamaz".into(),
@@ -637,9 +653,10 @@ impl TurkDil {
     }
 
     fn onnx_disa_aktar_komutu(&mut self, dosya: &str) -> Result<Value> {
-        let model = self.model.as_ref().ok_or_else(|| {
-            TurkError::RuntimeError("Dışa aktarılacak model bulunmuyor".into())
-        })?;
+        let model = self
+            .model
+            .as_ref()
+            .ok_or_else(|| TurkError::RuntimeError("Dışa aktarılacak model bulunmuyor".into()))?;
         info!("ONNX dışa aktarılıyor: {dosya}");
         crate::onnx::export_onnx(model, dosya)?;
         let mesaj = format!("ONNX dışa aktarıldı: {dosya}");
@@ -670,13 +687,11 @@ impl TurkDil {
         }
 
         let onceki_cwd = std::env::current_dir().ok();
-        std::env::set_current_dir(&yol).map_err(|e| {
-            TurkError::IOError(format!("Model dizinine geçilemedi: {e}"))
-        })?;
+        std::env::set_current_dir(&yol)
+            .map_err(|e| TurkError::IOError(format!("Model dizinine geçilemedi: {e}")))?;
 
-        let icerik = fs::read_to_string(&script).map_err(|e| {
-            TurkError::IOError(format!("'{}' okunamadı: {e}", script.display()))
-        })?;
+        let icerik = fs::read_to_string(&script)
+            .map_err(|e| TurkError::IOError(format!("'{}' okunamadı: {e}", script.display())))?;
 
         info!("Model Zoo çalıştırılıyor: {} ({})", id, script.display());
         let mut satir_no = 0usize;
@@ -776,9 +791,7 @@ impl TurkDil {
             veri.ozellik_sayisi(),
             veri.egitim_satir_sayisi(),
             veri.val_satir_sayisi(),
-            bolme
-                .map(|b| format!(", bolme={b}"))
-                .unwrap_or_default()
+            bolme.map(|b| format!(", bolme={b}")).unwrap_or_default()
         );
 
         if veri.ozellik_sayisi() == 784 {
@@ -791,11 +804,12 @@ impl TurkDil {
 
         Ok(Value::None)
     }
-    
+
     fn kaydet_icerik(&mut self, icerik: &str) -> Result<Value> {
-        let model = self.model.as_ref().ok_or_else(|| {
-            TurkError::RuntimeError("Kaydedilecek model bulunmuyor".into())
-        })?;
+        let model = self
+            .model
+            .as_ref()
+            .ok_or_else(|| TurkError::RuntimeError("Kaydedilecek model bulunmuyor".into()))?;
         let dosya_yolu = dosya_yolu_icerikten(icerik)?;
         info!("Model kaydediliyor: {dosya_yolu}");
         model.save(&dosya_yolu)?;
@@ -809,20 +823,26 @@ impl TurkDil {
         let mut model = Sequential::new();
         model.load(&dosya_yolu)?;
         self.model = Some(model);
-        
+
         Ok(Value::None)
     }
 
     /// Katman ekle - Dense
-    pub fn dense(&mut self, girdi_boyutu: usize, cikti_boyutu: usize, aktivasyon: &str) -> Result<()> {
-        let model = self.model.as_mut().ok_or_else(|| {
-            TurkError::RuntimeError("Önce model oluşturmalısınız".into())
-        })?;
-        
+    pub fn dense(
+        &mut self,
+        girdi_boyutu: usize,
+        cikti_boyutu: usize,
+        aktivasyon: &str,
+    ) -> Result<()> {
+        let model = self
+            .model
+            .as_mut()
+            .ok_or_else(|| TurkError::RuntimeError("Önce model oluşturmalısınız".into()))?;
+
         let activation = Activation::from_str(aktivasyon)?;
         let kernel_init = Box::new(GlorotUniform::new());
         let bias_init = Box::new(Zeros::new());
-        
+
         let dense = Dense::new(
             girdi_boyutu,
             cikti_boyutu,
@@ -831,7 +851,7 @@ impl TurkDil {
             bias_init,
             true, // use_bias
         )?;
-        
+
         model.add(dense);
         Ok(())
     }
@@ -850,9 +870,7 @@ fn ilk_tirnakli_deger(s: &str) -> Option<String> {
 /// `"metin"` veya `'metin'` içindeki değeri döndürür (tüm string tırnaklı olmalı).
 fn tirnak_ici(s: &str) -> Option<&str> {
     let s = s.trim();
-    if (s.starts_with('"') && s.ends_with('"'))
-        || (s.starts_with('\'') && s.ends_with('\''))
-    {
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
         Some(&s[1..s.len() - 1])
     } else {
         None
@@ -897,11 +915,7 @@ fn dsl_anahtar_degerler(icerik: &str) -> HashMap<String, String> {
         for ayirici in [':', '='] {
             if let Some(pos) = kisim.find(ayirici) {
                 let anahtar = kisim[..pos].trim().to_lowercase();
-                let deger = kisim[pos + 1..]
-                    .trim()
-                    .trim_matches('"')
-                    .trim()
-                    .to_string();
+                let deger = kisim[pos + 1..].trim().trim_matches('"').trim().to_string();
                 map.insert(anahtar, deger);
                 break;
             }
@@ -914,7 +928,9 @@ fn dsl_pozisyonel_tokenler(icerik: &str) -> Vec<String> {
     icerik
         .split(',')
         .map(str::trim)
-        .filter(|t| !t.is_empty() && !t.contains('=') && !t.contains(':') && tirnak_ici(t).is_none())
+        .filter(|t| {
+            !t.is_empty() && !t.contains('=') && !t.contains(':') && tirnak_ici(t).is_none()
+        })
         .map(|t| t.to_lowercase())
         .collect()
 }
@@ -928,9 +944,7 @@ fn derle_parametreleri_parse(icerik: &str) -> Result<DerleParametreleri> {
         .cloned()
         .or_else(|| poz.first().cloned())
         .ok_or_else(|| {
-            TurkError::SyntaxError(
-                "derle: optimizer belirtilmedi. Örnek: derle(adam)".into(),
-            )
+            TurkError::SyntaxError("derle: optimizer belirtilmedi. Örnek: derle(adam)".into())
         })?;
 
     let loss = map
@@ -944,9 +958,8 @@ fn derle_parametreleri_parse(icerik: &str) -> Result<DerleParametreleri> {
         .or_else(|| map.get("lr"))
         .or_else(|| map.get("learning_rate"))
         .map(|s| {
-            s.parse::<f64>().map_err(|_| {
-                TurkError::SyntaxError(format!("ogrenme_orani sayısal olmalı: '{s}'"))
-            })
+            s.parse::<f64>()
+                .map_err(|_| TurkError::SyntaxError(format!("ogrenme_orani sayısal olmalı: '{s}'")))
         })
         .transpose()?;
 
@@ -963,12 +976,7 @@ fn derle_parametreleri_parse(icerik: &str) -> Result<DerleParametreleri> {
 fn optimizer_olustur(ad: &str, lr: Option<f64>) -> Result<Box<dyn crate::optimizer::Optimizer>> {
     match ad.to_lowercase().as_str() {
         "sgd" => Ok(Box::new(SGD::new(lr.unwrap_or(0.01), None, false))),
-        "adam" => Ok(Box::new(Adam::new(
-            lr.unwrap_or(0.001),
-            0.9,
-            0.999,
-            1e-8,
-        ))),
+        "adam" => Ok(Box::new(Adam::new(lr.unwrap_or(0.001), 0.9, 0.999, 1e-8))),
         "adamw" => Ok(Box::new(AdamW::new(
             lr.unwrap_or(0.001),
             0.9,
@@ -992,9 +1000,7 @@ fn egit_parametreleri_parse(icerik: &str) -> Result<EgitParametreleri> {
         .or_else(|| map.get("epochs"))
         .cloned()
         .or_else(|| poz.first().cloned())
-        .ok_or_else(|| {
-            TurkError::SyntaxError("egit: epoch belirtilmedi.".into())
-        })?
+        .ok_or_else(|| TurkError::SyntaxError("egit: epoch belirtilmedi.".into()))?
         .parse::<usize>()
         .map_err(|_| TurkError::SyntaxError("Epoch sayısı tamsayı olmalıdır.".into()))?;
 
@@ -1003,24 +1009,18 @@ fn egit_parametreleri_parse(icerik: &str) -> Result<EgitParametreleri> {
         .or_else(|| map.get("batch"))
         .cloned()
         .or_else(|| poz.get(1).cloned())
-        .ok_or_else(|| {
-            TurkError::SyntaxError("egit: batch_boyutu belirtilmedi.".into())
-        })?
+        .ok_or_else(|| TurkError::SyntaxError("egit: batch_boyutu belirtilmedi.".into()))?
         .parse::<usize>()
         .map_err(|_| TurkError::SyntaxError("Batch boyutu tamsayı olmalıdır.".into()))?;
 
     let devam_et = map
         .get("devam_et")
         .or_else(|| map.get("devam"))
-        .map(|v| {
-            v.eq_ignore_ascii_case("true") || v == "1" || v.eq_ignore_ascii_case("evet")
-        })
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1" || v.eq_ignore_ascii_case("evet"))
         .unwrap_or_else(|| {
             poz.get(2)
                 .map(|v| {
-                    v.eq_ignore_ascii_case("true")
-                        || v == "1"
-                        || v.eq_ignore_ascii_case("devam")
+                    v.eq_ignore_ascii_case("true") || v == "1" || v.eq_ignore_ascii_case("devam")
                 })
                 .unwrap_or(false)
         });
@@ -1029,9 +1029,8 @@ fn egit_parametreleri_parse(icerik: &str) -> Result<EgitParametreleri> {
         .get("sabir")
         .or_else(|| map.get("patience"))
         .map(|s| {
-            s.parse::<usize>().map_err(|_| {
-                TurkError::SyntaxError(format!("sabir tamsayı olmalı: '{s}'"))
-            })
+            s.parse::<usize>()
+                .map_err(|_| TurkError::SyntaxError(format!("sabir tamsayı olmalı: '{s}'")))
         })
         .transpose()?;
 
@@ -1039,9 +1038,8 @@ fn egit_parametreleri_parse(icerik: &str) -> Result<EgitParametreleri> {
         .get("min_delta")
         .or_else(|| map.get("esik"))
         .map(|s| {
-            s.parse::<f64>().map_err(|_| {
-                TurkError::SyntaxError(format!("min_delta sayısal olmalı: '{s}'"))
-            })
+            s.parse::<f64>()
+                .map_err(|_| TurkError::SyntaxError(format!("min_delta sayısal olmalı: '{s}'")))
         })
         .transpose()?;
 
@@ -1057,7 +1055,7 @@ fn egit_parametreleri_parse(icerik: &str) -> Result<EgitParametreleri> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_model_olustur() {
         let mut dil = TurkDil::new();
@@ -1065,14 +1063,14 @@ mod tests {
         assert!(matches!(result, Value::None));
         assert!(dil.model.is_some());
     }
-    
+
     #[test]
     fn test_katman_ekle() {
         let mut dil = TurkDil::new();
         dil.calistir("model_olustur()").unwrap();
         let result = dil.calistir("katman_ekle(yogun(10, 5, \"relu\"))").unwrap();
         assert!(matches!(result, Value::None));
-        
+
         let model = dil.model.as_ref().unwrap();
         assert_eq!(model.layers.len(), 1);
     }
@@ -1109,8 +1107,10 @@ mod tests {
 
         let mut dil = TurkDil::new();
         dil.calistir("model_olustur()").unwrap();
-        dil.calistir("katman_ekle(yogun(2, 4, \"sigmoid\"))").unwrap();
-        dil.calistir("katman_ekle(yogun(4, 1, \"sigmoid\"))").unwrap();
+        dil.calistir("katman_ekle(yogun(2, 4, \"sigmoid\"))")
+            .unwrap();
+        dil.calistir("katman_ekle(yogun(4, 1, \"sigmoid\"))")
+            .unwrap();
         dil.calistir("derle(adam)").unwrap();
         dil.calistir(&format!("veri_yukle(\"{dosya}\")")).unwrap();
         let sonuc = dil.calistir("egit(5, 4)");
@@ -1138,8 +1138,10 @@ mod tests {
 
         let mut dil = TurkDil::new();
         dil.calistir("model_olustur()").unwrap();
-        dil.calistir("katman_ekle(yogun(2, 4, \"sigmoid\"))").unwrap();
-        dil.calistir("katman_ekle(yogun(4, 1, \"sigmoid\"))").unwrap();
+        dil.calistir("katman_ekle(yogun(2, 4, \"sigmoid\"))")
+            .unwrap();
+        dil.calistir("katman_ekle(yogun(4, 1, \"sigmoid\"))")
+            .unwrap();
         dil.calistir("derle(adam)").unwrap();
         dil.calistir(&format!("veri_yukle(\"{dosya}\")")).unwrap();
         assert!(dil.kontrol_et("egit(5, 4)").is_ok());
@@ -1151,7 +1153,8 @@ mod tests {
     fn test_derle_loss_parametresi() {
         let mut dil = TurkDil::new();
         dil.calistir("model_olustur()").unwrap();
-        dil.calistir("katman_ekle(yogun(2, 1, \"sigmoid\"))").unwrap();
+        dil.calistir("katman_ekle(yogun(2, 1, \"sigmoid\"))")
+            .unwrap();
         dil.calistir("derle(adam, loss=mse)").unwrap();
         let model = dil.model.as_ref().unwrap();
         assert!(model.is_compiled());
@@ -1164,7 +1167,8 @@ mod tests {
         std::fs::write(dosya, "x1,x2,y\n0,0,0\n0,1,1\n1,0,1\n1,1,0\n").unwrap();
 
         let mut dil = TurkDil::new();
-        dil.calistir(&format!("veri_yukle(\"{dosya}\", bolme=0.25)")).unwrap();
+        dil.calistir(&format!("veri_yukle(\"{dosya}\", bolme=0.25)"))
+            .unwrap();
         assert!(dil.aktif_veri.is_some());
 
         let veri = CsvVeriAkisi::yeni_bolme(dosya, Some("y"), Some(0.25)).unwrap();
@@ -1194,9 +1198,11 @@ mod tests {
     fn test_cnn_katman_zinciri_kontrol() {
         let mut dil = TurkDil::new();
         dil.calistir("model_olustur()").unwrap();
-        dil.calistir("katman_ekle(conv2d(28, 28, 1, 8, 3, relu))").unwrap();
+        dil.calistir("katman_ekle(conv2d(28, 28, 1, 8, 3, relu))")
+            .unwrap();
         dil.calistir("katman_ekle(maxpool(26, 26, 8, 2))").unwrap();
-        dil.calistir("katman_ekle(yogun(1352, 10, sigmoid))").unwrap();
+        dil.calistir("katman_ekle(yogun(1352, 10, sigmoid))")
+            .unwrap();
         dil.calistir("derle(adam)").unwrap();
         assert!(dil.kontrol_et("egit(1, 2)").is_err()); // veri yok — beklenen
     }

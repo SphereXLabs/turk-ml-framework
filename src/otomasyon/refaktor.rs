@@ -42,7 +42,9 @@ pub fn proje_refaktor_yurut(yol: &str, kullanici_istek: &str) -> Result<String, 
         let temiz = yorum_satirlari_temizle(&icerik);
         if temiz != icerik {
             dosya_yaz(yol, &temiz)?;
-            log.push(format!("▸ [REFAKTÖR] Gereksiz yorum satırları temizlendi: {yol}"));
+            log.push(format!(
+                "▸ [REFAKTÖR] Gereksiz yorum satırları temizlendi: {yol}"
+            ));
         }
     }
 
@@ -52,7 +54,10 @@ pub fn proje_refaktor_yurut(yol: &str, kullanici_istek: &str) -> Result<String, 
     log.push(REFAKTOR_BAGIMLI_TARAMA.into());
     let bagimlilar = proje_geneli_tara(yol, &plan.enjekte_kod)?;
     if bagimlilar.is_empty() {
-        log.push("▸ [REFAKTÖR] Doğrudan bağımlı dosya bulunamadı — proje geneli kontrol edilecek.".into());
+        log.push(
+            "▸ [REFAKTÖR] Doğrudan bağımlı dosya bulunamadı — proje geneli kontrol edilecek."
+                .into(),
+        );
     } else {
         log.push(format!(
             "▸ [REFAKTÖR] {} bağımlı dosya tespit edildi: {}",
@@ -110,8 +115,12 @@ fn proje_geneli_tara_sync(hedef_yol: &str, eklenen_kod: &str) -> Result<Vec<Stri
             .unwrap_or(&dosya)
             .to_string_lossy()
             .replace('\\', "/");
-        let icerik = fs::read_to_string(&dosya)
-            .map_err(|e| format!("Bağımlılık taraması okuma hatası ({}): {e}", dosya.display()))?;
+        let icerik = fs::read_to_string(&dosya).map_err(|e| {
+            format!(
+                "Bağımlılık taraması okuma hatası ({}): {e}",
+                dosya.display()
+            )
+        })?;
         if dosya_bagimli_mi(&icerik, &mod_yollari, &simgeler) {
             bagimlilar.push(yol_str);
         }
@@ -131,7 +140,9 @@ fn src_rs_dosyalarini_topla() -> Result<Vec<PathBuf>, String> {
 }
 
 fn src_dizin_gez(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    for girdi in fs::read_dir(dir).map_err(|e| format!("Dizin okunamadı ({}): {e}", dir.display()))? {
+    for girdi in
+        fs::read_dir(dir).map_err(|e| format!("Dizin okunamadı ({}): {e}", dir.display()))?
+    {
         let girdi = girdi.map_err(|e| format!("Dizin girdisi hatası: {e}"))?;
         let yol = girdi.path();
         if yol.is_dir() {
@@ -145,10 +156,7 @@ fn src_dizin_gez(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
 
 fn modul_yollarini_cikar(dosya: &Path) -> Vec<String> {
     let src = proje_kok_dizini().join("src");
-    let rel = dosya
-        .strip_prefix(&src)
-        .unwrap_or(dosya)
-        .with_extension("");
+    let rel = dosya.strip_prefix(&src).unwrap_or(dosya).with_extension("");
     let parcalar: Vec<String> = rel
         .components()
         .filter_map(|c| c.as_os_str().to_str().map(str::to_string))
@@ -170,8 +178,19 @@ fn dosyadan_simgeleri_cikar(icerik: &str) -> HashSet<String> {
     let mut simgeler = HashSet::new();
     for satir in icerik.lines() {
         let t = satir.trim();
-        for on_ek in ["pub fn ", "fn ", "pub struct ", "struct ", "pub enum ", "enum ", "pub trait ", "trait ", "impl ", "type ", "pub type "]
-        {
+        for on_ek in [
+            "pub fn ",
+            "fn ",
+            "pub struct ",
+            "struct ",
+            "pub enum ",
+            "enum ",
+            "pub trait ",
+            "trait ",
+            "impl ",
+            "type ",
+            "pub type ",
+        ] {
             if let Some(rest) = t.strip_prefix(on_ek) {
                 let ad = rest
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
@@ -210,8 +229,8 @@ fn akil_suzgeci(icerik: &str, yol: &str, istek: &str) -> Result<RefaktorPlani, S
     let hedef = enjeksiyon_hedefi_bul(icerik);
     let rust = yol.ends_with(".rs");
 
-    let yorum_temizligi = k.contains("yorum")
-        && (k.contains("temiz") || k.contains("sil") || k.contains("optimize"));
+    let yorum_temizligi =
+        k.contains("yorum") && (k.contains("temiz") || k.contains("sil") || k.contains("optimize"));
 
     if k.contains("siber") || k.contains("cyber") || k.contains("neon") {
         return Ok(RefaktorPlani {
@@ -226,7 +245,10 @@ fn akil_suzgeci(icerik: &str, yol: &str, istek: &str) -> Result<RefaktorPlani, S
         });
     }
 
-    if k.contains("optimize") || k.contains("optimiz") || k.contains("iyileştir") || k.contains("iyilestir")
+    if k.contains("optimize")
+        || k.contains("optimiz")
+        || k.contains("iyileştir")
+        || k.contains("iyilestir")
     {
         return Ok(RefaktorPlani {
             hedef_satir: hedef,
@@ -240,7 +262,10 @@ fn akil_suzgeci(icerik: &str, yol: &str, istek: &str) -> Result<RefaktorPlani, S
         });
     }
 
-    if k.contains("helper") || k.contains("yardımcı") || k.contains("yardimci") || k.contains("fonksiyon")
+    if k.contains("helper")
+        || k.contains("yardımcı")
+        || k.contains("yardimci")
+        || k.contains("fonksiyon")
     {
         return Ok(RefaktorPlani {
             hedef_satir: hedef,
@@ -286,11 +311,7 @@ fn enjeksiyon_hedefi_bul(icerik: &str) -> String {
             return satir.to_string();
         }
     }
-    icerik
-        .lines()
-        .next()
-        .unwrap_or("fn main")
-        .to_string()
+    icerik.lines().next().unwrap_or("fn main").to_string()
 }
 
 fn yorum_satirlari_temizle(icerik: &str) -> String {
@@ -372,12 +393,12 @@ mod tests {
 
     #[test]
     fn test_simgeleri_cikar() {
-/// TÜRK performans izleme notu — refaktör yardımcısı.
-#[inline]
-#[allow(dead_code)]
-fn turk_perf_notu(ham: &str) -> String {
-    format!("[TÜRK-PERF] {ham}")
-}
+        /// TÜRK performans izleme notu — refaktör yardımcısı.
+        #[inline]
+        #[allow(dead_code)]
+        fn turk_perf_notu(ham: &str) -> String {
+            format!("[TÜRK-PERF] {ham}")
+        }
         let simgeler = dosyadan_simgeleri_cikar("pub fn foo() {}\nstruct Bar {}");
         assert!(simgeler.contains("foo"));
         assert!(simgeler.contains("Bar"));

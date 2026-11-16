@@ -9,13 +9,12 @@ use chrono::Local;
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use kokpit_ui::{
-    arka_plan_ciz, cam_panel_ciz, gokturk_tamga_filigrani, komut_satir_sayisi,
-    log_filtre_uygun, log_satir_rengi, minimal_telemetry_ciz, olcekli, otuken_pulse_ciz,
-    panel_baslik_ciz, pencere_simgesi, renk_lerp, runik_etiket_ciz, splash_ciz, tab_oneri,
-    tema_uygula, turk_tamga_duzelt, vu_metre_ciz,
-    ACCENT_GREEN, ACCENT_ORANGE, DEEP_MOR, GLASS_FILL, KENAR_INCE, LOG_CYAN, LOG_NEON_ZINCIR,
-    MICRO_CYAN, NEON_ALERT, NEON_CYAN, TERMINAL_DIM, TERMINAL_USER, TUNC_BRONZ,
-    LogFiltre, VEKIL_TARAMA_SURE,
+    arka_plan_ciz, cam_panel_ciz, gokturk_tamga_filigrani, komut_satir_sayisi, log_filtre_uygun,
+    log_satir_rengi, minimal_telemetry_ciz, olcekli, otuken_pulse_ciz, panel_baslik_ciz,
+    pencere_simgesi, renk_lerp, runik_etiket_ciz, splash_ciz, tab_oneri, tema_uygula,
+    turk_tamga_duzelt, vu_metre_ciz, LogFiltre, ACCENT_GREEN, ACCENT_ORANGE, DEEP_MOR, GLASS_FILL,
+    KENAR_INCE, LOG_CYAN, LOG_NEON_ZINCIR, MICRO_CYAN, NEON_ALERT, NEON_CYAN, TERMINAL_DIM,
+    TERMINAL_USER, TUNC_BRONZ, VEKIL_TARAMA_SURE,
 };
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
@@ -24,9 +23,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 use sysinfo::{Disks, MemoryRefreshKind, ProcessRefreshKind, RefreshKind, System};
 use turk::{
-    cpu_kullanim_guncelle, EgitimIlerleme, Kulak, SesSinyal, SistemVekili, TurkSistem,
-    TURK_VEKIL_OPTIMIZE_MESAJ, TURK_VEKIL_UYARI_MESAJ, TurkDil, VekilKomut, VekilOlay,
-    konusmayi_metne_cevir, whisper_hazir_mi,
+    cpu_kullanim_guncelle, konusmayi_metne_cevir, whisper_hazir_mi, EgitimIlerleme, Kulak,
+    SesSinyal, SistemVekili, TurkDil, TurkSistem, VekilKomut, VekilOlay, TURK_VEKIL_OPTIMIZE_MESAJ,
+    TURK_VEKIL_UYARI_MESAJ,
 };
 
 const KOMUT_MERKEZI_YUKSEKLIK_TABAN: f32 = 88.0;
@@ -132,20 +131,24 @@ fn disk_io_guncelle(sistem: &mut System, olcum: &mut DiskIoOlcum) -> (f32, f32) 
 
 // ── Rezonans dalga motoru ─────────────────────────────────────────────────────
 
-fn catmull_rom(p0: egui::Pos2, p1: egui::Pos2, p2: egui::Pos2, p3: egui::Pos2, t: f32) -> egui::Pos2 {
+fn catmull_rom(
+    p0: egui::Pos2,
+    p1: egui::Pos2,
+    p2: egui::Pos2,
+    p3: egui::Pos2,
+    t: f32,
+) -> egui::Pos2 {
     let t2 = t * t;
     let t3 = t2 * t;
     egui::pos2(
-        0.5
-            * ((2.0 * p1.x)
-                + (-p0.x + p2.x) * t
-                + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2
-                + (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3),
-        0.5
-            * ((2.0 * p1.y)
-                + (-p0.y + p2.y) * t
-                + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2
-                + (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3),
+        0.5 * ((2.0 * p1.x)
+            + (-p0.x + p2.x) * t
+            + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2
+            + (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3),
+        0.5 * ((2.0 * p1.y)
+            + (-p0.y + p2.y) * t
+            + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2
+            + (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3),
     )
 }
 
@@ -427,9 +430,13 @@ impl Default for TurkSistemGui {
             loglar.push(format!("[{damga}] ▸ Whisper STT hazır."));
             loglar.push(format!("[{damga}] ▸ Mikrofon: [ 🎤 MIC ] ile etkinleştir."));
         } else {
-            loglar.push(format!("[{damga}] ▸ Whisper: .\\whisper-kur.ps1 ile kurun."));
+            loglar.push(format!(
+                "[{damga}] ▸ Whisper: .\\whisper-kur.ps1 ile kurun."
+            ));
         }
-        loglar.push(format!("[{damga}] ▸ TÜRK v3.0.0 — Göktürk Kokpit (Semantik Hafıza + Otonom Zincir) aktif."));
+        loglar.push(format!(
+            "[{damga}] ▸ TÜRK v3.0.0 — Göktürk Kokpit (Semantik Hafıza + Otonom Zincir) aktif."
+        ));
 
         let (vekil_tx, vekil_rx) = SistemVekili::baslat();
         let turk_sistem = Arc::new(Mutex::new(TurkSistem::yeni()));
@@ -527,10 +534,7 @@ impl TurkSistemGui {
     }
 
     fn kritik_banner_goster(&self) -> bool {
-        self.kritik_yuk
-            || self
-                .disk_kullanim_oran
-                .is_some_and(|d| d >= 0.90)
+        self.kritik_yuk || self.disk_kullanim_oran.is_some_and(|d| d >= 0.90)
     }
 
     fn otonom_arac_etiketi(&self) -> Option<&'static str> {
@@ -628,9 +632,12 @@ impl TurkSistemGui {
 
     fn otonom_rezonans_aktif(&self) -> bool {
         self.turk_dusunuyor
-            || self.loglar.iter().rev().take(3).any(|s| {
-                s.contains("[REFAKTÖR]") || s.contains("[DERLE]") || s.contains("[KOD]")
-            })
+            || self
+                .loglar
+                .iter()
+                .rev()
+                .take(3)
+                .any(|s| s.contains("[REFAKTÖR]") || s.contains("[DERLE]") || s.contains("[KOD]"))
     }
 
     fn dalga_rengi(&self) -> egui::Color32 {
@@ -698,9 +705,7 @@ impl TurkSistemGui {
                 || k.contains("etkin")
                 || !k.contains("kapat");
             self.vekil_otonom_mod = aktif;
-            let _ = self
-                .vekil_tx
-                .try_send(VekilKomut::OtonomMod(aktif));
+            let _ = self.vekil_tx.try_send(VekilKomut::OtonomMod(aktif));
             self.log_ekle(format!(
                 "▸ [TÜRK Vekil] Otonom mod {}",
                 if aktif { "AÇIK" } else { "KAPALI" }
@@ -716,7 +721,9 @@ impl TurkSistemGui {
                 || k.contains("hadi"))
         {
             let _ = self.vekil_tx.try_send(VekilKomut::OptimizasyonOnayla);
-            self.log_ekle("▸ [TÜRK Vekil] Süreç optimizasyonu onaylandı — os_seviyesi_kontrol başlatıldı.");
+            self.log_ekle(
+                "▸ [TÜRK Vekil] Süreç optimizasyonu onaylandı — os_seviyesi_kontrol başlatıldı.",
+            );
         }
     }
 
@@ -973,7 +980,9 @@ impl TurkSistemGui {
                         self.durum_mesaji = format!("Tamamlandı — {epoch_sayisi} epoch");
                         log_satirlari.push(format!(
                             "En iyi: loss={en_iyi_train:.6}{}",
-                            en_iyi_val.map(|v| format!(", val={v:.6}")).unwrap_or_default()
+                            en_iyi_val
+                                .map(|v| format!(", val={v:.6}"))
+                                .unwrap_or_default()
                         ));
                         self.epoch_ilerleme = 1.0;
                         self.guncel_epoch = epoch_sayisi;
@@ -1046,10 +1055,8 @@ impl TurkSistemGui {
                         if let Ok(g) = self.sohbet.lock() {
                             if let Some((_, son)) = g.last() {
                                 son_yanit = Some(son.clone());
-                                log_satirlari.push(format!(
-                                    "← {}",
-                                    son.lines().next().unwrap_or("")
-                                ));
+                                log_satirlari
+                                    .push(format!("← {}", son.lines().next().unwrap_or("")));
                             }
                         }
                     }
@@ -1181,26 +1188,24 @@ impl TurkSistemGui {
                         } else {
                             "Otonom KAPALI"
                         };
-                        ui.label(
-                            egui::RichText::new(durum)
-                                .small()
-                                .monospace()
-                                .color(if self.vekil_otonom_mod {
-                                    ACCENT_GREEN.linear_multiply(0.8)
-                                } else {
-                                    TERMINAL_DIM
-                                }),
-                        );
-                        if ui
-                            .checkbox(&mut self.vekil_otonom_mod, "toggle")
-                            .changed()
-                        {
+                        ui.label(egui::RichText::new(durum).small().monospace().color(
+                            if self.vekil_otonom_mod {
+                                ACCENT_GREEN.linear_multiply(0.8)
+                            } else {
+                                TERMINAL_DIM
+                            },
+                        ));
+                        if ui.checkbox(&mut self.vekil_otonom_mod, "toggle").changed() {
                             let _ = self
                                 .vekil_tx
                                 .try_send(VekilKomut::OtonomMod(self.vekil_otonom_mod));
                             self.log_ekle(format!(
                                 "▸ [TÜRK Vekil] Otonom mod {}",
-                                if self.vekil_otonom_mod { "AÇIK" } else { "KAPALI" }
+                                if self.vekil_otonom_mod {
+                                    "AÇIK"
+                                } else {
+                                    "KAPALI"
+                                }
                             ));
                         }
                     });
@@ -1249,10 +1254,7 @@ impl TurkSistemGui {
                 egui::Frame::none()
                     .fill(egui::Color32::from_rgba_premultiplied(8, 16, 24, 160))
                     .rounding(4.0)
-                    .stroke(egui::Stroke::new(
-                        0.5,
-                        MICRO_CYAN.linear_multiply(0.25),
-                    ))
+                    .stroke(egui::Stroke::new(0.5, MICRO_CYAN.linear_multiply(0.25)))
                     .inner_margin(6.0)
                     .show(ui, |ui| {
                         egui::ScrollArea::vertical()
@@ -1296,7 +1298,12 @@ impl TurkSistemGui {
         );
         let dalga_rect = rect.shrink(12.0);
         let hiz = self.dalga_hiz_carpani();
-        let amp = self.rezonans_genligi() * if self.otonom_rezonans_aktif() { 1.15 } else { 0.75 };
+        let amp = self.rezonans_genligi()
+            * if self.otonom_rezonans_aktif() {
+                1.15
+            } else {
+                0.75
+            };
         akiskan_nabiz_ciz(
             &painter,
             dalga_rect,
@@ -1364,7 +1371,9 @@ impl TurkSistemGui {
                 ui.label("CSV:");
                 ui.text_edit_singleline(&mut self.csv_yolu);
                 if ui.button("...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file()
+                    if let Some(p) = rfd::FileDialog::new()
+                        .add_filter("CSV", &["csv"])
+                        .pick_file()
                     {
                         self.csv_yolu = p.display().to_string();
                     }
@@ -1413,10 +1422,8 @@ impl TurkSistemGui {
             .inner_margin(0.0)
             .show(ui, |ui| {
                 let w = ui.available_width();
-                let (kutu, _) = ui.allocate_exact_size(
-                    egui::vec2(w, grafik_yukseklik),
-                    egui::Sense::hover(),
-                );
+                let (kutu, _) =
+                    ui.allocate_exact_size(egui::vec2(w, grafik_yukseklik), egui::Sense::hover());
                 let dalga_opak = if grafik_modu {
                     (1.0 - self.grafik_opaklik).max(0.08)
                 } else {
@@ -1536,11 +1543,7 @@ impl TurkSistemGui {
             );
             ui.add_space(6.0);
 
-            let gecmis = self
-                .sohbet
-                .lock()
-                .map(|g| g.clone())
-                .unwrap_or_default();
+            let gecmis = self.sohbet.lock().map(|g| g.clone()).unwrap_or_default();
 
             self.terminal_onceki_len = gecmis.len();
 
@@ -1609,159 +1612,150 @@ impl TurkSistemGui {
             egui::Stroke::new(KENAR_INCE, renk_lerp(MICRO_CYAN, TUNC_BRONZ, 0.4)),
         );
 
-        ui.allocate_ui_at_rect(
-            panel.shrink2(egui::vec2(16.0, 10.0)),
-            |ui| {
-                let girdi_id = egui::Id::new(KOMUT_GIRDI_ID);
-                ui.memory_mut(|mem| mem.request_focus(girdi_id));
+        ui.allocate_ui_at_rect(panel.shrink2(egui::vec2(16.0, 10.0)), |ui| {
+            let girdi_id = egui::Id::new(KOMUT_GIRDI_ID);
+            ui.memory_mut(|mem| mem.request_focus(girdi_id));
 
-                if let Some(ref muhur) = self.zincir_muhur {
-                    let pulse = 0.85 + (self.anim_zaman * 2.4).sin() * 0.15;
-                    ui.horizontal_wrapped(|ui| {
-                        ui.set_max_width(ui.available_width());
-                        ui.label(
-                            egui::RichText::new(muhur)
-                                .monospace()
-                                .size(14.0)
-                                .strong()
-                                .color(ACCENT_GREEN.linear_multiply(pulse)),
-                        );
-                    });
-                    ui.add_space(6.0);
-                }
-
-                if self.ses_dinliyor {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("🎤")
-                                .small()
-                                .color(ACCENT_ORANGE),
-                        );
-                        vu_metre_ciz(ui, self.ses_seviye, self.anim_zaman);
-                    });
-                }
-
-                let mut gonder = false;
+            if let Some(ref muhur) = self.zincir_muhur {
+                let pulse = 0.85 + (self.anim_zaman * 2.4).sin() * 0.15;
                 ui.horizontal_wrapped(|ui| {
+                    ui.set_max_width(ui.available_width());
                     ui.label(
-                        egui::RichText::new(TURK_CMD_PROMPT)
+                        egui::RichText::new(muhur)
                             .monospace()
-                            .size(15.0)
+                            .size(14.0)
                             .strong()
-                            .color(ACCENT_GREEN),
+                            .color(ACCENT_GREEN.linear_multiply(pulse)),
                     );
-
-                    let satirlar = komut_satir_sayisi(&self.girdi);
-                    let girdi = ui.add(
-                        egui::TextEdit::multiline(&mut self.girdi)
-                            .id(girdi_id)
-                            .hint_text(
-                                "sistem durumu | not al | cargo check | proje refaktör …",
-                            )
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(ui.available_width().min(520.0))
-                            .desired_rows(satirlar)
-                            .margin(egui::vec2(12.0, 10.0)),
-                    );
-
-                    if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
-                        if let Some(oneri) = tab_oneri(&self.girdi) {
-                            self.girdi = oneri;
-                        }
-                    }
-
-                    if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) && !self.komut_gecmisi.is_empty()
-                    {
-                        let idx = self.komut_gecmis_idx.unwrap_or(self.komut_gecmisi.len());
-                        if idx > 0 {
-                            let yeni = idx - 1;
-                            if let Some(k) = self.komut_gecmisi.get(yeni) {
-                                self.girdi = k.clone();
-                                self.komut_gecmis_idx = Some(yeni);
-                            }
-                        }
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::ArrowDown))
-                        && self.komut_gecmis_idx.is_some()
-                    {
-                        let idx = self.komut_gecmis_idx.unwrap();
-                        if idx + 1 < self.komut_gecmisi.len() {
-                            let yeni = idx + 1;
-                            if let Some(k) = self.komut_gecmisi.get(yeni) {
-                                self.girdi = k.clone();
-                                self.komut_gecmis_idx = Some(yeni);
-                            }
-                        } else {
-                            self.girdi.clear();
-                            self.komut_gecmis_idx = None;
-                        }
-                    }
-
-                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter))
-                        && ui.input(|i| !i.modifiers.shift);
-
-                    if let Some(oneri) = tab_oneri(&self.girdi) {
-                        ui.label(
-                            egui::RichText::new(format!("⇥ {}", &oneri[self.girdi.len()..]))
-                                .small()
-                                .monospace()
-                                .color(TERMINAL_DIM.linear_multiply(0.5)),
-                        );
-                    }
-
-                    let mic_aktif = self.ses_dinliyor || self.ses_ceviriyor;
-                    let mic_etiket = if self.ses_dinliyor {
-                        "[ 🎤 MIC ● ]"
-                    } else if self.ses_ceviriyor {
-                        "[ 🎤 MIC … ]"
-                    } else {
-                        "[ 🎤 MIC ]"
-                    };
-                    let mic_renk = if mic_aktif {
-                        ACCENT_ORANGE
-                    } else if whisper_hazir_mi() {
-                        ACCENT_GREEN
-                    } else {
-                        TERMINAL_DIM
-                    };
-                    if ui
-                        .add_enabled(
-                            whisper_hazir_mi() && !self.ses_ceviriyor,
-                            egui::Button::new(egui::RichText::new(mic_etiket).color(mic_renk)),
-                        )
-                        .clicked()
-                    {
-                        self.ses_mikrofon_toggle(ctx);
-                    }
-
-                    let otuken_renk = if self.otuken_pulse > 0.0 {
-                        ACCENT_GREEN.linear_multiply(0.6 + self.otuken_pulse * 0.4)
-                    } else {
-                        egui::Color32::WHITE
-                    };
-                    if ui
-                        .button(
-                            egui::RichText::new("[ 💥 ÖTÜKEN ]")
-                                .small()
-                                .strong()
-                                .color(otuken_renk),
-                        )
-                        .clicked()
-                        || (enter && !self.girdi.trim().is_empty())
-                    {
-                        gonder = true;
-                    }
-
-                    if enter && gonder {
-                        girdi.surrender_focus();
-                    }
                 });
+                ui.add_space(6.0);
+            }
 
-                if gonder {
-                    self.turk_gonder();
+            if self.ses_dinliyor {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("🎤").small().color(ACCENT_ORANGE));
+                    vu_metre_ciz(ui, self.ses_seviye, self.anim_zaman);
+                });
+            }
+
+            let mut gonder = false;
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new(TURK_CMD_PROMPT)
+                        .monospace()
+                        .size(15.0)
+                        .strong()
+                        .color(ACCENT_GREEN),
+                );
+
+                let satirlar = komut_satir_sayisi(&self.girdi);
+                let girdi = ui.add(
+                    egui::TextEdit::multiline(&mut self.girdi)
+                        .id(girdi_id)
+                        .hint_text("sistem durumu | not al | cargo check | proje refaktör …")
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(ui.available_width().min(520.0))
+                        .desired_rows(satirlar)
+                        .margin(egui::vec2(12.0, 10.0)),
+                );
+
+                if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                    if let Some(oneri) = tab_oneri(&self.girdi) {
+                        self.girdi = oneri;
+                    }
                 }
-            },
-        );
+
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) && !self.komut_gecmisi.is_empty()
+                {
+                    let idx = self.komut_gecmis_idx.unwrap_or(self.komut_gecmisi.len());
+                    if idx > 0 {
+                        let yeni = idx - 1;
+                        if let Some(k) = self.komut_gecmisi.get(yeni) {
+                            self.girdi = k.clone();
+                            self.komut_gecmis_idx = Some(yeni);
+                        }
+                    }
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowDown))
+                    && self.komut_gecmis_idx.is_some()
+                {
+                    let idx = self.komut_gecmis_idx.unwrap();
+                    if idx + 1 < self.komut_gecmisi.len() {
+                        let yeni = idx + 1;
+                        if let Some(k) = self.komut_gecmisi.get(yeni) {
+                            self.girdi = k.clone();
+                            self.komut_gecmis_idx = Some(yeni);
+                        }
+                    } else {
+                        self.girdi.clear();
+                        self.komut_gecmis_idx = None;
+                    }
+                }
+
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    && ui.input(|i| !i.modifiers.shift);
+
+                if let Some(oneri) = tab_oneri(&self.girdi) {
+                    ui.label(
+                        egui::RichText::new(format!("⇥ {}", &oneri[self.girdi.len()..]))
+                            .small()
+                            .monospace()
+                            .color(TERMINAL_DIM.linear_multiply(0.5)),
+                    );
+                }
+
+                let mic_aktif = self.ses_dinliyor || self.ses_ceviriyor;
+                let mic_etiket = if self.ses_dinliyor {
+                    "[ 🎤 MIC ● ]"
+                } else if self.ses_ceviriyor {
+                    "[ 🎤 MIC … ]"
+                } else {
+                    "[ 🎤 MIC ]"
+                };
+                let mic_renk = if mic_aktif {
+                    ACCENT_ORANGE
+                } else if whisper_hazir_mi() {
+                    ACCENT_GREEN
+                } else {
+                    TERMINAL_DIM
+                };
+                if ui
+                    .add_enabled(
+                        whisper_hazir_mi() && !self.ses_ceviriyor,
+                        egui::Button::new(egui::RichText::new(mic_etiket).color(mic_renk)),
+                    )
+                    .clicked()
+                {
+                    self.ses_mikrofon_toggle(ctx);
+                }
+
+                let otuken_renk = if self.otuken_pulse > 0.0 {
+                    ACCENT_GREEN.linear_multiply(0.6 + self.otuken_pulse * 0.4)
+                } else {
+                    egui::Color32::WHITE
+                };
+                if ui
+                    .button(
+                        egui::RichText::new("[ 💥 ÖTÜKEN ]")
+                            .small()
+                            .strong()
+                            .color(otuken_renk),
+                    )
+                    .clicked()
+                    || (enter && !self.girdi.trim().is_empty())
+                {
+                    gonder = true;
+                }
+
+                if enter && gonder {
+                    girdi.surrender_focus();
+                }
+            });
+
+            if gonder {
+                self.turk_gonder();
+            }
+        });
     }
 }
 
@@ -1788,7 +1782,11 @@ impl eframe::App for TurkSistemGui {
 
         arka_plan_ciz(ctx, self.anim_zaman);
 
-        let rezonans = if self.otonom_rezonans_aktif() { 1.4 } else { 1.0 };
+        let rezonans = if self.otonom_rezonans_aktif() {
+            1.4
+        } else {
+            1.0
+        };
         self.dalga_fazi += dt * 2.8 * self.dalga_hiz_carpani() * rezonans;
 
         self.sistem_bilgisi.refresh_memory();
@@ -1829,7 +1827,11 @@ impl eframe::App for TurkSistemGui {
         let sag_gen = olcekli(ctx, 400.0);
         let komut_yuk = olcekli(ctx, KOMUT_MERKEZI_YUKSEKLIK_TABAN)
             + (komut_satir_sayisi(&self.girdi).saturating_sub(2) as f32 * 18.0)
-            + if self.zincir_muhur.is_some() { 28.0 } else { 0.0 };
+            + if self.zincir_muhur.is_some() {
+                28.0
+            } else {
+                0.0
+            };
 
         let header_yuk = if self.kritik_banner_goster() {
             olcekli(ctx, 76.0)
@@ -1917,16 +1919,16 @@ impl eframe::App for TurkSistemGui {
 }
 
 fn ana_disk_yuzdesi() -> Option<f32> {
-/// TÜRK siber telemetri etiketi — otonom refaktör.
-#[allow(dead_code)]
-fn turk_siber_etiket() -> &'static str {
-/// TÜRK siber telemetri etiketi — otonom refaktör.
-#[allow(dead_code)]
-fn turk_siber_etiket() -> &'static str {
-    "◈ SİBER DALGA — TÜRK refaktör aktif"
-}
-    "◈ SİBER DALGA — TÜRK refaktör aktif"
-}
+    /// TÜRK siber telemetri etiketi — otonom refaktör.
+    #[allow(dead_code)]
+    fn turk_siber_etiket() -> &'static str {
+        /// TÜRK siber telemetri etiketi — otonom refaktör.
+        #[allow(dead_code)]
+        fn turk_siber_etiket() -> &'static str {
+            "◈ SİBER DALGA — TÜRK refaktör aktif"
+        }
+        "◈ SİBER DALGA — TÜRK refaktör aktif"
+    }
     Disks::new_with_refreshed_list()
         .iter()
         .find(|d| {

@@ -9,12 +9,12 @@ pub use beyin::{
     SISTEM_PROMPT,
 };
 pub use hafiza::{
-    Hafiza, HafizaEslesme, HafizaHavuzu, HafizaKaydi, HafizaMerkezi, SemantikKayit, hafiza_tara,
-    hafiza_tara_ozet,
+    hafiza_tara, hafiza_tara_ozet, Hafiza, HafizaEslesme, HafizaHavuzu, HafizaKaydi, HafizaMerkezi,
+    SemantikKayit,
 };
 pub use otonom_zincir_planlayici::{
-    ZincirAdimi, ZincirSonuc, cok_adimli_mi, otonom_zincir_planla_ve_yurut, plan_olustur,
-    zincir_yurut,
+    cok_adimli_mi, otonom_zincir_planla_ve_yurut, plan_olustur, zincir_yurut, ZincirAdimi,
+    ZincirSonuc,
 };
 
 use crate::error::{Result, TurkError};
@@ -83,7 +83,8 @@ mod tests {
         let mut motor = TurkSistem::yeni();
         let yanit = motor.mesaj_isle("Merhaba TÜRK").unwrap();
         assert!(
-            yanit.to_lowercase().contains("türk") || yanit.to_lowercase().contains("turk")
+            yanit.to_lowercase().contains("türk")
+                || yanit.to_lowercase().contains("turk")
                 || yanit.contains("Sinan")
         );
     }

@@ -57,7 +57,12 @@ pub fn cargo_check_json(proje_yolu: &str) -> Result<CargoCheckSonuc, String> {
     }
 
     let out = cargo_komutu()
-        .args(["check", "--message-format=json", "--features", "turk_sistem"])
+        .args([
+            "check",
+            "--message-format=json",
+            "--features",
+            "turk_sistem",
+        ])
         .current_dir(&dir)
         .output()
         .map_err(|e| format!("cargo çalıştırılamadı: {e}"))?;
@@ -134,9 +139,7 @@ fn json_mesajlari_ayikla(cikti: &str) -> (Vec<DerlemeHatasi>, Vec<DerlemeHatasi>
                         .and_then(|f| f.as_str())
                         .unwrap_or("?")
                         .to_string(),
-                    span.get("line_start")
-                        .and_then(|l| l.as_u64())
-                        .unwrap_or(0) as u32,
+                    span.get("line_start").and_then(|l| l.as_u64()).unwrap_or(0) as u32,
                 )
             })
             .unwrap_or_else(|| ("?".into(), 0));
@@ -148,7 +151,12 @@ fn json_mesajlari_ayikla(cikti: &str) -> (Vec<DerlemeHatasi>, Vec<DerlemeHatasi>
             seviye: seviye.clone(),
         };
 
-        let anahtar = (kayit.dosya.clone(), kayit.satir, kayit.mesaj.clone(), seviye.clone());
+        let anahtar = (
+            kayit.dosya.clone(),
+            kayit.satir,
+            kayit.mesaj.clone(),
+            seviye.clone(),
+        );
         if !gorulen.insert(anahtar) {
             continue;
         }
@@ -169,8 +177,7 @@ pub fn hata_onar(hata: &DerlemeHatasi) -> Result<String, String> {
         return Err("Geçersiz hata konumu.".into());
     }
 
-    let yol = cozumle_yol(&hata.dosya)
-        .unwrap_or_else(|_| proje_kok_dizini().join(&hata.dosya));
+    let yol = cozumle_yol(&hata.dosya).unwrap_or_else(|_| proje_kok_dizini().join(&hata.dosya));
     if !yol.is_file() {
         return Err(format!("Dosya bulunamadı: {}", yol.display()));
     }
@@ -257,7 +264,9 @@ pub fn otonom_derle_dongusu_bagimlilar(
         let sonuc = cargo_check_json(proje_yolu)?;
 
         if sonuc.basarili && (!uyarilari_temizle || sonuc.uyarilar.is_empty()) {
-            log.push(format!("✓ [DERLE] proje temiz — deneme {deneme}/{MAX_ONARIM_DENEMESI}"));
+            log.push(format!(
+                "✓ [DERLE] proje temiz — deneme {deneme}/{MAX_ONARIM_DENEMESI}"
+            ));
             return Ok(log.join("\n"));
         }
 

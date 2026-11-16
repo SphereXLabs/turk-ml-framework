@@ -1,3 +1,7 @@
+use env_logger::Builder;
+use log::{info, warn, LevelFilter};
+use ndarray::arr2;
+use turk::error::Result;
 /// DSL Örnek — main.turk dosyasını okuyup, XOR verisiyle gerçek eğitim yapar.
 ///
 /// Çalıştırmak için:
@@ -11,16 +15,10 @@ use turk::{
     model::{EarlyStopping, Sequential},
     optimizer::Adam,
 };
-use turk::error::Result;
-use log::{info, warn, LevelFilter};
-use ndarray::arr2;
-use env_logger::Builder;
 
 fn main() -> Result<()> {
     // ── Loglama ────────────────────────────────────────────────────────────
-    Builder::new()
-        .filter(None, LevelFilter::Info)
-        .init();
+    Builder::new().filter(None, LevelFilter::Info).init();
 
     info!("======================================================");
     info!(" TÜRK DSL Örneği — main.turk + XOR + BatchNorm + ES  ");
@@ -46,19 +44,18 @@ fn main() -> Result<()> {
 
     // ── XOR veri seti ──────────────────────────────────────────────────────
     //   Girdi: 2 özellik   Çıktı: 1 sınıf
-    let x_train = arr2(&[
-        [0.0_f64, 0.0],
-        [0.0,     1.0],
-        [1.0,     0.0],
-        [1.0,     1.0],
-    ]);
+    let x_train = arr2(&[[0.0_f64, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]);
     let y_train = arr2(&[[0.0_f64], [1.0], [1.0], [0.0]]);
 
     // Doğrulama için aynı veri (küçük örnekte anlamlı)
     let x_val = x_train.clone();
     let y_val = y_train.clone();
 
-    info!("XOR eğitim verisi: {} örnek, {} özellik", x_train.nrows(), x_train.ncols());
+    info!(
+        "XOR eğitim verisi: {} örnek, {} özellik",
+        x_train.nrows(),
+        x_train.ncols()
+    );
 
     // ── Model mimarisi (main.turk ile uyumlu) ─────────────────────────────
     //   Dense(2→8, Relu) → BatchNorm(8) → Dense(8→4, Relu) → Dense(4→1, Sigmoid)
@@ -66,7 +63,9 @@ fn main() -> Result<()> {
 
     let make_dense = |i: usize, o: usize, act: Activation| {
         turk::layer::Dense::new(
-            i, o, act,
+            i,
+            o,
+            act,
             Box::new(GlorotUniform::new()),
             Box::new(Zeros::new()),
             true,
@@ -106,7 +105,11 @@ fn main() -> Result<()> {
     info!(
         "Çalışan epoch: {}/100 (erken durdurma: {})",
         history.epochs_run(),
-        if history.epochs_run() < 100 { "Evet" } else { "Hayır" }
+        if history.epochs_run() < 100 {
+            "Evet"
+        } else {
+            "Hayır"
+        }
     );
 
     if let Some(ilk) = history.train_losses.first() {
@@ -124,16 +127,18 @@ fn main() -> Result<()> {
     let tahminler = model.predict(&x_train.view())?;
     let girdiler = [
         ([0.0_f64, 0.0], 0.0),
-        ([0.0,     1.0], 1.0),
-        ([1.0,     0.0], 1.0),
-        ([1.0,     1.0], 0.0),
+        ([0.0, 1.0], 1.0),
+        ([1.0, 0.0], 1.0),
+        ([1.0, 1.0], 0.0),
     ];
     let mut dogru = 0usize;
     for (idx, (girdi, beklenen)) in girdiler.iter().enumerate() {
         let tahmin: f64 = tahminler[[idx, 0]];
-        let sinif: f64  = if tahmin > 0.5 { 1.0 } else { 0.0 };
+        let sinif: f64 = if tahmin > 0.5 { 1.0 } else { 0.0 };
         let esit = (sinif - *beklenen).abs() < 1e-6_f64;
-        if esit { dogru += 1; }
+        if esit {
+            dogru += 1;
+        }
         let isaret = if esit { "✓" } else { "✗" };
         info!(
             "  [{:.0}, {:.0}] → beklenen={:.0}  tahmin={:.4}  sınıf={:.0}  {}",
@@ -145,9 +150,7 @@ fn main() -> Result<()> {
     // ── Eğitim geçmişini JSON'a kaydet ────────────────────────────────────
     let gecmis_dosyasi = "egitim_gecmisi.json";
     history.dosyaya_kaydet(gecmis_dosyasi)?;
-    info!(
-        "╔══════════════════════════════════════════════════════════╗"
-    );
+    info!("╔══════════════════════════════════════════════════════════╗");
     info!(
         "║  ▸ Eğitim istatistikleri '{}' dosyasına  ║",
         gecmis_dosyasi
@@ -157,9 +160,7 @@ fn main() -> Result<()> {
         history.epochs_run(),
         history.last_train_loss().unwrap_or(0.0)
     );
-    info!(
-        "╚══════════════════════════════════════════════════════════╝"
-    );
+    info!("╚══════════════════════════════════════════════════════════╝");
 
     info!("======================================================");
     info!(" Örnek tamamlandı.");

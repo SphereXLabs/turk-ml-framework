@@ -122,15 +122,15 @@ impl Layer for Conv2D {
                             for kh in 0..self.kernel_size {
                                 for kw in 0..self.kernel_size {
                                     for ic in 0..self.in_channels {
-                                        let in_idx =
-                                            hwc_idx(oh + kh, ow + kw, ic, self.in_w, self.in_channels);
-                                        let w_idx = hwc_idx(
-                                            kh,
-                                            kw,
+                                        let in_idx = hwc_idx(
+                                            oh + kh,
+                                            ow + kw,
                                             ic,
-                                            self.kernel_size,
+                                            self.in_w,
                                             self.in_channels,
                                         );
+                                        let w_idx =
+                                            hwc_idx(kh, kw, ic, self.kernel_size, self.in_channels);
                                         sum += input[[n, in_idx]] * self.weights[[w_idx, oc]];
                                     }
                                 }
@@ -156,9 +156,10 @@ impl Layer for Conv2D {
         let input = self.last_input.as_ref().ok_or_else(|| {
             TurkError::LayerError("Conv2D: forward çağrılmadan backward yapılamaz".into())
         })?;
-        let pre = self.last_pre_activation.as_ref().ok_or_else(|| {
-            TurkError::LayerError("Conv2D: pre_activation kaydedilmemiş".into())
-        })?;
+        let pre = self
+            .last_pre_activation
+            .as_ref()
+            .ok_or_else(|| TurkError::LayerError("Conv2D: pre_activation kaydedilmemiş".into()))?;
 
         let act_grad = self.activation.backward(pre);
         let dz = &act_grad * grad_output;
@@ -181,13 +182,8 @@ impl Layer for Conv2D {
                                 for ic in 0..self.in_channels {
                                     let in_idx =
                                         hwc_idx(oh + kh, ow + kw, ic, self.in_w, self.in_channels);
-                                    let w_idx = hwc_idx(
-                                        kh,
-                                        kw,
-                                        ic,
-                                        self.kernel_size,
-                                        self.in_channels,
-                                    );
+                                    let w_idx =
+                                        hwc_idx(kh, kw, ic, self.kernel_size, self.in_channels);
                                     grad_weights[[w_idx, oc]] += delta * input[[n, in_idx]];
                                     grad_input[[n, in_idx]] += delta * self.weights[[w_idx, oc]];
                                 }
@@ -303,7 +299,9 @@ pub struct MaxPool2D {
 impl MaxPool2D {
     pub fn new(in_h: usize, in_w: usize, channels: usize, pool_size: usize) -> Result<Self> {
         if pool_size == 0 {
-            return Err(TurkError::LayerError("MaxPool2D: havuz boyutu sıfır olamaz".into()));
+            return Err(TurkError::LayerError(
+                "MaxPool2D: havuz boyutu sıfır olamaz".into(),
+            ));
         }
         let out_h = havuz_cikis_boyutu(in_h, pool_size);
         let out_w = havuz_cikis_boyutu(in_w, pool_size);
@@ -400,19 +398,10 @@ impl Layer for MaxPool2D {
             }
         }
 
-        Ok((
-            grad_input,
-            Array2::zeros((0, 0)),
-            Array2::zeros((0, 0)),
-        ))
+        Ok((grad_input, Array2::zeros((0, 0)), Array2::zeros((0, 0))))
     }
 
-    fn update(
-        &mut self,
-        _: &ArrayView2<f64>,
-        _: &ArrayView2<f64>,
-        _: f64,
-    ) -> Result<()> {
+    fn update(&mut self, _: &ArrayView2<f64>, _: &ArrayView2<f64>, _: f64) -> Result<()> {
         Ok(())
     }
     fn get_weights(&self) -> Result<Array2<f64>> {
@@ -587,7 +576,9 @@ mod tests {
         assert_eq!(conv.output_size(), 2 * 2 * 2);
 
         let x = arr2(&[
-            [1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.],
+            [
+                1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+            ],
             [0.; 16],
         ]);
         let y = conv.forward(&x.view()).unwrap();

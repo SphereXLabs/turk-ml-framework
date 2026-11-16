@@ -106,61 +106,62 @@ fn kulak_dongusu(
     buffer: Arc<Mutex<Vec<f32>>>,
     kayit_aktif: Arc<AtomicBool>,
 ) {
-    let stream_olustur = |buf: Arc<Mutex<Vec<f32>>>, aktif: Arc<AtomicBool>| -> Result<cpal::Stream, String> {
-        match sample_format {
-            SampleFormat::F32 => device
-                .build_input_stream(
-                    &config,
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        if !aktif.load(Ordering::Relaxed) {
-                            return;
-                        }
-                        let mut b = buf.lock().expect("kulak buffer");
-                        if channels <= 1 {
-                            b.extend_from_slice(data);
-                        } else {
-                            for frame in data.chunks(channels) {
-                                let ort = frame.iter().copied().sum::<f32>() / channels as f32;
-                                b.push(ort);
+    let stream_olustur =
+        |buf: Arc<Mutex<Vec<f32>>>, aktif: Arc<AtomicBool>| -> Result<cpal::Stream, String> {
+            match sample_format {
+                SampleFormat::F32 => device
+                    .build_input_stream(
+                        &config,
+                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                            if !aktif.load(Ordering::Relaxed) {
+                                return;
                             }
-                        }
-                    },
-                    kulak_akis_hatasi,
-                    None,
-                )
-                .map_err(|e| format!("F32 akışı açılamadı: {e}"))
-                .and_then(akisi_baslat),
-            SampleFormat::I16 => device
-                .build_input_stream(
-                    &config,
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        if !aktif.load(Ordering::Relaxed) {
-                            return;
-                        }
-                        let mut b = buf.lock().expect("kulak buffer");
-                        if channels <= 1 {
-                            for &s in data {
-                                b.push(Sample::to_sample::<f32>(s));
+                            let mut b = buf.lock().expect("kulak buffer");
+                            if channels <= 1 {
+                                b.extend_from_slice(data);
+                            } else {
+                                for frame in data.chunks(channels) {
+                                    let ort = frame.iter().copied().sum::<f32>() / channels as f32;
+                                    b.push(ort);
+                                }
                             }
-                        } else {
-                            for frame in data.chunks(channels) {
-                                let ort: f32 = frame
-                                    .iter()
-                                    .map(|&s| Sample::to_sample::<f32>(s))
-                                    .sum::<f32>()
-                                    / channels as f32;
-                                b.push(ort);
+                        },
+                        kulak_akis_hatasi,
+                        None,
+                    )
+                    .map_err(|e| format!("F32 akışı açılamadı: {e}"))
+                    .and_then(akisi_baslat),
+                SampleFormat::I16 => device
+                    .build_input_stream(
+                        &config,
+                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                            if !aktif.load(Ordering::Relaxed) {
+                                return;
                             }
-                        }
-                    },
-                    kulak_akis_hatasi,
-                    None,
-                )
-                .map_err(|e| format!("I16 akışı açılamadı: {e}"))
-                .and_then(akisi_baslat),
-            other => Err(format!("Desteklenmeyen örnek formatı: {other:?}")),
-        }
-    };
+                            let mut b = buf.lock().expect("kulak buffer");
+                            if channels <= 1 {
+                                for &s in data {
+                                    b.push(Sample::to_sample::<f32>(s));
+                                }
+                            } else {
+                                for frame in data.chunks(channels) {
+                                    let ort: f32 = frame
+                                        .iter()
+                                        .map(|&s| Sample::to_sample::<f32>(s))
+                                        .sum::<f32>()
+                                        / channels as f32;
+                                    b.push(ort);
+                                }
+                            }
+                        },
+                        kulak_akis_hatasi,
+                        None,
+                    )
+                    .map_err(|e| format!("I16 akışı açılamadı: {e}"))
+                    .and_then(akisi_baslat),
+                other => Err(format!("Desteklenmeyen örnek formatı: {other:?}")),
+            }
+        };
 
     let mut stream = match stream_olustur(Arc::clone(&buffer), Arc::clone(&kayit_aktif)) {
         Ok(s) => Some(s),

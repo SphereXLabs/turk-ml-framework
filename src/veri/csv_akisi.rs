@@ -75,11 +75,9 @@ impl CsvVeriAkisi {
             }
         }
 
-        let (mut sema, indeks) =
-            csv_semasi_ve_indeks(dosya_yolu, hedef_kolon, &mut on_satir)?;
+        let (mut sema, indeks) = csv_semasi_ve_indeks(dosya_yolu, hedef_kolon, &mut on_satir)?;
 
-        let (egitim_satirlari, val_satirlari) =
-            satir_bol(&indeks, bolme_orani);
+        let (egitim_satirlari, val_satirlari) = satir_bol(&indeks, bolme_orani);
 
         sema.indeks = indeks;
         sema.egitim_satirlari = egitim_satirlari.clone();
@@ -125,9 +123,7 @@ impl CsvVeriAkisi {
 
     /// Doğrulama tensörlerine erişim (varsa).
     pub fn val_veri(&self) -> Option<(&Array2<f64>, &Array2<f64>)> {
-        self.val_onbellek
-            .as_ref()
-            .map(|(x, y)| (x, y))
+        self.val_onbellek.as_ref().map(|(x, y)| (x, y))
     }
 
     /// Bir epoch için batch iterator'ü döndürür (her çağrıda karıştırılmış okuma).
@@ -157,9 +153,7 @@ pub struct CsvEpochOkuyucu {
 impl CsvEpochOkuyucu {
     pub fn ac(sema: &CsvSemasi, batch_boyutu: usize, karistir: bool) -> Result<Self> {
         if batch_boyutu == 0 {
-            return Err(TurkError::ValueError(
-                "Batch boyutu sıfır olamaz.".into(),
-            ));
+            return Err(TurkError::ValueError("Batch boyutu sıfır olamaz.".into()));
         }
         if sema.egitim_satirlari.is_empty() {
             return Err(TurkError::DataError(
@@ -172,9 +166,8 @@ impl CsvEpochOkuyucu {
             okuma_sirasi.shuffle(&mut thread_rng());
         }
 
-        let file = File::open(&sema.kaynak).map_err(|e| {
-            TurkError::IOError(format!("'{}' açılamadı: {e}", sema.kaynak))
-        })?;
+        let file = File::open(&sema.kaynak)
+            .map_err(|e| TurkError::IOError(format!("'{}' açılamadı: {e}", sema.kaynak)))?;
 
         Ok(Self {
             file,
@@ -313,9 +306,8 @@ fn csv_semasi_ve_indeks<F>(
 where
     F: FnMut(usize),
 {
-    let mut file = File::open(dosya_yolu).map_err(|e| {
-        TurkError::IOError(format!("'{dosya_yolu}' açılamadı: {e}"))
-    })?;
+    let mut file = File::open(dosya_yolu)
+        .map_err(|e| TurkError::IOError(format!("'{dosya_yolu}' açılamadı: {e}")))?;
 
     let mut ilk_satir = String::new();
     dosyadan_satir_oku(&mut file, &mut ilk_satir)
@@ -363,9 +355,9 @@ where
     }
 
     loop {
-        let offset = file.stream_position().map_err(|e| {
-            TurkError::IOError(format!("Ofset okunamadı: {e}"))
-        })?;
+        let offset = file
+            .stream_position()
+            .map_err(|e| TurkError::IOError(format!("Ofset okunamadı: {e}")))?;
         let mut satir = String::new();
         let n = dosyadan_satir_oku(&mut file, &mut satir)
             .map_err(|e| TurkError::IOError(format!("Satır okunamadı: {e}")))?;
@@ -431,10 +423,12 @@ fn satir_bol(indeks: &CsvSatirIndeksi, bolme_orani: Option<f64>) -> (Vec<usize>,
     (egitim, val)
 }
 
-fn satirlari_oku(sema: &CsvSemasi, satir_indeksleri: &[usize]) -> Result<(Array2<f64>, Array2<f64>)> {
-    let mut file = File::open(&sema.kaynak).map_err(|e| {
-        TurkError::IOError(format!("'{}' açılamadı: {e}", sema.kaynak))
-    })?;
+fn satirlari_oku(
+    sema: &CsvSemasi,
+    satir_indeksleri: &[usize],
+) -> Result<(Array2<f64>, Array2<f64>)> {
+    let mut file = File::open(&sema.kaynak)
+        .map_err(|e| TurkError::IOError(format!("'{}' açılamadı: {e}", sema.kaynak)))?;
 
     let mut x_satirlar = Vec::with_capacity(satir_indeksleri.len());
     let mut y_degerler = Vec::with_capacity(satir_indeksleri.len());
@@ -527,14 +521,14 @@ mod tests {
     #[test]
     fn test_epoch_batchleri_lazy() {
         let dosya = "test_csv_lazy.csv";
-        std::fs::write(
-            dosya,
-            "x1,x2,y\n0,0,0\n0,1,1\n1,0,1\n1,1,0\n",
-        )
-        .unwrap();
+        std::fs::write(dosya, "x1,x2,y\n0,0,0\n0,1,1\n1,0,1\n1,1,0\n").unwrap();
 
         let akis = CsvVeriAkisi::yeni(dosya, Some("y")).unwrap();
-        let batches: Vec<_> = akis.epoch_batchleri(2).unwrap().collect::<Result<Vec<_>>>().unwrap();
+        let batches: Vec<_> = akis
+            .epoch_batchleri(2)
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
 
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].0.nrows(), 2);
@@ -546,11 +540,7 @@ mod tests {
     #[test]
     fn test_bolme_ve_val() {
         let dosya = "test_csv_bolme.csv";
-        std::fs::write(
-            dosya,
-            "x1,x2,y\n0,0,0\n0,1,1\n1,0,1\n1,1,0\n",
-        )
-        .unwrap();
+        std::fs::write(dosya, "x1,x2,y\n0,0,0\n0,1,1\n1,0,1\n1,1,0\n").unwrap();
 
         let akis = CsvVeriAkisi::yeni_bolme(dosya, Some("y"), Some(0.25)).unwrap();
         assert_eq!(akis.egitim_satir_sayisi(), 3);
@@ -585,15 +575,19 @@ mod tests {
     #[test]
     fn test_shuffle_farkli_epoch() {
         let dosya = "test_csv_shuffle.csv";
-        std::fs::write(
-            dosya,
-            "x1,x2,y\n0,0,0\n0,1,1\n1,0,1\n1,1,0\n5,5,0\n6,6,1\n",
-        )
-        .unwrap();
+        std::fs::write(dosya, "x1,x2,y\n0,0,0\n0,1,1\n1,0,1\n1,1,0\n5,5,0\n6,6,1\n").unwrap();
 
         let akis = CsvVeriAkisi::yeni(dosya, Some("y")).unwrap();
-        let b1: Vec<_> = akis.epoch_batchleri(1).unwrap().collect::<Result<Vec<_>>>().unwrap();
-        let b2: Vec<_> = akis.epoch_batchleri(1).unwrap().collect::<Result<Vec<_>>>().unwrap();
+        let b1: Vec<_> = akis
+            .epoch_batchleri(1)
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let b2: Vec<_> = akis
+            .epoch_batchleri(1)
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
 
         assert_eq!(b1.len(), 6);
         assert_eq!(b2.len(), 6);

@@ -55,7 +55,8 @@ pub fn cok_adimli_mi(metin: &str) -> bool {
     if k.contains("kontrol") || k.contains("sistem durumu") || k.contains("sistem kontrol") {
         n += 1;
     }
-    if k.contains("dosya") && (k.contains("oku") || k.contains("refaktör") || k.contains("refaktor"))
+    if k.contains("dosya")
+        && (k.contains("oku") || k.contains("refaktör") || k.contains("refaktor"))
     {
         n += 1;
     }
@@ -161,7 +162,9 @@ pub fn plan_olustur(metin: &str) -> Option<Vec<ZincirAdimi>> {
             yol: Some(proje_yolu.clone()),
             arac: Some(AracKomut::OtonomDerle {
                 yol: proje_yolu,
-                uyarilari_temizle: k.contains("uyarı") || k.contains("uyari") || k.contains("temizle"),
+                uyarilari_temizle: k.contains("uyarı")
+                    || k.contains("uyari")
+                    || k.contains("temizle"),
             }),
             vekil_temizlik: false,
         });
@@ -222,8 +225,7 @@ pub fn zincir_yurut(plan: &[ZincirAdimi]) -> Result<ZincirSonuc> {
 
         let basarisiz = sonuc.contains('✗')
             || sonuc.to_lowercase().contains("hata:")
-            || sonuc.to_lowercase().contains("error")
-                && !sonuc.contains("✓");
+            || sonuc.to_lowercase().contains("error") && !sonuc.contains("✓");
 
         ham_ciktilar.push(sonuc.clone());
 
@@ -235,9 +237,7 @@ pub fn zincir_yurut(plan: &[ZincirAdimi]) -> Result<ZincirSonuc> {
                 basarili: false,
                 adim_loglari,
                 ham_ciktilar,
-                ozet: format!(
-                    "Zincir adım {no}/{toplam} başarısız oldu. Logları incele, Sinan."
-                ),
+                ozet: format!("Zincir adım {no}/{toplam} başarısız oldu. Logları incele, Sinan."),
             });
         }
 
@@ -248,8 +248,7 @@ pub fn zincir_yurut(plan: &[ZincirAdimi]) -> Result<ZincirSonuc> {
         basarili: true,
         adim_loglari,
         ham_ciktilar,
-        ozet: "✓ Çoklu operasyon zinciri başarıyla kararlı sonuca ulaştırıldı, Sinan kanka!"
-            .into(),
+        ozet: "✓ Çoklu operasyon zinciri başarıyla kararlı sonuca ulaştırıldı, Sinan kanka!".into(),
     })
 }
 

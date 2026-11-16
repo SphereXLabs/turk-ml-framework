@@ -1,9 +1,9 @@
-use serde::{Serialize, Deserialize};
-use std::fmt;
-use std::collections::HashMap;
-use crate::token::Token;
 use crate::error::TurkError;
+use crate::token::Token;
 use ndarray::{Array2, ArrayView2};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
 
 /// Operatör
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -421,9 +421,22 @@ impl fmt::Display for Ifade {
                 }
                 write!(f, "}}")
             }
-            Ifade::Kosul { kosul, dogru: _, yanlis: _ } => write!(f, "if ({}) {{ ... }} else {{ ... }}", kosul),
-            Ifade::Dongu { baslangic, kosul, adim, gövde: _ } => write!(f, "for ({}; {}; {}) {{ ... }}", baslangic, kosul, adim),
-            Ifade::IcinDongu { degisken, dizi, gövde } => write!(f, "for ({}; {}; {}) {{ ... }}", degisken, dizi, gövde),
+            Ifade::Kosul {
+                kosul,
+                dogru: _,
+                yanlis: _,
+            } => write!(f, "if ({}) {{ ... }} else {{ ... }}", kosul),
+            Ifade::Dongu {
+                baslangic,
+                kosul,
+                adim,
+                gövde: _,
+            } => write!(f, "for ({}; {}; {}) {{ ... }}", baslangic, kosul, adim),
+            Ifade::IcinDongu {
+                degisken,
+                dizi,
+                gövde,
+            } => write!(f, "for ({}; {}; {}) {{ ... }}", degisken, dizi, gövde),
             Ifade::Dondur(ifade) => write!(f, "return {}", ifade),
             Ifade::Kes => write!(f, "break"),
             Ifade::Devam => write!(f, "continue"),
@@ -471,15 +484,41 @@ impl fmt::Display for KatmanOzellikleri {
 impl fmt::Display for OptimizerTipi {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            OptimizerTipi::SGD { lr, momentum, nesterov } => 
-                write!(f, "SGD(lr={}, momentum={:?}, nesterov={:?})", lr, momentum, nesterov),
-            OptimizerTipi::Adam { lr, beta1, beta2, epsilon } => 
-                write!(f, "Adam(lr={}, beta1={:?}, beta2={:?}, epsilon={:?})", lr, beta1, beta2, epsilon),
-            OptimizerTipi::AdamW { lr, weight_decay, beta1, beta2, epsilon } => 
-                write!(f, "AdamW(lr={}, weight_decay={:?}, beta1={:?}, beta2={:?}, epsilon={:?})", 
-                       lr, weight_decay, beta1, beta2, epsilon),
-            OptimizerTipi::RMSProp { lr, rho, epsilon } => 
-                write!(f, "RMSProp(lr={}, rho={:?}, epsilon={:?})", lr, rho, epsilon),
+            OptimizerTipi::SGD {
+                lr,
+                momentum,
+                nesterov,
+            } => write!(
+                f,
+                "SGD(lr={}, momentum={:?}, nesterov={:?})",
+                lr, momentum, nesterov
+            ),
+            OptimizerTipi::Adam {
+                lr,
+                beta1,
+                beta2,
+                epsilon,
+            } => write!(
+                f,
+                "Adam(lr={}, beta1={:?}, beta2={:?}, epsilon={:?})",
+                lr, beta1, beta2, epsilon
+            ),
+            OptimizerTipi::AdamW {
+                lr,
+                weight_decay,
+                beta1,
+                beta2,
+                epsilon,
+            } => write!(
+                f,
+                "AdamW(lr={}, weight_decay={:?}, beta1={:?}, beta2={:?}, epsilon={:?})",
+                lr, weight_decay, beta1, beta2, epsilon
+            ),
+            OptimizerTipi::RMSProp { lr, rho, epsilon } => write!(
+                f,
+                "RMSProp(lr={}, rho={:?}, epsilon={:?})",
+                lr, rho, epsilon
+            ),
         }
     }
 }
@@ -505,16 +544,14 @@ pub struct Model {
 impl Model {
     /// Yeni bir model
     pub fn new(ozellikler: ModelOzellikleri) -> Self {
-        Self {
-            ozellikler,
-        }
+        Self { ozellikler }
     }
-    
+
     /// Katman ekle
     pub fn katman_ekle(&mut self, katman: Katman) {
         self.ozellikler.katmanlar.push(katman);
     }
-    
+
     /// Modeli eğitir
     pub fn egit(
         &self,
@@ -522,18 +559,18 @@ impl Model {
         _y: &ArrayView2<f64>,
         _epochs: usize,
         _batch_size: usize,
-        _opt: Option<&str>
+        _opt: Option<&str>,
     ) -> Result<Vec<(f64, Option<f64>)>, TurkError> {
         // Eğitim implementasyonu
         Ok(Vec::new())
     }
-    
+
     /// Tahmin
     pub fn tahmin(&self, _x: &ArrayView2<f64>) -> Result<Array2<f64>, TurkError> {
         // Tahmin implementasyonu
         Ok(Array2::zeros((1, 1)))
     }
-    
+
     /// Değerlendirme
     pub fn degerlendir(
         &self,
@@ -783,22 +820,22 @@ pub trait ExpressionVisitor<T> {
     fn visit_logical(&mut self, expr: &LogicalExpression) -> T;
     fn visit_grouping(&mut self, expr: &GroupingExpression) -> T;
     fn visit_literal(&mut self, lit: &Literal) -> T;
-    fn visit_variable(&mut self, name: &String) -> T;
+    fn visit_variable(&mut self, name: &str) -> T;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_expression_visitor() {
         struct TestVisitor;
-        
+
         impl ExpressionVisitor<String> for TestVisitor {
             fn visit_assign(&mut self, expr: &AssignExpression) -> String {
                 format!("{} = {}", expr.name, expr.value.accept(self))
             }
-            
+
             fn visit_binary(&mut self, expr: &BinaryExpression) -> String {
                 format!(
                     "({} {} {})",
@@ -807,11 +844,11 @@ mod tests {
                     expr.right.accept(self)
                 )
             }
-            
+
             fn visit_unary(&mut self, expr: &UnaryExpression) -> String {
                 format!("({}{})", expr.operator, expr.right.accept(self))
             }
-            
+
             fn visit_logical(&mut self, expr: &LogicalExpression) -> String {
                 format!(
                     "({} {} {})",
@@ -820,11 +857,11 @@ mod tests {
                     expr.right.accept(self)
                 )
             }
-            
+
             fn visit_grouping(&mut self, expr: &GroupingExpression) -> String {
                 format!("({})", expr.expression.accept(self))
             }
-            
+
             fn visit_literal(&mut self, lit: &Literal) -> String {
                 match lit {
                     Literal::Number(n) => n.to_string(),
@@ -833,19 +870,19 @@ mod tests {
                     Literal::Nil => "nil".to_string(),
                 }
             }
-            
-            fn visit_variable(&mut self, name: &String) -> String {
-                name.clone()
+
+            fn visit_variable(&mut self, name: &str) -> String {
+                name.to_string()
             }
         }
-        
+
         let expr = Expression::Binary(BinaryExpression {
             left: Box::new(Expression::Literal(Literal::Number(1.0))),
             operator: Token::Add,
             right: Box::new(Expression::Literal(Literal::Number(2.0))),
         });
-        
+
         let mut visitor = TestVisitor;
         assert_eq!(expr.accept(&mut visitor), "(1 + 2)");
     }
-} 
+}

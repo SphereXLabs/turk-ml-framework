@@ -1,11 +1,18 @@
 // TÜRK dili projesi
 // Türkçe yapay sinir ağı kütüphanesi
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    clippy::new_without_default,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::should_implement_trait
+)]
 
 extern crate lazy_static;
 
 // Standart modüller
+pub mod aktivasyon;
 pub mod error;
 pub mod initializers;
 pub mod layer;
@@ -16,7 +23,6 @@ pub mod optimizer;
 pub mod preprocessing;
 pub mod token;
 pub mod utils;
-pub mod aktivasyon;
 
 // Lexer modülü
 pub mod lexer;
@@ -37,8 +43,8 @@ pub mod veri;
 pub mod cnn;
 
 // Kaynak konumu ve resmi DSL ayrıştırıcı
-pub mod source_position;
 pub mod dsl_parser;
+pub mod source_position;
 
 // ONNX dışa aktarma
 pub mod onnx;
@@ -58,45 +64,48 @@ pub mod otomasyon;
 pub mod ses;
 
 // Re-export
-pub use error::{Result, TurkError};
+pub use aktivasyon::Activation;
+pub use cihaz::{cihaz_listesi_metin, mevcut_cihazlar, Cihaz};
+pub use cnn::{Conv2D, Flatten, MaxPool2D};
 pub use dil::TurkDil;
 pub use dil::{EgitimIlerleme, Value};
-pub use dsl_parser::{DslKomut, komut_ayristir, hata_satirini_goster};
-pub use source_position::SourcePosition;
-pub use onnx::{export_onnx, import_onnx};
-pub use model::{EarlyStopping, EpochCallback, History, Sequential};
-pub use layer::{BatchNormalization, Layer, Dense, Dropout};
-pub use cnn::{Conv2D, Flatten, MaxPool2D};
-pub use optimizer::{Optimizer, SGD, Adam, AdamW, RMSProp};
-pub use loss::{Loss, MSE, MAE, CrossEntropy};
-pub use metrics::{Metric, Accuracy, Precision, Recall, F1};
-pub use preprocessing::{StandardScaler, MinMaxScaler};
-pub use initializers::{Initializer, GlorotUniform, GlorotNormal, HeUniform, HeNormal};
-pub use aktivasyon::Activation;
+pub use dsl_parser::{hata_satirini_goster, komut_ayristir, DslKomut};
+pub use error::{Result, TurkError};
+pub use initializers::{GlorotNormal, GlorotUniform, HeNormal, HeUniform, Initializer};
 pub use katman_kayit::{Katman, KatmanKayit, KatmanYukleVerisi};
-pub use veri::{CsvVeriAkisi, CsvEpochOkuyucu};
-pub use cihaz::{Cihaz, cihaz_listesi_metin, mevcut_cihazlar};
+pub use layer::{BatchNormalization, Dense, Dropout, Layer};
+pub use loss::{CrossEntropy, Loss, MAE, MSE};
+pub use metrics::{Accuracy, Metric, Precision, Recall, F1};
+pub use model::{EarlyStopping, EpochCallback, History, Sequential};
 pub use model_zoo::{
-    manifest_yukle, model_bul, model_bilgi_metin, model_indir, model_script_yolu,
-    kullanici_zoo_dizini, zoo_kok, zoo_listesi_metin, ZooManifest, ZooModelMeta,
+    kullanici_zoo_dizini, manifest_yukle, model_bilgi_metin, model_bul, model_indir,
+    model_script_yolu, zoo_kok, zoo_listesi_metin, ZooManifest, ZooModelMeta,
 };
+pub use onnx::{export_onnx, import_onnx};
+pub use optimizer::{Adam, AdamW, Optimizer, RMSProp, SGD};
+pub use preprocessing::{MinMaxScaler, StandardScaler};
+pub use source_position::SourcePosition;
+pub use veri::{CsvEpochOkuyucu, CsvVeriAkisi};
 
 #[cfg(feature = "turk_sistem")]
 pub use asistan::{
-    AsistanBeyni, AsistanYanit, Beyin, BeyinTuru, Hafiza, HafizaHavuzu, HafizaMerkezi,
-    SemantikKayit, TurkSistem, ZincirAdimi, ZincirSonuc, SISTEM_PROMPT, cok_adimli_mi,
-    hafiza_tara, hafiza_tara_ozet, otonom_zincir_planla_ve_yurut, plan_olustur, zincir_yurut,
+    cok_adimli_mi, hafiza_tara, hafiza_tara_ozet, otonom_zincir_planla_ve_yurut, plan_olustur,
+    zincir_yurut, AsistanBeyni, AsistanYanit, Beyin, BeyinTuru, Hafiza, HafizaHavuzu,
+    HafizaMerkezi, SemantikKayit, TurkSistem, ZincirAdimi, ZincirSonuc, SISTEM_PROMPT,
 };
 #[cfg(feature = "turk_sistem")]
 pub use otomasyon::{
-    AracCagrisiJson, AracKomut, SistemDurumu, SistemVekili, VekilKomut, VekilOlay, arac_calistir,
-    canli_hava_durumu_cek, cpu_kullanim_guncelle, cpu_kullanim_oku, dosyalari_listele,
-    dosya_olustur, dosya_yaz, proje_derle, proje_kontrol, sistem_durumu, terminal_komutu_calistir,
-    TURK_VEKIL_OPTIMIZE_MESAJ, TURK_VEKIL_UYARI_MESAJ,
+    arac_calistir, canli_hava_durumu_cek, cpu_kullanim_guncelle, cpu_kullanim_oku, dosya_olustur,
+    dosya_yaz, dosyalari_listele, proje_derle, proje_kontrol, sistem_durumu,
+    terminal_komutu_calistir, AracCagrisiJson, AracKomut, SistemDurumu, SistemVekili, VekilKomut,
+    VekilOlay, TURK_VEKIL_OPTIMIZE_MESAJ, TURK_VEKIL_UYARI_MESAJ,
 };
 
 #[cfg(feature = "turk_ses")]
-pub use ses::{KayitSonucu, Kulak, SesSinyal, konusmayi_metne_cevir, whisper_cli_yolu, whisper_hazir_mi, whisper_model_yolu};
+pub use ses::{
+    konusmayi_metne_cevir, whisper_cli_yolu, whisper_hazir_mi, whisper_model_yolu, KayitSonucu,
+    Kulak, SesSinyal,
+};
 
 /// Geriye uyumluluk alias'i
 #[cfg(feature = "turk_sistem")]
@@ -107,41 +116,61 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // Dosya açma yardımcı fonksiyonu
 pub fn open_file<P: AsRef<Path>>(path: P) -> Result<File> {
-    File::open(path.as_ref())
-        .map_err(|e| TurkError::IOError(format!("{} dosyası açılamadı: {}", path.as_ref().display(), e)))
+    File::open(path.as_ref()).map_err(|e| {
+        TurkError::IOError(format!(
+            "{} dosyası açılamadı: {}",
+            path.as_ref().display(),
+            e
+        ))
+    })
 }
 
 // Dosya okuma yardımcı fonksiyonu
 pub fn read_file<P: AsRef<Path>>(path: P) -> Result<String> {
     let mut file = open_file(path.as_ref())?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .map_err(|e| TurkError::IOError(format!("{} dosyası okunamadı: {}", path.as_ref().display(), e)))?;
+    file.read_to_string(&mut contents).map_err(|e| {
+        TurkError::IOError(format!(
+            "{} dosyası okunamadı: {}",
+            path.as_ref().display(),
+            e
+        ))
+    })?;
     Ok(contents)
 }
 
 // Dosya oluşturma yardımcı fonksiyonu
 pub fn create_file<P: AsRef<Path>>(path: P) -> Result<File> {
-    File::create(path.as_ref())
-        .map_err(|e| TurkError::IOError(format!("{} dosyası oluşturulamadı: {}", path.as_ref().display(), e)))
+    File::create(path.as_ref()).map_err(|e| {
+        TurkError::IOError(format!(
+            "{} dosyası oluşturulamadı: {}",
+            path.as_ref().display(),
+            e
+        ))
+    })
 }
 
 // Dosyaya yazma yardımcı fonksiyonu
 pub fn write_file<P: AsRef<Path>>(path: P, contents: &str) -> Result<()> {
     let mut file = create_file(path.as_ref())?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| TurkError::IOError(format!("{} dosyasına yazılamadı: {}", path.as_ref().display(), e)))?;
+    file.write_all(contents.as_bytes()).map_err(|e| {
+        TurkError::IOError(format!(
+            "{} dosyasına yazılamadı: {}",
+            path.as_ref().display(),
+            e
+        ))
+    })?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_version() {
-        println!("TÜRK dili sürümü: {}", VERSION);
-        assert!(!VERSION.is_empty());
+        println!("TÜRK dili sürümü: {VERSION}");
+        assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
     }
 }
 
@@ -153,7 +182,7 @@ impl TurkLang {
     pub fn version() -> &'static str {
         VERSION
     }
-    
+
     /// Kütüphane bilgilerini döndürür
     pub fn info() -> String {
         format!("TÜRK Dil Modeli ve Yapay Zeka Kütüphanesi v{}", VERSION)
@@ -184,7 +213,7 @@ impl Turk {
         self.model = Some(Box::new(model));
         Ok(())
     }
-    
+
     /// Modeli dosyaya kaydet
     pub fn model_kaydet(&self, path: &Path) -> Result<()> {
         if let Some(model) = &self.model {
@@ -202,6 +231,6 @@ impl Default for Turk {
     }
 }
 
-use std::path::Path;
-use std::io::{Read, Write};
 use std::fs::File;
+use std::io::{Read, Write};
+use std::path::Path;

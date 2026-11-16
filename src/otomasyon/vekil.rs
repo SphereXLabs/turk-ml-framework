@@ -122,11 +122,7 @@ async fn optimizasyon_calistir(tx: &mpsc::Sender<VekilOlay>) {
         .name("turk-os-kontrol".into())
         .spawn(os_seviyesi_kontrol)
     {
-        Ok(handle) => handle
-            .join()
-            .ok()
-            .and_then(|r| r.ok())
-            .unwrap_or_default(),
+        Ok(handle) => handle.join().ok().and_then(|r| r.ok()).unwrap_or_default(),
         Err(_) => Vec::new(),
     };
     let _ = tx

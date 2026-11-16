@@ -1,8 +1,8 @@
 //! TÜRK beyin katmanı — 3 aşamalı düşünce döngüsü (reasoning loop).
 
+use super::otonom_zincir_planlayici::{self, ZincirSonuc};
 use crate::error::{Result, TurkError};
 use crate::otomasyon::araclar::{self, AracCagrisiJson, AracKomut};
-use super::otonom_zincir_planlayici::{self, ZincirSonuc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -22,7 +22,9 @@ pub enum AsistanYanit {
         parametre: Option<String>,
         parametre2: Option<String>,
     },
-    DogalDil { metin: String },
+    DogalDil {
+        metin: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,10 +70,7 @@ impl AsistanBeyni {
             }
         }
 
-        let gguf_aktif = self
-            .gguf_yolu
-            .as_ref()
-            .is_some_and(|p| p.is_file());
+        let gguf_aktif = self.gguf_yolu.as_ref().is_some_and(|p| p.is_file());
 
         if !gguf_aktif {
             return Ok(AsistanYanit::DogalDil {
@@ -125,9 +124,8 @@ impl AsistanBeyni {
                     parametre2,
                     enjekte_hedef: None,
                 };
-                let arac_komut = araclar::AracKomut::json_den(&json).ok_or_else(|| {
-                    TurkError::RuntimeError("Geçersiz araç çağrısı.".into())
-                })?;
+                let arac_komut = araclar::AracKomut::json_den(&json)
+                    .ok_or_else(|| TurkError::RuntimeError("Geçersiz araç çağrısı.".into()))?;
 
                 // Aşama 2: Rust otomasyonu
                 let ham_sonuc = araclar::arac_calistir(&arac_komut)?;
@@ -155,12 +153,7 @@ impl AsistanBeyni {
         self.ic_beyin.yanit_uret(girdi, hafiza_baglam)
     }
 
-    fn arac_sonucunu_yorumla(
-        &self,
-        kullanici: &str,
-        arac: &AracKomut,
-        ham: &str,
-    ) -> String {
+    fn arac_sonucunu_yorumla(&self, kullanici: &str, arac: &AracKomut, ham: &str) -> String {
         if matches!(arac, AracKomut::WebArama { .. }) && ham.starts_with("[TÜRK]:") {
             return format!("[Araç: {}]\n{ham}", arac.etiket());
         }
@@ -480,7 +473,9 @@ mod tests {
     fn test_sohbet_sistem_durumu_tetiklemez() {
         let mut beyin = AsistanBeyni::yeni();
         let uzun = "Ne arıyorsunuz? Tutun elinden götürün";
-        let y = beyin.dusunce_dongusu(uzun, "önceki mesaj: merhaba").unwrap();
+        let y = beyin
+            .dusunce_dongusu(uzun, "önceki mesaj: merhaba")
+            .unwrap();
         assert!(!y.contains("Araç: sistem_durumu"));
         assert!(!y.contains("CPU:"));
         assert!(y.contains("dertleşmek harika"));

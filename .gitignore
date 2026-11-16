@@ -37,18 +37,31 @@ debug/
 .DS_Store
 Thumbs.db
 
-# Büyük / yerel veri ve modeller (repoya girmesin)
+# Büyük / yerel veri ve model ağırlıkları (repoyu hafif tut)
 /data/
 *.h5
 *.pth
 *.pt
 *.gguf
 *.bin
+*.onnx
+*.onnx.json
 *.idx3-ubyte
 *.idx1-ubyte
 *.gz
+# Büyük yerel CSV veri setleri (örnek model_zoo/*.csv takipte kalabilir)
+/mnist_train.csv
+/xor_data.csv
+/egitim_*.csv
 datatrain-*
 egitim_grafigi.png
+egitim_gecmisi.json
+/mnist_model.json
+/xor_model.json
+/xor_model_en_iyi.json
+/model_en_iyi.json
+/model.onnx.json
+*_en_iyi.json
 
 # Yanlışlıkla oluşmuş kopya klasör
 /TÜRK, src/

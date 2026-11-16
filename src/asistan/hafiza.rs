@@ -1,6 +1,6 @@
 //! TÜRK Jarvis v3 — bağlamsal semantik hafıza havuzu + oturum vektör arama.
 
-pub use crate::otomasyon::notlar::{HafizaEslesme, HafizaMerkezi, hafiza_tara, hafiza_tara_ozet};
+pub use crate::otomasyon::notlar::{hafiza_tara, hafiza_tara_ozet, HafizaEslesme, HafizaMerkezi};
 
 use crate::otomasyon::turk_sistem_veri_dizini;
 use serde::{Deserialize, Serialize};
@@ -139,7 +139,10 @@ impl HafizaHavuzu {
         // Disk not arşivinden de semantik tarama
         let notlar = hafiza_tara_ozet(sorgu);
         if !notlar.is_empty() && notlar.len() <= 400 {
-            let kisa = format!("[not_arşivi] {}", notlar.chars().take(200).collect::<String>());
+            let kisa = format!(
+                "[not_arşivi] {}",
+                notlar.chars().take(200).collect::<String>()
+            );
             if !self.son_hatirlanan.iter().any(|s| s.contains("not_arşivi")) {
                 self.son_hatirlanan.push(kisa.clone());
                 satirlar.push(kisa);
@@ -176,7 +179,8 @@ impl HafizaHavuzu {
         } else {
             "turk"
         };
-        let etiketler: Vec<String> = k.split_whitespace()
+        let etiketler: Vec<String> = k
+            .split_whitespace()
             .filter(|w| w.len() >= 4)
             .take(6)
             .map(str::to_string)
@@ -324,7 +328,11 @@ mod tests {
     #[test]
     fn test_havuz_baglam() {
         let mut h = HafizaHavuzu::yeni();
-        h.ekle("proje", "Siber tema refaktör tercihi aktif", vec!["siber".into()]);
+        h.ekle(
+            "proje",
+            "Siber tema refaktör tercihi aktif",
+            vec!["siber".into()],
+        );
         let baglam = h.baglam_enjekte("siber refaktör", 3);
         assert!(baglam.contains("SEMANTİK") || baglam.is_empty());
     }

@@ -1,14 +1,14 @@
 //! TÜRK araç (tool calling) kaydı — JSON ve doğal dil → sistem eylemleri.
 
-use super::refaktor::proje_refaktor_yurut;
 use super::derleyici::otonom_derle_rapor;
 use super::kod_ustasi::{self, kod_yaz_uygula};
+use super::notlar::hafiza_tara_ozet;
+use super::refaktor::proje_refaktor_yurut;
 use super::sistem::{
-    dosyalari_listele, dosya_olustur, dosya_yaz, proje_derle, proje_kontrol, sistem_durumu,
+    dosya_olustur, dosya_yaz, dosyalari_listele, proje_derle, proje_kontrol, sistem_durumu,
     terminal_komutu_calistir,
 };
 use super::web::{canli_hava_durumu_cek, hava_sorgusu_mu, sehir_ayikla};
-use super::notlar::hafiza_tara_ozet;
 use crate::error::Result;
 use serde::Deserialize;
 
@@ -29,15 +29,33 @@ pub struct AracCagrisiJson {
 /// LLM veya kural motorunun çağırabileceği araçlar
 #[derive(Debug, Clone)]
 pub enum AracKomut {
-    DosyaListele { yol: String },
-    TerminalKomut { komut: String },
+    DosyaListele {
+        yol: String,
+    },
+    TerminalKomut {
+        komut: String,
+    },
     SistemDurumu,
-    ProjeDerle { yol: String },
-    ProjeKontrol { yol: String },
-    DosyaYaz { yol: String, icerik: String },
-    DosyaOlustur { yol: String, icerik: String },
-    HafizaTara { anahtar_kelime: String },
-    WebArama { sorgu: String },
+    ProjeDerle {
+        yol: String,
+    },
+    ProjeKontrol {
+        yol: String,
+    },
+    DosyaYaz {
+        yol: String,
+        icerik: String,
+    },
+    DosyaOlustur {
+        yol: String,
+        icerik: String,
+    },
+    HafizaTara {
+        anahtar_kelime: String,
+    },
+    WebArama {
+        sorgu: String,
+    },
     KodYaz {
         yol: String,
         icerik: String,
@@ -74,17 +92,15 @@ impl AracKomut {
     pub fn json_den(cagri: &AracCagrisiJson) -> Option<Self> {
         let ad = cagri.arac.to_lowercase().replace('-', "_");
         match ad.as_str() {
-            "dosya_listele" | "dosyalari_listele" | "dosya_list" => {
-                Some(Self::DosyaListele {
-                    yol: cagri.parametre.clone().unwrap_or_else(|| ".".into()),
-                })
-            }
-            "terminal_komutu_calistir"
-            | "terminal_komut"
-            | "surec_baslat"
-            | "komut_calistir" => cagri.parametre.as_ref().map(|k| Self::TerminalKomut {
-                komut: k.clone(),
+            "dosya_listele" | "dosyalari_listele" | "dosya_list" => Some(Self::DosyaListele {
+                yol: cagri.parametre.clone().unwrap_or_else(|| ".".into()),
             }),
+            "terminal_komutu_calistir" | "terminal_komut" | "surec_baslat" | "komut_calistir" => {
+                cagri
+                    .parametre
+                    .as_ref()
+                    .map(|k| Self::TerminalKomut { komut: k.clone() })
+            }
             "sistem_durumu" | "sistem" => Some(Self::SistemDurumu),
             "proje_derle" | "cargo_derle" | "derle" => Some(Self::ProjeDerle {
                 yol: cagri.parametre.clone().unwrap_or_else(|| ".".into()),
@@ -346,7 +362,8 @@ pub fn metinden_arac_ayikla(metin: &str) -> Option<AracKomut> {
         }
     }
 
-    if k.contains("dosya") && (k.contains("listele") || k.contains("göster") || k.contains("goster"))
+    if k.contains("dosya")
+        && (k.contains("listele") || k.contains("göster") || k.contains("goster"))
     {
         let yol = yol_ayikla(metin).unwrap_or_else(|| ".".into());
         return Some(AracKomut::DosyaListele { yol });
@@ -355,7 +372,8 @@ pub fn metinden_arac_ayikla(metin: &str) -> Option<AracKomut> {
     if k.contains("cargo check")
         || (k.contains("projeyi") && k.contains("kontrol"))
         || (k.contains("proje") && k.contains("kontrol"))
-        || (k.contains("hata") && (k.contains("var mı") || k.contains("varmi") || k.contains("var mi")))
+        || (k.contains("hata")
+            && (k.contains("var mı") || k.contains("varmi") || k.contains("var mi")))
     {
         let yol = yol_ayikla(metin).unwrap_or_else(|| ".".into());
         return Some(AracKomut::ProjeKontrol { yol });
@@ -375,7 +393,10 @@ pub fn metinden_arac_ayikla(metin: &str) -> Option<AracKomut> {
         });
     }
 
-    if k.contains("çalıştır") || k.contains("calistir") || k.contains("başlat") || k.contains("baslat")
+    if k.contains("çalıştır")
+        || k.contains("calistir")
+        || k.contains("başlat")
+        || k.contains("baslat")
     {
         if let Some(komut) = komut_ayikla(metin) {
             return Some(AracKomut::TerminalKomut { komut });
@@ -416,7 +437,8 @@ fn refaktor_niyeti_mi(k: &str) -> bool {
         || (k.contains("dosya") && k.contains("optimize"))
         || (k.contains("dosyasını") && k.contains("optimize"))
         || (k.contains("dosyasini") && k.contains("optimize"))
-        || (k.contains("siber") && (k.contains("ekle") || k.contains("özellik") || k.contains("ozellik")))
+        || (k.contains("siber")
+            && (k.contains("ekle") || k.contains("özellik") || k.contains("ozellik")))
         || (k.contains("dosya") && k.contains("siber"))
 }
 
@@ -458,9 +480,8 @@ fn otonom_derle_niyeti_mi(k: &str) -> bool {
 
 fn kod_yaz_ayikla(metin: &str) -> Option<AracKomut> {
     let k = metin.to_lowercase();
-    let mut yol = kod_ustasi::rs_yol_ayikla(metin).or_else(|| {
-        yol_ayikla(metin).filter(|y| y.ends_with(".rs") || y.contains('/'))
-    })?;
+    let mut yol = kod_ustasi::rs_yol_ayikla(metin)
+        .or_else(|| yol_ayikla(metin).filter(|y| y.ends_with(".rs") || y.contains('/')))?;
 
     if !yol.contains('/') && (k.contains("src/bin") || k.contains("bin/") || k.contains("bin ")) {
         yol = format!("src/bin/{yol}");
@@ -632,7 +653,12 @@ fn yol_ayikla(metin: &str) -> Option<String> {
 
 fn komut_ayikla(metin: &str) -> Option<String> {
     let tetikleyiciler = [
-        "çalıştır:", "calistir:", "başlat:", "baslat:", "komut:", "run:",
+        "çalıştır:",
+        "calistir:",
+        "başlat:",
+        "baslat:",
+        "komut:",
+        "run:",
     ];
     let k = metin.to_lowercase();
     for t in tetikleyiciler {

@@ -18,9 +18,8 @@ pub fn export_onnx(model: &Sequential, path: &str) -> Result<()> {
         return Err(TurkError::onnx_error("Boş model dışa aktarılamaz"));
     }
     let onnx_model = OnnxModel::from_sequential(model)?;
-    let serialized = serde_json::to_string_pretty(&onnx_model).map_err(|e| {
-        TurkError::SerializationError(format!("ONNX serileştirme hatası: {e}"))
-    })?;
+    let serialized = serde_json::to_string_pretty(&onnx_model)
+        .map_err(|e| TurkError::SerializationError(format!("ONNX serileştirme hatası: {e}")))?;
     fs::write(path, serialized).map_err(TurkError::from)?;
     Ok(())
 }
@@ -28,9 +27,8 @@ pub fn export_onnx(model: &Sequential, path: &str) -> Result<()> {
 /// ONNX JSON dosyasını TURK Sequential modeline yükler.
 pub fn import_onnx(path: &str) -> Result<Sequential> {
     let content = fs::read_to_string(path).map_err(TurkError::from)?;
-    let onnx_model: OnnxModel = serde_json::from_str(&content).map_err(|e| {
-        TurkError::DeserializationError(format!("ONNX okuma hatası: {e}"))
-    })?;
+    let onnx_model: OnnxModel = serde_json::from_str(&content)
+        .map_err(|e| TurkError::DeserializationError(format!("ONNX okuma hatası: {e}")))?;
     onnx_model.to_sequential()
 }
 
@@ -193,12 +191,14 @@ impl OnnxModel {
         for node in &self.graph.node {
             match node.op_type.as_str() {
                 "Gemm" => {
-                    let w_name = node.input.get(1).ok_or_else(|| {
-                        TurkError::onnx_error("Gemm düğümünde ağırlık eksik")
-                    })?;
-                    let b_name = node.input.get(2).ok_or_else(|| {
-                        TurkError::onnx_error("Gemm düğümünde bias eksik")
-                    })?;
+                    let w_name = node
+                        .input
+                        .get(1)
+                        .ok_or_else(|| TurkError::onnx_error("Gemm düğümünde ağırlık eksik"))?;
+                    let b_name = node
+                        .input
+                        .get(2)
+                        .ok_or_else(|| TurkError::onnx_error("Gemm düğümünde bias eksik"))?;
                     let w_tensor = self.find_initializer(w_name)?;
                     let b_tensor = self.find_initializer(b_name)?;
                     let in_sz = w_tensor.dims.first().copied().unwrap_or(1);
@@ -232,9 +232,7 @@ impl OnnxModel {
                     let lt = attr_string(node, "layer_type").unwrap_or_default();
                     let mut ek = HashMap::new();
                     if let Some(json) = attr_string(node, "metadata_json") {
-                        if let Ok(map) =
-                            serde_json::from_str::<HashMap<String, f64>>(&json)
-                        {
+                        if let Ok(map) = serde_json::from_str::<HashMap<String, f64>>(&json) {
                             ek = map;
                         }
                     }
@@ -397,10 +395,10 @@ fn aktivasyon_dugumu_ekle(
         Activation::Tanh => ("Tanh", format!("act_{idx}_tanh")),
         Activation::Softmax => ("Softmax", format!("act_{idx}_softmax")),
         Activation::Linear
-            | Activation::LeakyRelu(_)
-            | Activation::Swish
-            | Activation::Elu(_)
-            | Activation::Selu => {
+        | Activation::LeakyRelu(_)
+        | Activation::Swish
+        | Activation::Elu(_)
+        | Activation::Selu => {
             return input.to_string();
         }
     };

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use sysinfo::{MINIMUM_CPU_UPDATE_INTERVAL, System};
+use sysinfo::{System, MINIMUM_CPU_UPDATE_INTERVAL};
 
 /// Task Manager benzeri yumuşatma penceresi
 const CPU_GUNCELLEME_ARALIGI: Duration = Duration::from_millis(1000);
@@ -107,10 +107,7 @@ pub fn cpu_kullanim_guncelle() -> f32 {
 
 /// Sohbet araçları — önbelleği okur, yeni ölçüm tetiklemez.
 pub fn cpu_kullanim_oku() -> f32 {
-    cpu_olcum_durumu()
-        .lock()
-        .map(|d| d.yuzde)
-        .unwrap_or(0.0)
+    cpu_olcum_durumu().lock().map(|d| d.yuzde).unwrap_or(0.0)
 }
 
 fn cargo_komutu() -> Command {
@@ -277,7 +274,12 @@ pub fn proje_kontrol(yol: &str) -> String {
     }
 
     let cikti = cargo_komutu()
-        .args(["check", "--message-format=json", "--features", "turk_sistem"])
+        .args([
+            "check",
+            "--message-format=json",
+            "--features",
+            "turk_sistem",
+        ])
         .current_dir(&dir)
         .output();
 
@@ -361,9 +363,7 @@ fn cargo_json_hatalari(cikti: &str) -> Vec<(String, u32, String)> {
                         .and_then(|f| f.as_str())
                         .unwrap_or("?")
                         .to_string(),
-                    span.get("line_start")
-                        .and_then(|l| l.as_u64())
-                        .unwrap_or(0) as u32,
+                    span.get("line_start").and_then(|l| l.as_u64()).unwrap_or(0) as u32,
                 )
             })
             .unwrap_or_else(|| ("?".into(), 0));
@@ -470,14 +470,16 @@ pub fn sistem_durumu() -> SistemDurumu {
 
     let disk_yuzde = Disks::new_with_refreshed_list()
         .iter()
-        .find(|d| d.mount_point().to_str() == Some("/") || {
-            #[cfg(windows)]
-            {
-                d.mount_point().to_str() == Some("C:\\")
-            }
-            #[cfg(not(windows))]
-            {
-                false
+        .find(|d| {
+            d.mount_point().to_str() == Some("/") || {
+                #[cfg(windows)]
+                {
+                    d.mount_point().to_str() == Some("C:\\")
+                }
+                #[cfg(not(windows))]
+                {
+                    false
+                }
             }
         })
         .map(|d| {

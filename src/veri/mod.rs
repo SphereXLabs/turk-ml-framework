@@ -2,4 +2,4 @@
 
 mod csv_akisi;
 
-pub use csv_akisi::{CsvEpochOkuyucu, CsvSemasi, CsvVeriAkisi, csv_semasi_oku};
+pub use csv_akisi::{csv_semasi_oku, CsvEpochOkuyucu, CsvSemasi, CsvVeriAkisi};

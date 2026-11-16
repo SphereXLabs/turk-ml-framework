@@ -7,193 +7,193 @@ pub enum Token {
     // Anahtar Kelimeler
     #[token("model")]
     Model,
-    
+
     #[token("katman")]
     Layer,
-    
+
     #[token("aktivasyon")]
     Activation,
-    
+
     #[token("optimizer")]
     Optimizer,
-    
+
     #[token("egit")]
     Train,
-    
+
     #[token("tahmin")]
     Predict,
-    
+
     #[token("kaydet")]
     Save,
-    
+
     #[token("yukle")]
     Load,
-    
+
     // Operatörler
     #[token("+")]
     Add,
-    
+
     #[token("-")]
     Sub,
-    
+
     #[token("*")]
     Mul,
-    
+
     #[token("/")]
     Div,
-    
+
     #[token("=")]
     Assign,
-    
+
     #[token("==")]
     Eq,
-    
+
     #[token("!=")]
     Neq,
-    
+
     #[token("<")]
     Lt,
-    
+
     #[token(">")]
     Gt,
-    
+
     #[token("<=")]
     Le,
-    
+
     #[token(">=")]
     Ge,
-    
+
     // Parantezler ve ayraçlar
     #[token("(")]
     LParen,
-    
+
     #[token(")")]
     RParen,
-    
+
     #[token("[")]
     LBracket,
-    
+
     #[token("]")]
     RBracket,
-    
+
     #[token("{")]
     LBrace,
-    
+
     #[token("}")]
     RBrace,
-    
+
     #[token(",")]
     Comma,
-    
+
     #[token(":")]
     Colon,
-    
+
     #[token(";")]
     Semicolon,
-    
+
     // İstatistiksel Fonksiyonlar
     #[token("ortalama")]
     Mean,
-    
+
     #[token("medyan")]
     Median,
-    
+
     #[token("mod")]
     Mode,
-    
+
     #[token("varyans")]
     Variance,
-    
+
     #[token("standart_sapma")]
     StdDev,
-    
+
     #[token("korelasyon")]
     Correlation,
-    
+
     #[token("kovaryans")]
     Covariance,
-    
+
     // Aktivasyon Fonksiyonları
     #[token("relu")]
     Relu,
-    
+
     #[token("leakyRelu")]
     LeakyRelu,
-    
+
     #[token("sigmoid")]
     Sigmoid,
-    
+
     #[token("tanh")]
     Tanh,
-    
+
     #[token("softmax")]
     Softmax,
-    
+
     #[token("swish")]
     Swish,
-    
+
     // Kayıp Fonksiyonları
     #[token("mse")]
     MSE,
-    
+
     #[token("mae")]
     MAE,
-    
+
     #[token("crossEntropy")]
     CrossEntropy,
-    
+
     #[token("binaryCrossEntropy")]
     BinaryCrossEntropy,
-    
+
     #[token("huberLoss")]
     HuberLoss,
-    
+
     // Optimizer Tipleri
     #[token("sgd")]
     SGD,
-    
+
     #[token("adam")]
     Adam,
-    
+
     #[token("adamw")]
     AdamW,
-    
+
     #[token("rmsprop")]
     RMSProp,
-    
+
     // Sayılar ve metinler
     #[regex(r"[0-9]+(\.[0-9]+)?", |lex| lex.slice().parse())]
     Number(f64),
-    
+
     #[regex(r#""[^"]*""#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
     String(String),
-    
+
     // Tanımlayıcılar (değişken, fonksiyon isimleri)
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Identifier(String),
-    
+
     // Katman tipleri
     #[token("dense")]
     Dense,
-    
+
     #[token("conv2d")]
     Conv2D,
-    
+
     #[token("maxpooling2d")]
     MaxPooling2D,
-    
+
     #[token("flatten")]
     Flatten,
-    
+
     // Yorum satırları ve boşluklar
     #[regex(r"[ \t\n\f]+", logos::skip)]
     #[regex(r"//[^\n]*", logos::skip)]
     #[regex(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/", logos::skip)]
     Whitespace,
-    
+
     // Dosya sonu
     EOF,
-    
+
     // Hata durumu
     #[error]
     Error,
@@ -270,22 +270,22 @@ impl fmt::Display for Token {
 mod tests {
     use super::*;
     use logos::Logos;
-    
+
     #[test]
     fn test_basic_tokens() {
         let mut lexer = Token::lexer("model katman aktivasyon optimizer");
-        
+
         assert_eq!(lexer.next(), Some(Token::Model));
         assert_eq!(lexer.next(), Some(Token::Layer));
         assert_eq!(lexer.next(), Some(Token::Activation));
         assert_eq!(lexer.next(), Some(Token::Optimizer));
         assert_eq!(lexer.next(), None);
     }
-    
+
     #[test]
     fn test_operator_tokens() {
         let mut lexer = Token::lexer("+ - * / = == != < > <= >=");
-        
+
         assert_eq!(lexer.next(), Some(Token::Add));
         assert_eq!(lexer.next(), Some(Token::Sub));
         assert_eq!(lexer.next(), Some(Token::Mul));
@@ -299,48 +299,48 @@ mod tests {
         assert_eq!(lexer.next(), Some(Token::Ge));
         assert_eq!(lexer.next(), None);
     }
-    
+
     #[test]
     fn test_literal_tokens() {
-        let mut lexer = Token::lexer("123 3.14 \"merhaba\"");
+        let mut lexer = Token::lexer("123 2.5 \"merhaba\"");
         assert_eq!(lexer.next(), Some(Token::Number(123.0)));
-        assert_eq!(lexer.next(), Some(Token::Number(3.14)));
+        assert_eq!(lexer.next(), Some(Token::Number(2.5)));
         match lexer.next() {
             Some(Token::String(s)) => assert_eq!(s, "merhaba"),
             other => panic!("String bekleniyor, gelen: {other:?}"),
         }
         assert_eq!(lexer.next(), None);
     }
-    
+
     #[test]
     fn test_identifier_token() {
         let mut lexer = Token::lexer("degisken_ismi Model123");
-        
+
         match lexer.next() {
             Some(Token::Identifier(s)) => assert_eq!(s, "degisken_ismi"),
             _ => panic!("Değişken tokeni bekleniyor"),
         }
-        
+
         match lexer.next() {
             Some(Token::Identifier(s)) => assert_eq!(s, "Model123"),
             _ => panic!("Değişken tokeni bekleniyor"),
         }
-        
+
         assert_eq!(lexer.next(), None);
     }
-    
+
     #[test]
     fn test_comment_skip() {
         let mut lexer = Token::lexer("model // Bu bir yorum\nkatman");
-        
+
         assert_eq!(lexer.next(), Some(Token::Model));
         assert_eq!(lexer.next(), Some(Token::Layer));
         assert_eq!(lexer.next(), None);
-        
+
         let mut lexer = Token::lexer("model /* Bu çok\nsatırlı\nbir yorum */ katman");
-        
+
         assert_eq!(lexer.next(), Some(Token::Model));
         assert_eq!(lexer.next(), Some(Token::Layer));
         assert_eq!(lexer.next(), None);
     }
-} 
+}

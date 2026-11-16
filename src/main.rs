@@ -1,17 +1,17 @@
-///! TÜRK Programlama Dili — Ana CLI Giriş Noktası
-///!
-///! Kullanım:
-///!   turk run <dosya.turk>    — .turk dosyasını çalıştır
-///!   turk check <dosya.turk>  — statik analiz (eğitim başlatmadan)
-///!   turk repl                — etkileşimli mod
-///!   turk --yardim | -y       — yardım ekranı
+//! TÜRK Programlama Dili — Ana CLI Giriş Noktası
+//!
+//! Kullanım:
+//! - `turk run <dosya.turk>` — .turk dosyasını çalıştır
+//! - `turk check <dosya.turk>` — statik analiz (eğitim başlatmadan)
+//! - `turk repl` — etkileşimli mod
+//! - `turk --yardim | -y` — yardım ekranı
 
-use turk::TurkDil;
 use turk::dil::Value;
 use turk::error::{Result, TurkError};
 use turk::hata_satirini_goster;
 use turk::model::Sequential;
 use turk::onnx::export_onnx;
+use turk::TurkDil;
 use turk::{cihaz_listesi_metin, model_bilgi_metin, model_indir, zoo_listesi_metin};
 
 use std::env;
@@ -95,9 +95,7 @@ fn run() -> Result<()> {
         Some("run") => {
             let dosya = args.get(2).ok_or_else(|| {
                 eprintln!("{KULLANIM}");
-                TurkError::SyntaxError(
-                    "Dosya yolu belirtilmedi. Örnek: turk run proje.turk".into(),
-                )
+                TurkError::SyntaxError("Dosya yolu belirtilmedi. Örnek: turk run proje.turk".into())
             })?;
             dosyayi_calistir(dosya)
         }
@@ -121,10 +119,7 @@ fn run() -> Result<()> {
                     "Model JSON yolu belirtilmedi. Örnek: turk export model.json".into(),
                 )
             })?;
-            let out = args
-                .get(3)
-                .map(String::as_str)
-                .unwrap_or("model.onnx.json");
+            let out = args.get(3).map(String::as_str).unwrap_or("model.onnx.json");
             model_json_onnx_aktar(json, out)
         }
 
@@ -228,9 +223,8 @@ fn dosyayi_calistir(dosya_yolu: &str) -> Result<()> {
         );
     }
 
-    let icerik = fs::read_to_string(yol).map_err(|e| {
-        TurkError::IOError(format!("'{dosya_yolu}' okunamadı: {e}"))
-    })?;
+    let icerik = fs::read_to_string(yol)
+        .map_err(|e| TurkError::IOError(format!("'{dosya_yolu}' okunamadı: {e}")))?;
 
     println!();
     println!("  \x1b[35m◈\x1b[0m \x1b[1mTÜRK\x1b[0m çalıştırılıyor: \x1b[36m{dosya_yolu}\x1b[0m");
@@ -295,9 +289,8 @@ fn dosyayi_calistir(dosya_yolu: &str) -> Result<()> {
 fn dosyayi_kontrol_et(dosya_yolu: &str) -> Result<()> {
     let yol = Path::new(dosya_yolu);
 
-    let icerik = fs::read_to_string(yol).map_err(|e| {
-        TurkError::IOError(format!("'{dosya_yolu}' okunamadı: {e}"))
-    })?;
+    let icerik = fs::read_to_string(yol)
+        .map_err(|e| TurkError::IOError(format!("'{dosya_yolu}' okunamadı: {e}")))?;
 
     println!();
     println!(
@@ -320,27 +313,21 @@ fn dosyayi_kontrol_et(dosya_yolu: &str) -> Result<()> {
         match dil.kontrol_et_satir(satir, satir_no) {
             Ok(()) => info!("[{satir_no:>3}] ✓ {satir}"),
             Err(e) => {
-                eprintln!(
-                    "  \x1b[31m✗ STATİK HATA\x1b[0m Satır {satir_no}: {e}"
-                );
+                eprintln!("  \x1b[31m✗ STATİK HATA\x1b[0m Satır {satir_no}: {e}");
                 return Err(e);
             }
         }
     }
 
     println!("  \x1b[90m{}\x1b[0m", "─".repeat(54));
-    println!(
-        "  \x1b[32m✓\x1b[0m Statik analiz geçti — {komut_sayisi} komut, {satir_no} satır.\n"
-    );
+    println!("  \x1b[32m✓\x1b[0m Statik analiz geçti — {komut_sayisi} komut, {satir_no} satır.\n");
 
     Ok(())
 }
 
 fn model_json_onnx_aktar(json_yolu: &str, onnx_yolu: &str) -> Result<()> {
     println!();
-    println!(
-        "  \x1b[35m◈\x1b[0m \x1b[1mTÜRK EXPORT\x1b[0m — {json_yolu} → {onnx_yolu}"
-    );
+    println!("  \x1b[35m◈\x1b[0m \x1b[1mTÜRK EXPORT\x1b[0m — {json_yolu} → {onnx_yolu}");
     let mut model = Sequential::new();
     model.load(json_yolu)?;
     export_onnx(&model, onnx_yolu)?;
@@ -411,8 +398,8 @@ fn etkisesimli_mod() -> Result<()> {
 
         match dil.calistir(komut) {
             Ok(Value::None) => {}
-            Ok(sonuc)       => println!("  \x1b[32m→\x1b[0m {sonuc:?}"),
-            Err(e)          => eprintln!("  \x1b[31m✗\x1b[0m {e}"),
+            Ok(sonuc) => println!("  \x1b[32m→\x1b[0m {sonuc:?}"),
+            Err(e) => eprintln!("  \x1b[31m✗\x1b[0m {e}"),
         }
     }
 

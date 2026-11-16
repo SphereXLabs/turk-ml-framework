@@ -1,4 +1,4 @@
-﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
@@ -306,7 +306,11 @@ impl eframe::App for TurkGui {
                 egui::ComboBox::from_id_source("model_sec")
                     .selected_text(&self.secili_model)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.secili_model, "xor".into(), "XOR Siniflandirici");
+                        ui.selectable_value(
+                            &mut self.secili_model,
+                            "xor".into(),
+                            "XOR Siniflandirici",
+                        );
                         ui.selectable_value(
                             &mut self.secili_model,
                             "mnist_mlp".into(),
@@ -363,10 +367,8 @@ impl eframe::App for TurkGui {
                 }
                 if self.egitim_asamasi || self.guncel_epoch > 0 {
                     ui.add(
-                        egui::ProgressBar::new(self.epoch_ilerleme).text(format!(
-                            "Epoch {}/{}",
-                            self.guncel_epoch, self.toplam_epoch
-                        )),
+                        egui::ProgressBar::new(self.epoch_ilerleme)
+                            .text(format!("Epoch {}/{}", self.guncel_epoch, self.toplam_epoch)),
                     );
                 }
             }

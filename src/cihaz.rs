@@ -37,8 +37,7 @@ impl Cihaz {
                 }
             }
             "cuda" | "ekran_karti" => Err(TurkError::RuntimeError(
-                "Gercek GPU (CUDA) henuz desteklenmiyor. Simdilik: cihaz=paralel"
-                    .into(),
+                "Gercek GPU (CUDA) henuz desteklenmiyor. Simdilik: cihaz=paralel".into(),
             )),
             other => Err(TurkError::SyntaxError(format!(
                 "Bilinmeyen cihaz: '{other}'. Gecerli: cpu, paralel"

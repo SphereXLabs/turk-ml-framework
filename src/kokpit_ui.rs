@@ -128,10 +128,9 @@ pub fn fontlari_yukle(ctx: &egui::Context) {
         if let Ok(windir) = std::env::var("WINDIR") {
             let segoe = format!(r"{windir}\Fonts\segoeui.ttf");
             if let Ok(bytes) = std::fs::read(&segoe) {
-                fonts.font_data.insert(
-                    "segoe_latin".to_owned(),
-                    egui::FontData::from_owned(bytes),
-                );
+                fonts
+                    .font_data
+                    .insert("segoe_latin".to_owned(), egui::FontData::from_owned(bytes));
                 for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
                     if let Some(list) = fonts.families.get_mut(&family) {
                         list.insert(0, "segoe_latin".to_owned());
@@ -174,18 +173,16 @@ pub fn tema_uygula(ctx: &egui::Context) {
     style.spacing.item_spacing = egui::vec2(10.0 * s, 8.0 * s);
     style.spacing.window_margin = egui::Margin::same(12.0 * s);
     style.spacing.button_padding = egui::vec2(10.0 * s, 6.0 * s);
-    style.text_styles.insert(
-        egui::TextStyle::Body,
-        egui::FontId::proportional(16.0 * s),
-    );
+    style
+        .text_styles
+        .insert(egui::TextStyle::Body, egui::FontId::proportional(16.0 * s));
     style.text_styles.insert(
         egui::TextStyle::Monospace,
         egui::FontId::monospace(15.0 * s),
     );
-    style.text_styles.insert(
-        egui::TextStyle::Small,
-        egui::FontId::proportional(14.0 * s),
-    );
+    style
+        .text_styles
+        .insert(egui::TextStyle::Small, egui::FontId::proportional(14.0 * s));
     style.text_styles.insert(
         egui::TextStyle::Button,
         egui::FontId::proportional(15.0 * s),
@@ -206,18 +203,38 @@ pub fn arka_plan_ciz(ctx: &egui::Context, _anim: f32) {
     painter.circle_filled(cx, r, egui::Color32::from_rgba_premultiplied(8, 10, 14, 18));
     for (dx, dy) in [(-1.0_f32, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
         let k = egui::pos2(
-            if dx < 0.0 { ekran.left() } else { ekran.right() },
-            if dy < 0.0 { ekran.top() } else { ekran.bottom() },
+            if dx < 0.0 {
+                ekran.left()
+            } else {
+                ekran.right()
+            },
+            if dy < 0.0 {
+                ekran.top()
+            } else {
+                ekran.bottom()
+            },
         );
-        painter.circle_filled(k, r * 0.55, egui::Color32::from_rgba_premultiplied(0, 0, 0, 28));
+        painter.circle_filled(
+            k,
+            r * 0.55,
+            egui::Color32::from_rgba_premultiplied(0, 0, 0, 28),
+        );
     }
 }
 
 pub fn cam_panel_ciz(painter: &egui::Painter, rect: egui::Rect, anim: f32) {
     painter.rect_filled(rect, CAM_RADIUS, GLASS_FILL);
     let t = (anim * 0.45).sin() * 0.5 + 0.5;
-    let cyan = renk_lerp(MICRO_CYAN.linear_multiply(0.22), MICRO_CYAN.linear_multiply(0.42), t);
-    let tunç = renk_lerp(TUNC_BRONZ.linear_multiply(0.35), TUNC_BRONZ.linear_multiply(0.55), 1.0 - t);
+    let cyan = renk_lerp(
+        MICRO_CYAN.linear_multiply(0.22),
+        MICRO_CYAN.linear_multiply(0.42),
+        t,
+    );
+    let tunç = renk_lerp(
+        TUNC_BRONZ.linear_multiply(0.35),
+        TUNC_BRONZ.linear_multiply(0.55),
+        1.0 - t,
+    );
     let r = rect.expand(-0.25);
     let rad = CAM_RADIUS;
     painter.line_segment(
@@ -228,7 +245,10 @@ pub fn cam_panel_ciz(painter: &egui::Painter, rect: egui::Rect, anim: f32) {
         egui::Stroke::new(KENAR_INCE, cyan),
     );
     painter.line_segment(
-        [egui::pos2(r.left(), r.top() + rad), egui::pos2(r.left(), r.bottom() - rad)],
+        [
+            egui::pos2(r.left(), r.top() + rad),
+            egui::pos2(r.left(), r.bottom() - rad),
+        ],
         egui::Stroke::new(KENAR_INCE, cyan.linear_multiply(0.75)),
     );
     painter.line_segment(

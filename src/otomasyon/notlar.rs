@@ -127,12 +127,7 @@ pub fn hafiza_tara_ozet(anahtar_kelime: &str) -> String {
     satirlar.join("")
 }
 
-fn metin_eslesir(
-    dosya_adi: &str,
-    icerik: &str,
-    anahtar_kucuk: &str,
-    kelimeler: &[String],
-) -> bool {
+fn metin_eslesir(dosya_adi: &str, icerik: &str, anahtar_kucuk: &str, kelimeler: &[String]) -> bool {
     let dosya_kucuk = dosya_adi.to_lowercase();
     let icerik_kucuk = icerik.to_lowercase();
 
@@ -151,8 +146,7 @@ fn metin_eslesir(
 
 fn satir_eslesir(satir: &str, anahtar_kucuk: &str, kelimeler: &[String]) -> bool {
     let k = satir.to_lowercase();
-    k.contains(anahtar_kucuk)
-        || kelimeler.iter().any(|w| k.contains(w.as_str()))
+    k.contains(anahtar_kucuk) || kelimeler.iter().any(|w| k.contains(w.as_str()))
 }
 
 fn dosya_zaman_damgasi(path: &Path) -> u64 {
@@ -222,8 +216,18 @@ mod tests {
 
     #[test]
     fn test_metin_eslesir_dosya_adi() {
-        assert!(metin_eslesir("notlar_ozet.txt", "içerik", "notlar", &["notlar".into()]));
-        assert!(metin_eslesir("a.txt", "selam dünya", "selam", &["selam".into()]));
+        assert!(metin_eslesir(
+            "notlar_ozet.txt",
+            "içerik",
+            "notlar",
+            &["notlar".into()]
+        ));
+        assert!(metin_eslesir(
+            "a.txt",
+            "selam dünya",
+            "selam",
+            &["selam".into()]
+        ));
         assert!(!metin_eslesir("a.txt", "merhaba", "xyz", &["xyz".into()]));
     }
 }

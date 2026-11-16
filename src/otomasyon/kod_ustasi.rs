@@ -81,7 +81,11 @@ pub fn kod_enjekte_et(yol: &str, hedef_satir: &str, yeni_kod: &str) -> Result<St
 }
 
 /// Kod yazma aracı — dosya oluşturur veya üzerine yazar.
-pub fn kod_yaz_uygula(yol: &str, icerik: &str, enjekte_hedef: Option<&str>) -> Result<String, String> {
+pub fn kod_yaz_uygula(
+    yol: &str,
+    icerik: &str,
+    enjekte_hedef: Option<&str>,
+) -> Result<String, String> {
     if let Some(hedef) = enjekte_hedef.filter(|h| !h.trim().is_empty()) {
         return kod_enjekte_et(yol, hedef, icerik);
     }

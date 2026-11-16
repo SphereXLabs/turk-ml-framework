@@ -84,7 +84,9 @@ fn wav_yaz(yol: &Path, ornekler: &[f32], hz: u32) -> Result<(), String> {
             .write_sample(i16)
             .map_err(|e| format!("WAV örneği yazılamadı: {e}"))?;
     }
-    writer.finalize().map_err(|e| format!("WAV kapatılamadı: {e}"))?;
+    writer
+        .finalize()
+        .map_err(|e| format!("WAV kapatılamadı: {e}"))?;
     Ok(())
 }
 

@@ -86,13 +86,11 @@ pub fn model_indir(id: &str, hedef_kok: Option<&Path>) -> Result<PathBuf> {
         .join(&meta.id);
 
     if hedef.exists() {
-        fs::remove_dir_all(&hedef).map_err(|e| {
-            TurkError::IOError(format!("Eski model dizini silinemedi: {e}"))
-        })?;
+        fs::remove_dir_all(&hedef)
+            .map_err(|e| TurkError::IOError(format!("Eski model dizini silinemedi: {e}")))?;
     }
-    fs::create_dir_all(&hedef).map_err(|e| {
-        TurkError::IOError(format!("Hedef dizin oluşturulamadı: {e}"))
-    })?;
+    fs::create_dir_all(&hedef)
+        .map_err(|e| TurkError::IOError(format!("Hedef dizin oluşturulamadı: {e}")))?;
     dizin_kopyala(&kaynak, &hedef)?;
 
     Ok(hedef)
@@ -117,7 +115,8 @@ pub fn zoo_listesi_metin() -> String {
         models: vec![],
     });
 
-    let mut out = String::from("╔══════════════════════════════════════════════════════════════╗\n");
+    let mut out =
+        String::from("╔══════════════════════════════════════════════════════════════╗\n");
     out.push_str("║                    TÜRK Model Zoo                            ║\n");
     out.push_str("╠══════════════════════════════════════════════════════════════╣\n");
 
@@ -174,14 +173,14 @@ pub fn model_bilgi_metin(id: &str) -> Result<String> {
 }
 
 fn dizin_kopyala(kaynak: &Path, hedef: &Path) -> Result<()> {
-    for entry in fs::read_dir(kaynak).map_err(|e| {
-        TurkError::IOError(format!("Dizin okunamadı {}: {e}", kaynak.display()))
-    })? {
+    for entry in fs::read_dir(kaynak)
+        .map_err(|e| TurkError::IOError(format!("Dizin okunamadı {}: {e}", kaynak.display())))?
+    {
         let entry = entry.map_err(|e| TurkError::IOError(e.to_string()))?;
         let tur = entry.path();
-        let ad = tur.file_name().ok_or_else(|| {
-            TurkError::IOError("Geçersiz dosya adı".into())
-        })?;
+        let ad = tur
+            .file_name()
+            .ok_or_else(|| TurkError::IOError("Geçersiz dosya adı".into()))?;
         let hedef_yol = hedef.join(ad);
         if tur.is_dir() {
             fs::create_dir_all(&hedef_yol).map_err(|e| TurkError::IOError(e.to_string()))?;
