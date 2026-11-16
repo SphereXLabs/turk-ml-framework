@@ -229,11 +229,7 @@ Daha fazla bilgi için [CONTRIBUTING.md](CONTRIBUTING.md) dosyasına bakın.
 
 Bu proje MIT Lisansı altında lisanslanmıştır - detaylar için [LICENSE](LICENSE) dosyasına bakın.
 
-## 📧 İletişim
 
-- **GitHub:** [github.com/user/turk](https://github.com/user/turk)
-- **E-posta:** ornek@mail.com
-- **Twitter:** [@turk_dil](https://twitter.com/turk_dil)
 
 ## 🌐 İlgili Projeler
 
