@@ -1,0 +1,12 @@
+# TÜRK - Yapay Zeka Ağı Tanımı
+# XOR sınıflandırma problemi için eğitim örneği
+
+MODEL_OLUSTUR: YapayZekaAgi
+
+KATMAN_EKLE: Dense(girdi: 2, cikti: 8, aktivasyon: Relu)
+KATMAN_EKLE: BatchNormalization()
+KATMAN_EKLE: Dense(girdi: 8, cikti: 4, aktivasyon: Relu)
+KATMAN_EKLE: Dense(girdi: 4, cikti: 1, aktivasyon: Sigmoid)
+
+DERLE: (optimizer: Adam, ogrenme_orani: 0.05, loss: MSE)
+EGIT: (epoch: 100, batch_boyutu: 4, sabir: 10, min_delta: 0.0001)

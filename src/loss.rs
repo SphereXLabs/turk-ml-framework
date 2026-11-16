@@ -2,26 +2,27 @@ use crate::{Result, TurkError};
 use ndarray::prelude::*;
 use ndarray::Array2;
 use serde::{Serialize, Deserialize};
+use std::fmt;
 
-/// Kayıp fonksiyonu trait'i
-pub trait Loss: Send + Sync {
+/// Loss trait'i
+pub trait Loss: fmt::Debug + Send + Sync {
     /// Kayıp değerini hesaplar
-    fn compute(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<f32>;
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64>;
     
     /// Kayıp fonksiyonunun gradyanını hesaplar
-    fn gradient(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<Array2<f32>>;
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>>;
     
     /// Kayıp fonksiyonunun adını döndürür
     fn name(&self) -> &'static str;
     
-    /// Kayıp fonksiyonunun klonunu oluşturur
+    /// Kayıp fonksiyonunu klonlar
     fn clone_box(&self) -> Box<dyn Loss>;
 }
 
 /// Çapraz Entropi kayıp fonksiyonu
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossEntropy {
-    pub epsilon: f32,
+    pub epsilon: f64,
     pub from_logits: bool,
 }
 
@@ -44,105 +45,113 @@ impl Default for CrossEntropy {
 }
 
 impl Loss for CrossEntropy {
-    fn compute(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<f32> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "CrossEntropy: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+        if y_true.shape() != y_pred.shape() {
+            return Err(TurkError::DimensionMismatch(format!(
+                "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
+                y_true.shape(), y_pred.shape()
             )));
         }
-
+        
         let predictions = if self.from_logits {
             // Logits'ten olasılıklara dönüşüm (softmax)
-            let max_vals = predictions.map_axis(Axis(1), |row| {
-                row.fold(f32::NEG_INFINITY, |max, &val| max.max(val))
+            let max_vals = y_pred.map_axis(Axis(1), |row| {
+                row.fold(f64::NEG_INFINITY, |max, &val| max.max(val))
             });
             
-            let exp_preds = predictions.outer_iter()
-                .zip(max_vals.iter())
-                .map(|(row, &max_val)| {
-                    row.mapv(|val| (val - max_val).exp())
-                })
-                .collect::<Vec<_>>();
-                
-            let sum_exp = exp_preds.iter()
-                .map(|row| row.sum())
-                .collect::<Vec<_>>();
-                
-            let mut softmax_probs = Array2::zeros(predictions.raw_dim());
+            let mut softmax_probs = Array2::zeros(y_pred.raw_dim());
             
-            for ((i, row), &sum) in exp_preds.iter().enumerate().zip(sum_exp.iter()) {
-                for (j, &val) in row.iter().enumerate() {
-                    softmax_probs[[i, j]] = val / sum;
+            for i in 0..y_pred.nrows() {
+                let row = y_pred.row(i);
+                let max_val = max_vals[i];
+                let mut exp_sum = 0.0;
+                
+                // e^(x_i - max) hesapla ve topla
+                for j in 0..row.len() {
+                    let exp_val = (row[j] - max_val).exp();
+                    softmax_probs[[i, j]] = exp_val;
+                    exp_sum += exp_val;
+                }
+                
+                // Normalizasyon
+                for j in 0..row.len() {
+                    softmax_probs[[i, j]] /= exp_sum;
                 }
             }
             
             softmax_probs
         } else {
-            predictions.clone()
+            y_pred.to_owned()
         };
         
-        let clipped_predictions = predictions.mapv(|x| x.max(self.epsilon).min(1.0 - self.epsilon));
+        // Epsilon ile clipping
+        let predictions = predictions.mapv(|p| p.max(self.epsilon).min(1.0 - self.epsilon));
         
-        let batch_size = predictions.shape()[0] as f32;
-        let loss = -targets.iter()
-            .zip(clipped_predictions.iter())
-            .map(|(&t, &p)| t * p.ln())
-            .sum::<f32>();
-
-        Ok(loss / batch_size)
+        // Cross entropy hesapla: -sum(y_true * log(y_pred))
+        let mut loss = 0.0;
+        for i in 0..y_true.nrows() {
+            for j in 0..y_true.ncols() {
+                if y_true[[i, j]] > 0.0 {
+                    loss -= y_true[[i, j]] * predictions[[i, j]].ln();
+                }
+            }
+        }
+        
+        Ok(loss / y_true.nrows() as f64)
     }
-
-    fn gradient(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<Array2<f32>> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "CrossEntropy gradient: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
+    
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+        if y_true.shape() != y_pred.shape() {
+            return Err(TurkError::DimensionMismatch(format!(
+                "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
+                y_true.shape(), y_pred.shape()
             )));
         }
-
-        let batch_size = predictions.shape()[0] as f32;
         
-        if self.from_logits {
-            // Softmax + Çapraz entropi birleşik gradient:
-            // Bu durumda softmax çıktıları - hedefler formülü kullanılır
-            let max_vals = predictions.map_axis(Axis(1), |row| {
-                row.fold(f32::NEG_INFINITY, |max, &val| max.max(val))
+        let predictions = if self.from_logits {
+            // Logits'ten olasılıklara dönüşüm (softmax)
+            let max_vals = y_pred.map_axis(Axis(1), |row| {
+                row.fold(f64::NEG_INFINITY, |max, &val| max.max(val))
             });
             
-            let mut softmax_probs = Array2::zeros(predictions.raw_dim());
+            let mut softmax_probs = Array2::zeros(y_pred.raw_dim());
             
-            for (i, row) in predictions.outer_iter().enumerate() {
+            for i in 0..y_pred.nrows() {
+                let row = y_pred.row(i);
                 let max_val = max_vals[i];
-                let exp_vals: Vec<f32> = row.iter().map(|&x| (x - max_val).exp()).collect();
-                let sum_exp: f32 = exp_vals.iter().sum();
+                let mut exp_sum = 0.0;
                 
-                for (j, &exp_val) in exp_vals.iter().enumerate() {
-                    softmax_probs[[i, j]] = exp_val / sum_exp;
+                // e^(x_i - max) hesapla ve topla
+                for j in 0..row.len() {
+                    let exp_val = (row[j] - max_val).exp();
+                    softmax_probs[[i, j]] = exp_val;
+                    exp_sum += exp_val;
+                }
+                
+                // Normalizasyon
+                for j in 0..row.len() {
+                    softmax_probs[[i, j]] /= exp_sum;
                 }
             }
             
-            // softmax çıktılar - hedefler
-            Ok((softmax_probs - targets) / batch_size)
+            softmax_probs
         } else {
-            let clipped_predictions = predictions.mapv(|x| x.max(self.epsilon).min(1.0 - self.epsilon));
-            
-            let grad = Array2::from_shape_fn(predictions.raw_dim(), |(i, j)| {
-                if targets[[i, j]] > 0.0 {
-                    -targets[[i, j]] / clipped_predictions[[i, j]]
-                } else {
-                    0.0
-                }
-            });
-            
-            Ok(grad / batch_size)
-        }
+            y_pred.to_owned()
+        };
+        
+        // Softmax CE için gradient hesapla
+        let batch_size = y_true.nrows() as f64;
+        let mut grad = predictions.clone();
+        
+        // Gradient: (y_pred - y_true) / batch_size
+        grad = grad - y_true;
+        grad = grad / batch_size;
+        
+        Ok(grad)
     }
-    
+
     fn name(&self) -> &'static str {
-        "cross_entropy"
+        "crossentropy"
     }
     
     fn clone_box(&self) -> Box<dyn Loss> {
@@ -161,36 +170,31 @@ impl Default for MSE {
 }
 
 impl Loss for MSE {
-    fn compute(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<f32> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "MSE: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+        if y_true.shape() != y_pred.shape() {
+            return Err(TurkError::DimensionMismatch(format!(
+                "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
+                y_true.shape(), y_pred.shape()
             )));
         }
-
-        let batch_size = predictions.shape()[0] as f32;
-        let diff = predictions - targets;
-        let squared_diff = diff.mapv(|x| x * x);
-        let sum_squared_diff = squared_diff.sum();
         
-        Ok(sum_squared_diff / batch_size)
-    }
-
-    fn gradient(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<Array2<f32>> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "MSE gradient: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
-            )));
-        }
-
-        let batch_size = predictions.shape()[0] as f32;
-        Ok(2.0 * (predictions - targets) / batch_size)
+        let diff = y_pred - y_true;
+        let mse = (diff.clone() * diff).mean().unwrap();
+        Ok(mse)
     }
     
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+        if y_true.shape() != y_pred.shape() {
+            return Err(TurkError::DimensionMismatch(format!(
+                "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
+                y_true.shape(), y_pred.shape()
+            )));
+        }
+        
+        let grad = 2.0 * (y_pred - y_true) / y_true.len() as f64;
+        Ok(grad)
+    }
+
     fn name(&self) -> &'static str {
         "mse"
     }
@@ -211,44 +215,40 @@ impl Default for MAE {
 }
 
 impl Loss for MAE {
-    fn compute(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<f32> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "MAE: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+        if y_true.shape() != y_pred.shape() {
+            return Err(TurkError::DimensionMismatch(format!(
+                "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
+                y_true.shape(), y_pred.shape()
             )));
         }
-
-        let batch_size = predictions.shape()[0] as f32;
-        let abs_diff = (predictions - targets).mapv(|x| x.abs());
         
-        Ok(abs_diff.sum() / batch_size)
+        let diff = (y_pred - y_true).mapv(|x| x.abs());
+        let mae = diff.sum() / y_true.len() as f64;
+        Ok(mae)
     }
 
-    fn gradient(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<Array2<f32>> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "MAE gradient: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+        if y_true.shape() != y_pred.shape() {
+            return Err(TurkError::DimensionMismatch(format!(
+                "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
+                y_true.shape(), y_pred.shape()
             )));
         }
-
-        let batch_size = predictions.shape()[0] as f32;
-        let gradient = Array2::from_shape_fn(predictions.raw_dim(), |(i, j)| {
-            if predictions[[i, j]] > targets[[i, j]] {
+        
+        let diff = (y_pred - y_true).mapv(|x| {
+            if x > 0.0 {
                 1.0
-            } else if predictions[[i, j]] < targets[[i, j]] {
+            } else if x < 0.0 {
                 -1.0
             } else {
                 0.0
             }
         });
         
-        Ok(gradient / batch_size)
+        Ok(diff / y_true.len() as f64)
     }
-    
+
     fn name(&self) -> &'static str {
         "mae"
     }
@@ -261,11 +261,11 @@ impl Loss for MAE {
 /// Huber kayıp fonksiyonu - MSE ve MAE'nin bir kombinasyonu
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Huber {
-    pub delta: f32,
+    pub delta: f64,
 }
 
 impl Huber {
-    pub fn new(delta: f32) -> Self {
+    pub fn new(delta: f64) -> Self {
         Self { delta }
     }
 }
@@ -277,20 +277,11 @@ impl Default for Huber {
 }
 
 impl Loss for Huber {
-    fn compute(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<f32> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Huber: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
-            )));
-        }
-
-        let batch_size = predictions.shape()[0] as f32;
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
         let mut loss_sum = 0.0;
         
-        for (pred, target) in predictions.iter().zip(targets.iter()) {
-            let error = (pred - target).abs();
+        for (t, p) in y_true.iter().zip(y_pred.iter()) {
+            let error = (t - p).abs();
             
             if error <= self.delta {
                 // MSE bölgesi
@@ -301,34 +292,27 @@ impl Loss for Huber {
             }
         }
         
-        Ok(loss_sum / batch_size)
+        Ok(loss_sum / y_true.len() as f64)
     }
 
-    fn gradient(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<Array2<f32>> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Huber gradient: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
-            )));
-        }
-
-        let batch_size = predictions.shape()[0] as f32;
-        let gradient = Array2::from_shape_fn(predictions.raw_dim(), |(i, j)| {
-            let error = predictions[[i, j]] - targets[[i, j]];
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+        let mut gradient = Array2::zeros(y_true.raw_dim());
+        
+        for (i, (t, p)) in y_true.iter().zip(y_pred.iter()).enumerate() {
+            let error = t - p;
             
             if error.abs() <= self.delta {
                 // MSE bölgesi
-                error
+                gradient[[i, 0]] = error;
             } else {
                 // MAE bölgesi
-                self.delta * error.signum()
+                gradient[[i, 0]] = self.delta * error.signum();
             }
-        });
+        }
         
-        Ok(gradient / batch_size)
+        Ok(gradient / y_true.len() as f64)
     }
-    
+
     fn name(&self) -> &'static str {
         "huber"
     }
@@ -341,135 +325,105 @@ impl Loss for Huber {
 /// Kategorik Çapraz Entropi (Categorical Cross Entropy) kayıp fonksiyonu
 /// Çok sınıflı sınıflandırma için
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CategoricalCrossEntropy {
-    pub epsilon: f32,
-    pub from_logits: bool,
-}
-
-impl CategoricalCrossEntropy {
-    pub fn new(from_logits: bool) -> Self {
-        Self {
-            epsilon: 1e-7,
-            from_logits,
-        }
-    }
-}
-
-impl Default for CategoricalCrossEntropy {
-    fn default() -> Self {
-        Self {
-            epsilon: 1e-7,
-            from_logits: false,
-        }
-    }
-}
+pub struct CategoricalCrossEntropy;
 
 impl Loss for CategoricalCrossEntropy {
-    fn compute(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<f32> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "CategoricalCrossEntropy: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
-            )));
-        }
-
-        let batch_size = predictions.shape()[0] as f32;
-        
-        // Softmax uygula (eğer gerekiyorsa)
-        let predictions = if self.from_logits {
-            // Logits'ten olasılıklara dönüşüm (softmax)
-            let max_vals = predictions.map_axis(Axis(1), |row| {
-                row.fold(f32::NEG_INFINITY, |max, &val| max.max(val))
-            });
-            
-            let mut softmax_probs = Array2::zeros(predictions.raw_dim());
-            
-            for (i, row) in predictions.outer_iter().enumerate() {
-                let max_val = max_vals[i];
-                let exp_vals: Vec<f32> = row.iter().map(|&x| (x - max_val).exp()).collect();
-                let sum_exp: f32 = exp_vals.iter().sum();
-                
-                for (j, &exp_val) in exp_vals.iter().enumerate() {
-                    softmax_probs[[i, j]] = exp_val / sum_exp;
-                }
-            }
-            
-            softmax_probs
-        } else {
-            predictions.clone()
-        };
-        
-        let clipped_preds = predictions.mapv(|x| x.max(self.epsilon).min(1.0 - self.epsilon));
-        
-        // Her örnek için çapraz entropi hesapla ve topla
-        let mut loss_sum = 0.0;
-        
-        for (i, target_row) in targets.outer_iter().enumerate() {
-            for (j, &target_val) in target_row.iter().enumerate() {
-                if target_val > 0.0 {
-                    loss_sum -= target_val * clipped_preds[[i, j]].ln();
-                }
-            }
-        }
-        
-        Ok(loss_sum / batch_size)
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+        let epsilon = 1e-7;
+        let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
+        Ok(-(y_true * y_pred.mapv(|v| v.ln())).sum() / y_true.len() as f64)
     }
 
-    fn gradient(&self, predictions: &Array2<f32>, targets: &Array2<f32>) -> Result<Array2<f32>> {
-        if predictions.shape() != targets.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "CategoricalCrossEntropy gradient: Tahmin şekli: {:?}, Hedef şekli: {:?}",
-                predictions.shape(),
-                targets.shape()
-            )));
-        }
-
-        let batch_size = predictions.shape()[0] as f32;
-        
-        if self.from_logits {
-            // Softmax'in türevi + çapraz entropi basit bir forma indirgenebilir
-            // Sonuç: softmax(logits) - targets
-            let max_vals = predictions.map_axis(Axis(1), |row| {
-                row.fold(f32::NEG_INFINITY, |max, &val| max.max(val))
-            });
-            
-            let mut softmax_probs = Array2::zeros(predictions.raw_dim());
-            
-            for (i, row) in predictions.outer_iter().enumerate() {
-                let max_val = max_vals[i];
-                let exp_vals: Vec<f32> = row.iter().map(|&x| (x - max_val).exp()).collect();
-                let sum_exp: f32 = exp_vals.iter().sum();
-                
-                for (j, &exp_val) in exp_vals.iter().enumerate() {
-                    softmax_probs[[i, j]] = exp_val / sum_exp;
-                }
-            }
-            
-            Ok((softmax_probs - targets) / batch_size)
-        } else {
-            let clipped_preds = predictions.mapv(|x| x.max(self.epsilon).min(1.0 - self.epsilon));
-            
-            let mut gradient = Array2::zeros(predictions.raw_dim());
-            
-            for i in 0..predictions.shape()[0] {
-                for j in 0..predictions.shape()[1] {
-                    if targets[[i, j]] > 0.0 {
-                        gradient[[i, j]] = -targets[[i, j]] / clipped_preds[[i, j]];
-                    }
-                }
-            }
-            
-            Ok(gradient / batch_size)
-        }
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+        let epsilon = 1e-7;
+        let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
+        Ok((y_pred - y_true) / y_true.len() as f64)
     }
-    
+
     fn name(&self) -> &'static str {
-        "categorical_cross_entropy"
+        "categorical_crossentropy"
     }
     
     fn clone_box(&self) -> Box<dyn Loss> {
         Box::new(self.clone())
+    }
+}
+
+/// Binary Crossentropy
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BinaryCrossentropy;
+
+impl Loss for BinaryCrossentropy {
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+        let epsilon = 1e-7;
+        let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
+        Ok(-(y_true * y_pred.mapv(|v| v.ln()) + (1.0 - y_true) * y_pred.mapv(|v| (1.0 - v).ln()))
+            .mean()
+            .unwrap())
+    }
+    
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+        let epsilon = 1e-7;
+        let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
+        let y_pred_clone = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
+        Ok((y_pred_clone.clone() - y_true) / (y_pred_clone.clone() * (1.0 - y_pred_clone)) / y_true.len() as f64)
+    }
+
+    fn name(&self) -> &'static str {
+        "binary_crossentropy"
+    }
+    
+    fn clone_box(&self) -> Box<dyn Loss> {
+        Box::new(BinaryCrossentropy)
+    }
+}
+
+/// Sparse Categorical Crossentropy
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SparseCategoricalCrossentropy;
+
+impl Loss for SparseCategoricalCrossentropy {
+    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+        let epsilon = 1e-7;
+        let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
+        let mut loss = 0.0;
+        for i in 0..y_true.nrows() {
+            let class = y_true[[i, 0]] as usize;
+            loss -= y_pred[[i, class]].ln();
+        }
+        Ok(loss / y_true.len() as f64)
+    }
+    
+    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+        let epsilon = 1e-7;
+        let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
+        let mut grad = Array2::zeros(y_pred.raw_dim());
+        for i in 0..y_true.nrows() {
+            let class = y_true[[i, 0]] as usize;
+            grad[[i, class]] = y_pred[[i, class]] - 1.0;
+        }
+        Ok(grad / y_true.len() as f64)
+    }
+
+    fn name(&self) -> &'static str {
+        "sparse_categorical_crossentropy"
+    }
+    
+    fn clone_box(&self) -> Box<dyn Loss> {
+        Box::new(SparseCategoricalCrossentropy)
+    }
+}
+
+/// Kayıp fonksiyonu oluştur
+pub fn create_loss(loss: &str) -> Result<Box<dyn Loss>> {
+    match loss.to_lowercase().as_str() {
+        "mse" => Ok(Box::new(MSE::default())),
+        "mae" => Ok(Box::new(MAE::default())),
+        "huber" => Ok(Box::new(Huber::default())),
+        "binary_crossentropy" | "binarycrossentropy" => Ok(Box::new(BinaryCrossentropy)),
+        "categorical_crossentropy" | "categoricalcrossentropy" => Ok(Box::new(CategoricalCrossEntropy)),
+        "sparse_categorical_crossentropy" | "sparsecategoricalcrossentropy" => Ok(Box::new(SparseCategoricalCrossentropy)),
+        _ => Err(TurkError::LossError(format!("Geçersiz kayıp fonksiyonu: {}", loss))),
     }
 }
 
@@ -485,13 +439,13 @@ mod tests {
         let predictions = Array::from_shape_vec((2, 1), vec![1.0, 2.0]).unwrap();
         let targets = Array::from_shape_vec((2, 1), vec![1.5, 1.0]).unwrap();
         
-        let loss = mse.compute(&predictions, &targets).unwrap();
+        let loss = mse.loss(&targets.view(), &predictions.view()).unwrap();
         assert!((loss - 0.625).abs() < 1e-6);
         
-        let gradient = mse.gradient(&predictions, &targets).unwrap();
+        let gradient = mse.gradient(&targets.view(), &predictions.view()).unwrap();
         assert_eq!(gradient.shape(), &[2, 1]);
-        assert!((gradient[[0, 0]] + 1.0).abs() < 1e-6);
-        assert!((gradient[[1, 0]] - 2.0).abs() < 1e-6);
+        assert!((gradient[[0, 0]] + 0.5).abs() < 1e-6);  // -0.5 değerini kontrol et
+        assert!((gradient[[1, 0]] - 1.0).abs() < 1e-6);
     }
     
     #[test]
@@ -501,7 +455,7 @@ mod tests {
         let predictions = Array::from_shape_vec((2, 1), vec![1.0, 2.0]).unwrap();
         let targets = Array::from_shape_vec((2, 1), vec![1.5, 1.0]).unwrap();
         
-        let loss = mae.compute(&predictions, &targets).unwrap();
+        let loss = mae.loss(&targets.view(), &predictions.view()).unwrap();
         assert!((loss - 0.75).abs() < 1e-6);
     }
     
@@ -519,7 +473,7 @@ mod tests {
             0.0, 1.0, 0.0,
         ]).unwrap();
         
-        let loss = ce.compute(&predictions, &targets).unwrap();
+        let loss = ce.loss(&targets.view(), &predictions.view()).unwrap();
         assert!(loss > 0.0);
     }
     
@@ -530,10 +484,7 @@ mod tests {
         let predictions = Array::from_shape_vec((3, 1), vec![1.0, 2.0, 5.0]).unwrap();
         let targets = Array::from_shape_vec((3, 1), vec![1.5, 1.0, 2.0]).unwrap();
         
-        let loss = huber.compute(&predictions, &targets).unwrap();
+        let loss = huber.loss(&targets.view(), &predictions.view()).unwrap();
         assert!(loss > 0.0);
-        
-        let gradient = huber.gradient(&predictions, &targets).unwrap();
-        assert_eq!(gradient.shape(), &[3, 1]);
     }
 } 

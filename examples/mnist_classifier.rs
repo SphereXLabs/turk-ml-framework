@@ -1,211 +1,209 @@
-use anyhow::Result;
-use mnist::{MnistBuilder, Mnist};
-use ndarray::{Array2, s};
-use std::time::Instant;
-use colored::*;
-use turk_lang::{
-    Sequential, Dense, Dropout, BatchNorm, Activation, 
-    Adam,
-    metrics::Accuracy,
+use turk::{
+    Sequential, Dense, Dropout,
+    Optimizer, Adam, SGD, RMSProp,
+    Loss, CrossEntropy,
+    StandardScaler, MinMaxScaler, 
+    Metric, Accuracy, Precision, Recall, F1Score,
+    GlorotUniform, HeNormal,
+    Result
 };
-use env_logger;
-use log::info;
+use ndarray::{Array2, ArrayView2, Axis};
+use mnist::{MnistBuilder, Mnist};
+use std::time::Instant;
+use log::{info, warn, error, debug};
+use env_logger::Builder;
+use log::LevelFilter;
+use std::env;
+use indicatif::{ProgressBar, ProgressStyle};
+use colored::*;
 
 fn main() -> Result<()> {
-    // Log seviyesini ayarla
+    // Loglama sistemini kur
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", "info");
+    }
     env_logger::init();
     
-    println!("{}", "MNIST El Yazısı Rakam Sınıflandırıcı".green().bold());
-    println!("{}", "==========================================".green());
+    info!("MNIST Sınıflandırıcı Örneği Başlatılıyor...");
     
-    // MNIST veri setini yükle
-    println!("MNIST veri seti yükleniyor...");
-    let start = Instant::now();
+    // MNIST verisini indir ve yükle
+    info!("MNIST veri seti yükleniyor...");
+    let mnist = load_mnist_data()?;
     
-    let Mnist {
-        trn_img, trn_lbl,
-        val_img, val_lbl,
-        ..
-    } = MnistBuilder::new()
-        .label_format_digit()
-        .training_set_length(50000)
-        .validation_set_length(10000)
-        .test_set_length(10000)
-        .finalize();
+    // Eğitim ve test verilerini hazırla
+    let (x_train, y_train, x_test, y_test) = prepare_mnist_data(&mnist)?;
     
-    // Veri setini yeniden şekillendir
-    let train_data = ndarray::Array3::from_shape_vec((50000, 28, 28), trn_img)?
-        .map(|x| *x as f32 / 255.0);
-    let train_labels = Array1::from_vec(trn_lbl);
+    // Modeli oluştur
+    info!("Model oluşturuluyor...");
+    let mut model = create_model(x_train.shape()[1])?;
     
-    let val_data = ndarray::Array3::from_shape_vec((10000, 28, 28), val_img)?
-        .map(|x| *x as f32 / 255.0);
-    let val_labels = Array1::from_vec(val_lbl);
-    
-    println!("Veri yükleme tamamlandı! ({:.2}s)", start.elapsed().as_secs_f32());
-    
-    // Verileri düzleştir
-    println!("Veriler ön işleniyor...");
-    let start = Instant::now();
-    
-    // Paralel işleme kullanarak verileri düzleştir
-    let train_data = flatten_images(&train_data);
-    let val_data = flatten_images(&val_data);
-    
-    // Etiketleri one-hot encode et
-    let train_labels = one_hot_encode(&train_labels, 10)?;
-    let val_labels = one_hot_encode(&val_labels, 10)?;
-    
-    println!("Ön işleme tamamlandı! ({:.2}s)", start.elapsed().as_secs_f32());
-    println!("Eğitim veri şekli: {:?}", train_data.shape());
-    println!("Doğrulama veri şekli: {:?}", val_data.shape());
-    
-    // Model oluştur
-    println!("\n{}", "Model oluşturuluyor...".green());
-    let mut model = Sequential::new();
-    
-    // Model mimarisi
-    model.add(Dense::new(784, 128, Activation::Relu));
-    model.add(Dropout::new(0.2));
-    model.add(BatchNorm::new(128));
-    model.add(Dense::new(128, 64, Activation::Relu));
-    model.add(Dropout::new(0.2));
-    model.add(Dense::new(64, 10, Activation::Softmax));
-    
-    // Optimizer seçimi
-    model.compile(Adam::new(0.001));
-    
-    // Model özetini göster
-    println!("{}", model.summary());
-    
-    // Hiperparametreler
-    let epochs = 5;
-    let batch_size = 32;
+    // Model bilgisini yazdır
+    info!("Model Yapısı:\n{}", model.summary());
     
     // Modeli eğit
-    info!("Model eğitimi başlatılıyor...");
-    let history = model.fit(
-        &train_data, 
-        &train_labels,
+    info!("Model eğitiliyor...");
+    let başlangıç_zamanı = Instant::now();
+    let epochs = 5;
+    let batch_size = 128;
+    
+    let mut progress_bar = ProgressBar::new((epochs * (x_train.shape()[0] / batch_size)) as u64);
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap()
+            .progress_chars("#>-")
+    );
+    
+    model.fit_with_callback(
+        &x_train.view(), 
+        &y_train.view(), 
         epochs, 
-        batch_size,
-        Some((&val_data, &val_labels))
-    ).unwrap();
+        batch_size, 
+        Some(Box::new(move |epoch, batch, total_batches, loss, accuracy| {
+            progress_bar.inc(1);
+            if batch % 100 == 0 {
+                info!("Epoch {}/{}, Batch {}/{}, Loss: {:.4}, Accuracy: {:.2}%", 
+                       epoch + 1, epochs, batch, total_batches, loss, accuracy * 100.0);
+            }
+        }))
+    )?;
     
-    info!("Eğitim tamamlandı!");
-    
-    println!("Eğitim süresi: {:.2}s", start.elapsed().as_secs_f32());
-    
-    // Eğitim geçmişini göster
-    println!("\n{}", "Eğitim Geçmişi".green());
-    println!("{}", "=============".green());
-    for (epoch, (train_loss, val_loss)) in history.iter().enumerate() {
-        let val_loss_str = match val_loss {
-            Some(val) => format!("{:.4}", val),
-            None => "N/A".to_string(),
-        };
-        println!("Epoch {}: Train Loss = {:.4}, Val Loss = {}", epoch + 1, train_loss, val_loss_str);
-    }
+    let eğitim_süresi = başlangıç_zamanı.elapsed();
+    info!("Eğitim tamamlandı! Süre: {:.2?}", eğitim_süresi);
     
     // Modeli değerlendir
-    println!("\n{}", "Model değerlendiriliyor...".green());
-    let start = Instant::now();
+    info!("Model test verisi üzerinde değerlendiriliyor...");
+    let değerlendirme_başlangıcı = Instant::now();
+    let test_loss = model.evaluate(&x_test.view(), &y_test.view())?;
     
-    // Accuracy metriki oluştur
+    // Metrikleri hesapla
+    let tahminler = model.predict(&x_test.view())?;
     let accuracy = Accuracy::new();
+    let precision = Precision::new();
+    let recall = Recall::new();
+    let f1_score = F1Score::new();
     
-    // Değerlendirme
-    let metrics = model.evaluate(&val_data, &val_labels, &[&accuracy])?;
+    let tahmin_sınıfları = tahminler.map_axis(Axis(1), |örnek| {
+        örnek.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, _)| i as f64)
+            .unwrap_or(0.0)
+    });
     
-    println!("Değerlendirme tamamlandı! ({:.2}s)", start.elapsed().as_secs_f32());
+    let gerçek_sınıflar = y_test.map_axis(Axis(1), |örnek| {
+        örnek.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, _)| i as f64)
+            .unwrap_or(0.0)
+    });
     
-    // Metrikleri göster
-    println!("\n{}", "Değerlendirme Sonuçları".green());
-    println!("{}", "=====================".green());
-    for (name, value) in metrics {
-        println!("{}: {:.4}", name, value);
-    }
+    let accuracy_score = accuracy.calculate(&gerçek_sınıflar.view(), &tahmin_sınıfları.view())?;
+    let precision_score = precision.calculate(&gerçek_sınıflar.view(), &tahmin_sınıfları.view())?;
+    let recall_score = recall.calculate(&gerçek_sınıflar.view(), &tahmin_sınıfları.view())?;
+    let f1_score_val = f1_score.calculate(&gerçek_sınıflar.view(), &tahmin_sınıfları.view())?;
+    
+    let değerlendirme_süresi = değerlendirme_başlangıcı.elapsed();
+    
+    // Sonuçları yazdır
+    print_separator();
+    println!("{}", "  MNIST SINIFLANDIRICI SONUÇLARI  ".bold().bright_white().on_blue());
+    print_separator();
+    println!("{:<15} {}", "Test Kaybı:".yellow(), format!("{:.4}", test_loss).cyan());
+    println!("{:<15} {}", "Doğruluk:".yellow(), format!("{:.2}%", accuracy_score * 100.0).green());
+    println!("{:<15} {}", "Kesinlik:".yellow(), format!("{:.4}", precision_score).cyan());
+    println!("{:<15} {}", "Duyarlılık:".yellow(), format!("{:.4}", recall_score).cyan());
+    println!("{:<15} {}", "F1 Skoru:".yellow(), format!("{:.4}", f1_score_val).cyan());
+    println!("{:<15} {}", "Eğitim Süresi:".yellow(), format!("{:.2?}", eğitim_süresi).cyan());
+    println!("{:<15} {}", "Test Süresi:".yellow(), format!("{:.2?}", değerlendirme_süresi).cyan());
+    print_separator();
     
     // Modeli kaydet
-    println!("\n{}", "Model kaydediliyor...".green());
-    model.save("mnist_model.json")?;
-    println!("Model başarıyla kaydedildi: mnist_model.json");
-    
-    // Birkaç örnek tahmin yap
-    println!("\n{}", "Örnek Tahminler".green());
-    println!("{}", "===============".green());
-    
-    // Rastgele 5 örnek seç
-    let indices = [42, 123, 456, 789, 890];
-    
-    for &idx in &indices {
-        let sample = val_data.slice(s![idx..idx+1, ..]).to_owned();
-        let true_label = val_labels.slice(s![idx..idx+1, ..]).to_owned();
-        
-        // Modeli çalıştır
-        let prediction = model.predict(&sample)?;
-        
-        // En yüksek olasılıklı sınıfı bul
-        let pred_class = get_argmax(&prediction);
-        let true_class = get_argmax(&true_label);
-        
-        // Sonucu göster
-        let result_text = if pred_class == true_class {
-            format!("Doğru: {} ✓", pred_class).green()
-        } else {
-            format!("Yanlış: {} (gerçek: {})", pred_class, true_class).red()
-        };
-        
-        println!("Örnek {}: {}", idx, result_text);
-    }
+    info!("Model kaydediliyor...");
+    model.save("examples/mnist_model.json")?;
+    info!("Model başarıyla kaydedildi: examples/mnist_model.json");
     
     Ok(())
 }
 
-// Görüntü verilerini düzleştir (paralel)
-fn flatten_images(images: &ndarray::Array3<f32>) -> Array2<f32> {
-    let n_samples = images.shape()[0];
-    let mut flattened = Array2::<f32>::zeros((n_samples, 784));
-    
-    // Tek thread kullanarak güvenli bir şekilde işlem yapalım
-    for i in 0..n_samples {
-        let img_flat = images.slice(s![i, .., ..]).to_owned().into_shape((784,)).unwrap();
-        flattened.slice_mut(s![i, ..]).assign(&img_flat);
-    }
-    
-    flattened
+fn print_separator() {
+    println!("{}", "=".repeat(50).bright_blue());
 }
 
-// Etiketleri one-hot encode et
-fn one_hot_encode(labels: &ndarray::Array1<u8>, n_classes: usize) -> Result<Array2<f32>> {
-    let n_samples = labels.len();
-    let mut one_hot = Array2::<f32>::zeros((n_samples, n_classes));
+/// MNIST verisini yükle
+fn load_mnist_data() -> Result<Mnist> {
+    let mnist = MnistBuilder::new()
+        .label_format_digit()
+        .training_set_length(60_000)
+        .test_set_length(10_000)
+        .finalize();
     
-    for (i, &label) in labels.iter().enumerate() {
-        // Güvenlik kontrolü: out-of-bounds erişimi engelle
-        if label as usize >= n_classes {
-            return Err(anyhow::anyhow!("Etiket sayısı sınıf sayısından büyük: {} >= {}", label, n_classes));
-        }
-        one_hot[[i, label as usize]] = 1.0;
-    }
-    
-    Ok(one_hot)
+    Ok(mnist)
 }
 
-// Argmax fonksiyonu
-fn get_argmax(array: &Array2<f32>) -> usize {
-    let mut max_idx = 0;
-    let mut max_val = f32::MIN;
+/// MNIST verilerini Turk kütüphanesi için hazırla
+fn prepare_mnist_data(mnist: &Mnist) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>, Array2<f64>)> {
+    // Eğitim verilerini hazırla
+    let train_size = mnist.trn_img.len() / 784;
+    let mut x_train = Array2::zeros((train_size, 784));
     
-    for (i, &val) in array.slice(s![0, ..]).iter().enumerate() {
-        if val > max_val {
-            max_val = val;
-            max_idx = i;
+    for i in 0..train_size {
+        for j in 0..784 {
+            let pixel = mnist.trn_img[i * 784 + j] as f64 / 255.0;
+            x_train[[i, j]] = pixel;
         }
     }
     
-    max_idx
+    // Eğitim etiketlerini one-hot encoding'e dönüştür
+    let mut y_train = Array2::zeros((train_size, 10));
+    for i in 0..train_size {
+        let label = mnist.trn_lbl[i] as usize;
+        y_train[[i, label]] = 1.0;
+    }
+    
+    // Test verilerini hazırla
+    let test_size = mnist.tst_img.len() / 784;
+    let mut x_test = Array2::zeros((test_size, 784));
+    
+    for i in 0..test_size {
+        for j in 0..784 {
+            let pixel = mnist.tst_img[i * 784 + j] as f64 / 255.0;
+            x_test[[i, j]] = pixel;
+        }
+    }
+    
+    // Test etiketlerini one-hot encoding'e dönüştür
+    let mut y_test = Array2::zeros((test_size, 10));
+    for i in 0..test_size {
+        let label = mnist.tst_lbl[i] as usize;
+        y_test[[i, label]] = 1.0;
+    }
+    
+    info!("Veri hazırlama tamamlandı. Eğitim: {} örnek, Test: {} örnek", train_size, test_size);
+    Ok((x_train, y_train, x_test, y_test))
 }
 
-// Yardımcı tiplemeler
-type Array1<T> = ndarray::Array1<T>;
+/// MNIST için model oluştur
+fn create_model(input_size: usize) -> Result<Sequential> {
+    let mut model = Sequential::new();
+    
+    // Giriş katmanı
+    let glorot_init = GlorotUniform::new();
+    model.add(Dense::new_with_initializer(input_size, 128, "relu", Box::new(glorot_init)));
+    model.add(Dropout::new(0.3));
+    
+    // Gizli katman
+    let he_init = HeNormal::new();
+    model.add(Dense::new_with_initializer(128, 64, "relu", Box::new(he_init)));
+    model.add(Dropout::new(0.2));
+    
+    // Çıkış katmanı
+    model.add(Dense::new(64, 10, "softmax"));
+    
+    // Modeli derle
+    let adam = Adam::new(0.001, 0.9, 0.999, 1e-8);
+    model.compile(adam, CrossEntropy::new());
+    
+    Ok(model)
+}

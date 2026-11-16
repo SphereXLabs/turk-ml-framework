@@ -1,428 +1,468 @@
-use logos::Logos;
-use std::collections::HashMap;
-use turk_lang::ast::{Deyim, Ifade, Program, DegerTipi, AktivasyonFonksiyonu, OptimizerTipi};
-use turk_lang::token::Token;
-use turk_lang::model::Sequential;
-use turk_lang::layer::{Activation, Dense};
-use turk_lang::optimizer::SGD;
-use turk_lang::Result;
-use turk_lang::parser::model_parser::ModelParser;
-use turk_lang::TurkError;
-use log::info;
-use env_logger;
+///! TÜRK Programlama Dili — Ana CLI Giriş Noktası
+///!
+///! Kullanım:
+///!   turk run <dosya.turk>    — .turk dosyasını çalıştır
+///!   turk check <dosya.turk>  — statik analiz (eğitim başlatmadan)
+///!   turk repl                — etkileşimli mod
+///!   turk --yardim | -y       — yardım ekranı
 
-pub struct Yorumlayici {
-    degiskenler: HashMap<String, DegerTipi>,
-    modeller: HashMap<String, Sequential>,
+use turk::TurkDil;
+use turk::dil::Value;
+use turk::error::{Result, TurkError};
+use turk::hata_satirini_goster;
+use turk::model::Sequential;
+use turk::onnx::export_onnx;
+use turk::{cihaz_listesi_metin, model_bilgi_metin, model_indir, zoo_listesi_metin};
+
+use std::env;
+use std::fs;
+use std::io::{self, BufRead, Write};
+use std::path::Path;
+use std::process;
+
+use env_logger::Builder;
+use log::{error, info, LevelFilter};
+
+// ─── Sabitler ──────────────────────────────────────────────────────────────
+const VERSIYON: &str = env!("CARGO_PKG_VERSION");
+
+const BANNER: &str = r#"
+  ╔════════════════════════════════════════════════════╗
+  ║  ████████╗██╗   ██╗██████╗ ██╗  ██╗               ║
+  ║     ██╔══╝██║   ██║██╔══██╗██║ ██╔╝               ║
+  ║     ██║   ██║   ██║██████╔╝█████╔╝                ║
+  ║     ██║   ██║   ██║██╔══██╗██╔═██╗                ║
+  ║     ██║   ╚██████╔╝██║  ██║██║  ██╗               ║
+  ║     ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝              ║
+  ║   Türkçe Yapay Zeka Programlama Dili               ║
+  ╚════════════════════════════════════════════════════╝
+"#;
+
+const KULLANIM: &str = r#"
+  Kullanım:
+    turk run   <dosya.turk>    — .turk dosyasını çalıştır
+    turk check <dosya.turk>    — katman/veri uyumunu eğitimsiz doğrula
+    turk export <model.json> [cikti.onnx.json] — ONNX JSON dışa aktar
+    turk cihaz                  — kullanılabilir hesaplama cihazlarını listele
+    turk zoo list               — Model Zoo listesi
+    turk zoo bilgi <id>         — model detayı
+    turk zoo indir <id> [hedef] — model dosyalarını indir/kopyala
+    turk zoo calistir <id>      — Model Zoo betiğini çalıştır
+    turk repl                  — etkileşimli REPL modu başlat
+    turk -y  | --yardim       — bu yardım ekranını göster
+
+  Örnekler:
+    cargo run -- run proje.turk
+    cargo run -- check proje.turk
+    cargo run -- repl
+    cargo run -- run egitimler/mnist.turk
+
+  Desteklenen Komutlar (.turk içinde):
+    model_olustur()
+    katman_ekle(yogun(girdi, cikti, "aktivasyon"))
+    katman_ekle(dropout(oran))
+    katman_ekle(batch_norm(ozellik_sayisi))
+    derle(adam)  |  derle(sgd)  |  derle(adamw, cihaz=paralel)
+    egit(epoch, batch_boyutu)
+    kaydet("model.json")
+    yukle("model.json")
+    onnx_disa_aktar("model.onnx.json")
+    model_bilgisi()
+    cihaz_bilgisi()
+    model_zoo()
+    model_indir("xor")
+    model_calistir("xor")
+"#;
+
+// ─── Ana Giriş ─────────────────────────────────────────────────────────────
+fn main() {
+    Builder::new()
+        .filter_module("turk", LevelFilter::Info)
+        .filter_level(LevelFilter::Warn)
+        .init();
+
+    if let Err(e) = run() {
+        eprintln!("\n  \x1b[31m✗ Hata:\x1b[0m {e}\n");
+        process::exit(1);
+    }
 }
 
-impl Yorumlayici {
-    pub fn new() -> Self {
-        Self {
-            degiskenler: HashMap::new(),
-            modeller: HashMap::new(),
-        }
-    }
+fn run() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
 
-    pub fn yorumla(&mut self, program: &Program) -> Result<()> {
-        for deyim in &program.deyimler {
-            self.deyim_yorumla(deyim)?;
+    match args.get(1).map(String::as_str) {
+        // ── turk run <dosya> ───────────────────────────────────────────────
+        Some("run") => {
+            let dosya = args.get(2).ok_or_else(|| {
+                eprintln!("{KULLANIM}");
+                TurkError::SyntaxError(
+                    "Dosya yolu belirtilmedi. Örnek: turk run proje.turk".into(),
+                )
+            })?;
+            dosyayi_calistir(dosya)
         }
-        Ok(())
-    }
 
-    fn deyim_yorumla(&mut self, deyim: &Deyim) -> Result<()> {
-        match deyim {
-            Deyim::DegiskenTanimi { isim, deger } => {
-                let deger = self.ifade_yorumla(deger.clone())?;
-                let deger_klon = deger.clone();
-                self.degiskenler.insert(isim.clone(), deger);
-                eprintln!("Değişken tanımlandı: {} = {:?}", isim, deger_klon);
-                Ok(())
-            }
-            Deyim::VeriTanimi { isim, deger } => {
-                let deger = self.ifade_yorumla(*deger.clone())?;
-                let deger_klon = deger.clone();
-                self.degiskenler.insert(isim.clone(), deger);
-                eprintln!("Veri tanımlandı: {} = {:?}", isim, deger_klon);
-                Ok(())
-            }
-            Deyim::Egitim { model, x_train, y_train } => {
-                eprintln!("Model eğitimi başlatılıyor: {}", model);
-                
-                // Önce verileri hazırlayalım
-                let x_train_data = self.ifade_yorumla(*x_train.clone())?.to_array()?;
-                let y_train_data = self.ifade_yorumla(*y_train.clone())?.to_array()?;
-                
-                // Sonra modeli alalım
-                let model_ref = self.modeller.get_mut(model)
-                    .ok_or_else(|| TurkError::InvalidInput(
-                        format!("Model bulunamadı: {}", model)
-                    ))?;
-                
-                // Model derlenmediyse, varsayılan optimizer ile derle
-                if !model_ref.is_compiled() {
-                    model_ref.compile_boxed(Box::new(SGD::new(0.01)));
-                }
-                
-                // Sonra eğit
-                model_ref.fit(&x_train_data, &y_train_data, 10, 32, None)?;
-                eprintln!("Model eğitimi tamamlandı: {}", model);
-                Ok(())
-            }
-            Deyim::ModelTanimi { isim, ozellikler } => {
-                eprintln!("Model tanımlanıyor: {}", isim);
-                eprintln!("Model özellikleri: {:?}", ozellikler);
-                
-                let mut model = Sequential::new();
-                
-                // Katmanları oluştur
-                for (i, katman) in ozellikler.katmanlar.iter().enumerate() {
-                    let input_size = if i == 0 {
-                        katman.noron_sayisi as usize // İlk katmanın nöron sayısı giriş boyutu olur
-                    } else {
-                        ozellikler.katmanlar[i-1].noron_sayisi as usize
-                    };
-                    
-                    let output_size = katman.noron_sayisi as usize;
-                    
-                    let aktivasyon = match katman.aktivasyon {
-                        AktivasyonFonksiyonu::Relu => Activation::Relu,
-                        AktivasyonFonksiyonu::Sigmoid => Activation::Sigmoid,
-                        AktivasyonFonksiyonu::Tanh => Activation::Tanh,
-                        AktivasyonFonksiyonu::Softmax => Activation::Softmax,
-                        AktivasyonFonksiyonu::LeakyRelu(alpha) => Activation::LeakyRelu(alpha as f32),
-                        AktivasyonFonksiyonu::Swish => Activation::Swish,
-                    };
-                    
-                    model.add(Dense::new(input_size, output_size, aktivasyon));
-                }
-                
-                // Varsayılan yapılandırma değerlerini ayarla
-                let optimizer: Box<dyn turk_lang::optimizer::Optimizer> = match &ozellikler.optimizer {
-                    OptimizerTipi::SGD { lr, momentum, nesterov: _ } => {
-                        if let Some(momentum_val) = momentum {
-                            Box::new(turk_lang::optimizer::SGD::with_momentum(*lr as f32, *momentum_val as f32))
-                        } else {
-                            Box::new(turk_lang::optimizer::SGD::new(*lr as f32))
-                        }
-                    },
-                    OptimizerTipi::Adam { lr, beta1, beta2, epsilon } => {
-                        Box::new(turk_lang::optimizer::Adam::with_betas(*lr as f32, *beta1 as f32, *beta2 as f32, *epsilon as f32))
-                    },
-                    OptimizerTipi::AdamW { lr, weight_decay, beta1, beta2 } => {
-                        Box::new(turk_lang::optimizer::AdamW::with_betas(*lr as f32, *weight_decay as f32, *beta1 as f32, *beta2 as f32, 1e-8))
-                    },
-                    OptimizerTipi::RMSProp { lr, rho, epsilon } => {
-                        Box::new(turk_lang::optimizer::RMSProp::with_decay(
-                            *lr as f32, *rho as f32, *epsilon as f32
-                        ))
-                    },
-                };
-                
-                // Modeli derle
-                model.compile_boxed(optimizer);
-                
-                self.modeller.insert(isim.clone(), model);
-                eprintln!("Model başarıyla tanımlandı: {}", isim);
-                Ok(())
-            }
-            Deyim::ModelEgitimi { model, egitim_verisi, etiketler } => {
-                eprintln!("Model eğitimi başlatılıyor: {}", model);
-                
-                // Önce verileri hazırlayalım
-                let x_train = self.ifade_yorumla(egitim_verisi.clone())?.to_array()?;
-                let y_train = self.ifade_yorumla(etiketler.clone())?.to_array()?;
-                
-                // Sonra modeli alalım
-                let model_ref = self.modeller.get_mut(model)
-                    .ok_or_else(|| TurkError::InvalidInput(
-                        format!("Model bulunamadı: {}", model)
-                    ))?;
-                
-                // Model derlenmediyse, varsayılan optimizer ile derle
-                if !model_ref.is_compiled() {
-                    model_ref.compile_boxed(Box::new(SGD::new(0.01)));
-                }
-                
-                // Sonra eğit
-                model_ref.fit(&x_train, &y_train, 10, 32, None)?;
-                eprintln!("Model eğitimi tamamlandı: {}", model);
-                Ok(())
-            }
-            Deyim::Tahmin { model, girdi } => {
-                eprintln!("Tahmin yapılıyor: {}", model);
-                
-                let mut x = self.ifade_yorumla(girdi.clone())?.to_array()?;
-                
-                // Eğer giriş tek boyutlu ise (n,) şeklinde, onu (1,n) şekline dönüştür
-                if x.shape()[0] == 1 && x.shape()[1] != 1 {
-                    // Zaten doğru şekilde (1,n)
-                } else if x.ndim() == 2 && x.shape()[1] == 1 {
-                    // (n,1) şeklinde, transpoze et
-                    x = x.t().to_owned();
-                } else {
-                    // Tek örnek olarak yeniden şekillendir
-                    let n_cols = x.len();
-                    x = x.into_shape((1, n_cols))
-                        .map_err(|e| TurkError::NdarrayError(e.into()))?;
-                }
-                
-                let model_ref = self.modeller.get_mut(model)
-                    .ok_or_else(|| TurkError::InvalidInput(
-                        format!("Model bulunamadı: {}", model)
-                    ))?;
-                
-                let tahmin = model_ref.forward(&x)?;
-                
-                eprintln!("Tahmin sonucu: {:?}", tahmin);
-                Ok(())
-            }
-            Deyim::Atama { isim, deger } => {
-                let deger = self.ifade_yorumla(deger.clone())?;
-                self.degiskenler.insert(isim.clone(), deger);
-                Ok(())
-            }
-            Deyim::IfadeDeyimi(ifade) => {
-                let _ = self.ifade_yorumla(ifade.clone())?;
-                Ok(())
-            },
-            Deyim::EgerDeyimi { kosul, govde, degilse_govde } => {
-                let kosul_degeri = self.ifade_yorumla(kosul.clone())?;
-                match kosul_degeri {
-                    DegerTipi::Mantiksal(true) => {
-                        for deyim in govde.iter() {
-                            self.deyim_yorumla(deyim)?;
-                        }
-                        Ok(())
-                    }
-                    DegerTipi::Mantiksal(false) => {
-                        if let Some(degilse) = degilse_govde {
-                            for deyim in degilse.iter() {
-                                self.deyim_yorumla(deyim)?;
-                            }
-                        }
-                        Ok(())
-                    }
-                    _ => Err(TurkError::InvalidInput("Koşul ifadesi mantıksal bir değer döndürmeli".to_string()))
-                }
-            }
-            Deyim::DonguDeyimi { kosul, govde } => {
-                while let DegerTipi::Mantiksal(true) = self.ifade_yorumla(kosul.clone())? {
-                    for deyim in govde.iter() {
-                        self.deyim_yorumla(deyim)?;
-                    }
-                }
-                Ok(())
-            }
-            Deyim::IcinDongusu { degisken, dizi, govde } => {
-                let dizi_degeri = self.ifade_yorumla(dizi.clone())?;
-                if let DegerTipi::Dizi(elemanlar) = dizi_degeri {
-                    for eleman in elemanlar {
-                        self.degiskenler.insert(degisken.clone(), eleman);
-                        for deyim in govde.iter() {
-                            self.deyim_yorumla(deyim)?;
-                        }
-                    }
+        // ── turk check <dosya> ─────────────────────────────────────────────
+        Some("check") => {
+            let dosya = args.get(2).ok_or_else(|| {
+                eprintln!("{KULLANIM}");
+                TurkError::SyntaxError(
+                    "Dosya yolu belirtilmedi. Örnek: turk check proje.turk".into(),
+                )
+            })?;
+            dosyayi_kontrol_et(dosya)
+        }
+
+        // ── turk export <model.json> [out.onnx.json] ───────────────────────
+        Some("export") => {
+            let json = args.get(2).ok_or_else(|| {
+                eprintln!("{KULLANIM}");
+                TurkError::SyntaxError(
+                    "Model JSON yolu belirtilmedi. Örnek: turk export model.json".into(),
+                )
+            })?;
+            let out = args
+                .get(3)
+                .map(String::as_str)
+                .unwrap_or("model.onnx.json");
+            model_json_onnx_aktar(json, out)
+        }
+
+        // ── turk cihaz ─────────────────────────────────────────────────────
+        Some("cihaz") => {
+            println!("{BANNER}");
+            println!("{}", cihaz_listesi_metin());
+            Ok(())
+        }
+
+        // ── turk zoo list|bilgi|indir|calistir ────────────────────────────
+        Some("zoo") => {
+            let alt = args.get(2).map(String::as_str).unwrap_or("list");
+            match alt {
+                "list" | "liste" => {
+                    println!("{BANNER}");
+                    println!("{}", zoo_listesi_metin());
                     Ok(())
-                } else {
-                    Err(TurkError::InvalidInput("Döngü için dizi bekleniyor".to_string()))
                 }
-            }
-            Deyim::KirDeyimi => Ok(()),
-            Deyim::DevamDeyimi => {
-                println!("DevamDeyimi çalıştırıldı (şimdilik döngü dışı)");
-                Ok(())
-            }
-            Deyim::Blok(deyimler) => {
-                for deyim in deyimler {
-                    self.deyim_yorumla(deyim)?;
+                "bilgi" | "info" => {
+                    let id = args.get(3).ok_or_else(|| {
+                        TurkError::SyntaxError(
+                            "Model id belirtilmedi. Örnek: turk zoo bilgi xor".into(),
+                        )
+                    })?;
+                    println!("{}", model_bilgi_metin(id)?);
+                    Ok(())
                 }
-                Ok(())
-            }
-            Deyim::FonksiyonTanimi { isim, parametreler: _, govde: _ } => {
-                println!("Fonksiyon tanımı: {}", isim);
-                Ok(())
-            }
-            Deyim::DondurDeyimi(deger) => {
-                let _ = self.ifade_yorumla(deger.clone())?;
-                Ok(())
-            }
-            Deyim::Ifade(ifade) => {
-                println!("Ifade çalıştırıldı: {:?}", ifade);
-                let _ = self.ifade_yorumla(ifade.clone())?;
-                Ok(())
-            }
-            Deyim::ModelKaydetme { model, dosya_yolu } => {
-                eprintln!("Model kaydediliyor: {} -> {}", model, dosya_yolu);
-                
-                let model_ref = self.modeller.get(model)
-                    .ok_or_else(|| TurkError::InvalidInput(
-                        format!("Model bulunamadı: {}", model)
-                    ))?;
-                
-                model_ref.save(dosya_yolu)?;
-                eprintln!("Model başarıyla kaydedildi: {}", dosya_yolu);
-                Ok(())
-            }
-            Deyim::ModelYukleme { isim, dosya_yolu } => {
-                eprintln!("Model yükleniyor: {} <- {}", isim, dosya_yolu);
-                
-                let mut model = Sequential::new();
-                model.load(dosya_yolu)?;
-                
-                self.modeller.insert(isim.clone(), model);
-                eprintln!("Model başarıyla yüklendi: {}", isim);
-                Ok(())
-            }
-            Deyim::ModelDegerlendirme { model, test_verisi, test_etiketleri } => {
-                eprintln!("Model değerlendiriliyor: {}", model);
-                
-                let x_test = self.ifade_yorumla(test_verisi.clone())?.to_array()?;
-                let _y_test = self.ifade_yorumla(test_etiketleri.clone())?.to_array()?;
-                
-                let model_ref = self.modeller.get_mut(model)
-                    .ok_or_else(|| TurkError::InvalidInput(
-                        format!("Model bulunamadı: {}", model)
-                    ))?;
-                
-                // Basit bir doğruluk hesabı
-                let tahminler = model_ref.forward(&x_test)?;
-                // TODO: Gerçek metrik hesaplamaları
-                
-                eprintln!("Model değerlendirme sonuçları: {:?}", tahminler);
-                Ok(())
-            }
-            Deyim::ModelOzeti { model } => {
-                eprintln!("Model özeti gösteriliyor: {}", model);
-                
-                let model_ref = self.modeller.get(model)
-                    .ok_or_else(|| TurkError::InvalidInput(
-                        format!("Model bulunamadı: {}", model)
-                    ))?;
-                
-                eprintln!("{}", model_ref.summary());
-                Ok(())
-            }
-            Deyim::VeriGorsellestirme { .. } => {
-                eprintln!("Veri görselleştirme: Şu an desteklenmiyor");
-                Ok(())
-            }
-            Deyim::ImportDeyimi { .. } => {
-                eprintln!("Import deyimi: Şu an desteklenmiyor");
-                Ok(())
-            }
-            Deyim::TryCatch { .. } => {
-                eprintln!("Try-Catch deyimi: Şu an desteklenmiyor");
-                Ok(())
-            }
-            Deyim::LambdaTanimi { .. } => {
-                eprintln!("Lambda tanımı: Şu an desteklenmiyor");
-                Ok(())
+                "indir" | "download" => {
+                    let id = args.get(3).ok_or_else(|| {
+                        TurkError::SyntaxError(
+                            "Model id belirtilmedi. Örnek: turk zoo indir xor".into(),
+                        )
+                    })?;
+                    let hedef = args.get(4).map(|s| s.as_str());
+                    let yol = model_indir(id, hedef.map(std::path::Path::new))?;
+                    println!("  \x1b[32m✓\x1b[0m Model indirildi: {}\n", yol.display());
+                    Ok(())
+                }
+                "calistir" | "run" => {
+                    let id = args.get(3).ok_or_else(|| {
+                        TurkError::SyntaxError(
+                            "Model id belirtilmedi. Örnek: turk zoo calistir xor".into(),
+                        )
+                    })?;
+                    zoo_model_calistir(id)
+                }
+                other => Err(TurkError::SyntaxError(format!(
+                    "Bilinmeyen zoo alt komutu: '{other}'. \
+                     Geçerli: list, bilgi, indir, calistir"
+                ))),
             }
         }
-    }
 
-    fn ifade_yorumla(&mut self, ifade: Ifade) -> Result<DegerTipi> {
-        match ifade {
-            Ifade::Sayi(n) => Ok(DegerTipi::Sayi(n as f32)),
-            Ifade::Metin(s) => Ok(DegerTipi::Metin(s)),
-            Ifade::Mantiksal(b) => Ok(DegerTipi::Mantiksal(b)),
-            Ifade::Degisken(isim) => {
-                self.degiskenler.get(&isim)
-                    .cloned()
-                    .ok_or_else(|| TurkError::InvalidInput(format!("Tanımlanmamış değişken: {}", isim)))
+        // ── turk repl ─────────────────────────────────────────────────────
+        Some("repl") => {
+            println!("{BANNER}");
+            println!("  Sürüm: {VERSIYON}  |  Etkileşimli Mod");
+            println!("  Çıkmak için: çıkış  ya da  exit\n");
+            etkisesimli_mod()
+        }
+
+        // ── yardım ────────────────────────────────────────────────────────
+        Some("-y") | Some("--yardim") | Some("help") | Some("-h") | Some("--help") => {
+            println!("{BANNER}");
+            println!("  Sürüm: {VERSIYON}");
+            println!("{KULLANIM}");
+            Ok(())
+        }
+
+        // ── tek argüman → doğrudan dosya yolu kabul et (backwards compat) ─
+        Some(arg) if arg.ends_with(".turk") => dosyayi_calistir(arg),
+
+        // ── bilinmeyen / argümansız ────────────────────────────────────────
+        _ => {
+            println!("{BANNER}");
+            eprintln!("{KULLANIM}");
+            if args.len() <= 1 {
+                // Argüman yoksa REPL'i aç
+                println!("  (Argüman verilmedi — etkileşimli mod başlatılıyor)");
+                println!("  Çıkmak için: çıkış  ya da  exit\n");
+                etkisesimli_mod()
+            } else {
+                Err(TurkError::SyntaxError(format!(
+                    "Bilinmeyen komut: '{}'. `turk --yardim` ile kullanımı görün.",
+                    args[1]
+                )))
             }
-            Ifade::Dizi(elemanlar) => {
-                let mut deger_listesi = Vec::new();
-                for eleman in elemanlar {
-                    deger_listesi.push(self.ifade_yorumla(eleman)?);
-                }
-                Ok(DegerTipi::Dizi(deger_listesi))
-            }
-            Ifade::Liste(elemanlar) => {
-                let mut deger_listesi = Vec::new();
-                for eleman in elemanlar {
-                    deger_listesi.push(self.ifade_yorumla(eleman)?);
-                }
-                Ok(DegerTipi::Dizi(deger_listesi))
-            }
-            Ifade::FonksiyonCagrisi { fonksiyon, argumanlar } => {
-                let fonksiyon_ismi = match *fonksiyon {
-                    Ifade::Degisken(ref isim) => isim.clone(),
-                    _ => return Err(TurkError::InvalidInput("Fonksiyon ismi bir değişken olmalı".to_string())),
-                };
-                
-                match fonksiyon_ismi.as_str() {
-                    "Egit" => {
-                        if argumanlar.len() != 3 {
-                            return Err(TurkError::InvalidInput("Egit fonksiyonu 3 argüman bekliyor".to_string()));
-                        }
-                        
-                        let _model = self.ifade_yorumla(argumanlar[0].clone())?;
-                        let _egitim_verisi = self.ifade_yorumla(argumanlar[1].clone())?;
-                        let _etiketler = self.ifade_yorumla(argumanlar[2].clone())?;
-                        
-                        Ok(DegerTipi::Birim)
-                    }
-                    _ => Err(TurkError::InvalidInput(format!("Bilinmeyen fonksiyon: {}", fonksiyon_ismi))),
-                }
-            }
-            _ => Err(TurkError::InvalidInput("Desteklenmeyen ifade türü".to_string())),
         }
     }
 }
 
-fn main() -> Result<()> {
-    env_logger::init();
-    info!("TURK Yorumlayıcı Başlatıldı");
-    let kaynak = r#"
-        Model sinir_agi {
-            Katman(3, Aktivasyon = Relu)
-            Katman(5, Aktivasyon = Relu)
-            Katman(2, Aktivasyon = Softmax)
-            OgrenmeOrani = 0,1
-            Kayip = "cross_entropy"
-            Batch = 32
-            Epoch = 5
-        }
-        Veri x_train = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-        Veri y_train = [[1, 0], [0, 1], [1, 0]]
-        Egit(sinir_agi, x_train, y_train)
-        Veri test_verisi = [1, 0, 0]
-        Tahmin(sinir_agi, test_verisi)
-    "#;
+// ─── Dosya Çalıştırıcı ─────────────────────────────────────────────────────
+fn dosyayi_calistir(dosya_yolu: &str) -> Result<()> {
+    let yol = Path::new(dosya_yolu);
 
-    let mut lexer = Token::lexer(kaynak);
-    let mut tokens = Vec::new();
-    println!("Token'lar üretiliyor:");
-    while let Some(token) = lexer.next() {
-        match token {
-            Ok(token) => {
-                println!("Token: {:?}", token);
-                tokens.push((token, lexer.slice().to_string()));
+    // Uzantı kontrolü (uyarı, hata değil)
+    if yol.extension().and_then(|e| e.to_str()) != Some("turk") {
+        eprintln!(
+            "  \x1b[33m⚠ Uyarı:\x1b[0m '{dosya_yolu}' .turk uzantılı değil, yine de çalıştırılıyor."
+        );
+    }
+
+    let icerik = fs::read_to_string(yol).map_err(|e| {
+        TurkError::IOError(format!("'{dosya_yolu}' okunamadı: {e}"))
+    })?;
+
+    println!();
+    println!("  \x1b[35m◈\x1b[0m \x1b[1mTÜRK\x1b[0m çalıştırılıyor: \x1b[36m{dosya_yolu}\x1b[0m");
+    println!("  \x1b[90m{}\x1b[0m", "─".repeat(54));
+
+    let mut dil = TurkDil::new();
+    let mut satir_no = 0usize;
+
+    for satir in icerik.lines() {
+        satir_no += 1;
+        let satir = satir.trim();
+
+        // Boş satır ve yorum satırlarını atla
+        if satir.is_empty() || satir.starts_with('#') || satir.starts_with("//") {
+            continue;
+        }
+
+        info!("[{satir_no:>3}] {satir}");
+
+        match dil.calistir_satir(satir, satir_no) {
+            Ok(sonuc) => {
+                // Anlamlı çıktı varsa göster
+                match &sonuc {
+                    Value::Number(n) => {
+                        println!("  \x1b[32m→\x1b[0m {n}");
+                    }
+                    Value::Text(t) => {
+                        println!("  \x1b[32m→\x1b[0m {t}");
+                    }
+                    Value::None => {} // sessiz
+                    other => {
+                        println!("  \x1b[32m→\x1b[0m {other:?}");
+                    }
+                }
             }
             Err(e) => {
-                eprintln!("Lexer hatası: {:?}", e);
-                return Err(TurkError::LexerError(format!("{:?}", e)));
+                if let TurkError::SyntaxError(msg) = &e {
+                    if let Some(col_part) = msg.split("sütun ").nth(1) {
+                        if let Some(col_str) = col_part.split(':').next() {
+                            if let Ok(col) = col_str.trim().parse::<usize>() {
+                                eprintln!(
+                                    "{}",
+                                    hata_satirini_goster(satir, col, &msg.replace('\n', " "))
+                                );
+                            }
+                        }
+                    }
+                }
+                eprintln!("  \x1b[31m✗\x1b[0m Satır {satir_no}: {e}");
+                return Err(e);
             }
         }
     }
-    println!("Token'lar üretildi, toplam: {}", tokens.len());
 
-    let mut parser = ModelParser::new(tokens);
-    let program = parser.parse()?;
+    println!("  \x1b[90m{}\x1b[0m", "─".repeat(54));
+    println!("  \x1b[32m✓\x1b[0m Tamamlandı — {satir_no} satır işlendi.\n");
 
-    println!("Program başarıyla ayrıştırıldı:");
-    for deyim in &program.deyimler {
-        println!("{:#?}", deyim);
+    Ok(())
+}
+
+// ─── Statik Analiz (check) ─────────────────────────────────────────────────
+fn dosyayi_kontrol_et(dosya_yolu: &str) -> Result<()> {
+    let yol = Path::new(dosya_yolu);
+
+    let icerik = fs::read_to_string(yol).map_err(|e| {
+        TurkError::IOError(format!("'{dosya_yolu}' okunamadı: {e}"))
+    })?;
+
+    println!();
+    println!(
+        "  \x1b[35m◈\x1b[0m \x1b[1mTÜRK CHECK\x1b[0m — statik analiz: \x1b[36m{dosya_yolu}\x1b[0m"
+    );
+    println!("  \x1b[90m{}\x1b[0m", "─".repeat(54));
+
+    let mut dil = TurkDil::new();
+    let mut satir_no = 0usize;
+    let mut komut_sayisi = 0usize;
+
+    for satir in icerik.lines() {
+        satir_no += 1;
+        let satir = satir.trim();
+        if satir.is_empty() || satir.starts_with('#') || satir.starts_with("//") {
+            continue;
+        }
+
+        komut_sayisi += 1;
+        match dil.kontrol_et_satir(satir, satir_no) {
+            Ok(()) => info!("[{satir_no:>3}] ✓ {satir}"),
+            Err(e) => {
+                eprintln!(
+                    "  \x1b[31m✗ STATİK HATA\x1b[0m Satır {satir_no}: {e}"
+                );
+                return Err(e);
+            }
+        }
     }
 
-    let mut yorumlayici = Yorumlayici::new();
-    match yorumlayici.yorumla(&program) {
-        Ok(_) => println!("Program başarıyla çalıştırıldı."),
-        Err(e) => eprintln!("Çalıştırma hatası: {}", e),
+    println!("  \x1b[90m{}\x1b[0m", "─".repeat(54));
+    println!(
+        "  \x1b[32m✓\x1b[0m Statik analiz geçti — {komut_sayisi} komut, {satir_no} satır.\n"
+    );
+
+    Ok(())
+}
+
+fn model_json_onnx_aktar(json_yolu: &str, onnx_yolu: &str) -> Result<()> {
+    println!();
+    println!(
+        "  \x1b[35m◈\x1b[0m \x1b[1mTÜRK EXPORT\x1b[0m — {json_yolu} → {onnx_yolu}"
+    );
+    let mut model = Sequential::new();
+    model.load(json_yolu)?;
+    export_onnx(&model, onnx_yolu)?;
+    println!("  \x1b[32m✓\x1b[0m ONNX dışa aktarıldı: {onnx_yolu}\n");
+    Ok(())
+}
+
+fn zoo_model_calistir(id: &str) -> Result<()> {
+    println!();
+    println!(
+        "  \x1b[35m◈\x1b[0m \x1b[1mTÜRK ZOO\x1b[0m — model çalıştırılıyor: \x1b[36m{id}\x1b[0m"
+    );
+    println!("  \x1b[90m{}\x1b[0m", "─".repeat(54));
+
+    let mut dil = TurkDil::new();
+    dil.calistir(&format!("model_calistir(\"{id}\")"))?;
+
+    println!("  \x1b[90m{}\x1b[0m", "─".repeat(54));
+    println!("  \x1b[32m✓\x1b[0m Model Zoo tamamlandı.\n");
+    Ok(())
+}
+
+// ─── REPL (Etkileşimli Mod) ────────────────────────────────────────────────
+fn etkisesimli_mod() -> Result<()> {
+    let mut dil = TurkDil::new();
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    let mut giris = String::new();
+
+    loop {
+        print!("\x1b[35m  turk>\x1b[0m ");
+        io::stdout().flush().ok();
+
+        giris.clear();
+        match reader.read_line(&mut giris) {
+            Ok(0) => break, // EOF
+            Err(e) => {
+                eprintln!("  \x1b[31m✗\x1b[0m Okuma hatası: {e}");
+                continue;
+            }
+            Ok(_) => {}
+        }
+
+        let komut = giris.trim();
+        if komut.is_empty() || komut.starts_with('#') || komut.starts_with("//") {
+            continue;
+        }
+        if matches!(komut, "çıkış" | "exit" | "quit" | "q") {
+            println!("\n  \x1b[35m◈\x1b[0m TÜRK kapanıyor. Görüşürüz!\n");
+            break;
+        }
+
+        // "check <dosya>" komutunu REPL içinden de destekle
+        if let Some(dosya) = komut.strip_prefix("check ") {
+            if let Err(e) = dosyayi_kontrol_et(dosya.trim()) {
+                error!("{e}");
+            }
+            continue;
+        }
+
+        // "run <dosya>" komutunu REPL içinden de destekle
+        if let Some(dosya) = komut.strip_prefix("run ") {
+            if let Err(e) = dosyayi_calistir(dosya.trim()) {
+                error!("{e}");
+            }
+            continue;
+        }
+
+        match dil.calistir(komut) {
+            Ok(Value::None) => {}
+            Ok(sonuc)       => println!("  \x1b[32m→\x1b[0m {sonuc:?}"),
+            Err(e)          => eprintln!("  \x1b[31m✗\x1b[0m {e}"),
+        }
     }
 
     Ok(())
-} 
+}
+
+// ─── Testler ───────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_olustur_komutu() {
+        let mut dil = TurkDil::new();
+        assert!(dil.calistir("model_olustur()").is_ok());
+        assert!(dil.model.is_some());
+    }
+
+    #[test]
+    fn test_dosya_bulunamadiysa_hata() {
+        let sonuc = dosyayi_calistir("olmayan_dosya.turk");
+        assert!(sonuc.is_err());
+    }
+
+    #[test]
+    fn test_check_gecerli_script() {
+        let dosya = "test_check_script.turk";
+        std::fs::write(
+            dosya,
+            "model_olustur()\n\
+             katman_ekle(yogun(2, 4, \"relu\"))\n\
+             katman_ekle(yogun(4, 1, \"sigmoid\"))\n\
+             derle(adam)\n",
+        )
+        .unwrap();
+        assert!(dosyayi_kontrol_et(dosya).is_ok());
+        std::fs::remove_file(dosya).ok();
+    }
+
+    #[test]
+    fn test_check_boyut_uyumsuzlugu() {
+        let dosya = "test_check_bad.turk";
+        std::fs::write(
+            dosya,
+            "model_olustur()\n\
+             katman_ekle(yogun(2, 4, \"relu\"))\n\
+             katman_ekle(yogun(8, 1, \"sigmoid\"))\n",
+        )
+        .unwrap();
+        assert!(dosyayi_kontrol_et(dosya).is_err());
+        std::fs::remove_file(dosya).ok();
+    }
+}

@@ -1,0 +1,125 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Temel derlemeler ve testler
+  build:
+    name: Build and Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable]
+        
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Rust Sürümünü Kur
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ matrix.rust }}
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Önbelleği Kur
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Derle
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --all-features
+
+    - name: Testleri Çalıştır
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --all-features
+
+  # Kod kalite kontrolleri
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Rust Sürümünü Kur
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Kod Formatını Kontrol Et
+      uses: actions-rs/cargo@v1
+      with:
+        command: fmt
+        args: --all -- --check
+
+    - name: Clippy ile Lint Kontrolü
+      uses: actions-rs/cargo@v1
+      with:
+        command: clippy
+        args: --all-targets --all-features -- -D warnings
+
+  # Dokümantasyon kontrolü
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Rust Sürümünü Kur
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    
+    - name: Dokümantasyonu Derle
+      uses: actions-rs/cargo@v1
+      with:
+        command: doc
+        args: --no-deps --all-features
+
+  # Kod kapsamı raporu
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Rust Sürümünü Kur
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    
+    - name: Tarpaulin İle Kod Kapsamını Ölç
+      uses: actions-rs/tarpaulin@v0.1
+      with:
+        version: '0.20.0'
+        args: '--out Xml --exclude-files="tests/*"'
+    
+    - name: Coveralls'a Yükle
+      uses: coverallsapp/github-action@v1
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path-to-lcov: ./cobertura.xml 

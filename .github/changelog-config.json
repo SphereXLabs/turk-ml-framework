@@ -1,0 +1,80 @@
+{
+  "categories": [
+    {
+      "title": "## 🚀 Yeni Özellikler",
+      "labels": ["feature", "enhancement", "yeni-özellik"]
+    },
+    {
+      "title": "## 🐛 Hata Düzeltmeleri",
+      "labels": ["fix", "bugfix", "hata-düzeltme"]
+    },
+    {
+      "title": "## 📚 Dokümantasyon",
+      "labels": ["documentation", "docs", "dokümantasyon"]
+    },
+    {
+      "title": "## ⚙️ Yapılandırma ve Bağımlılıklar",
+      "labels": ["dependencies", "build", "config", "yapılandırma"]
+    },
+    {
+      "title": "## 🧪 Test ve CI",
+      "labels": ["test", "tests", "ci", "testing"]
+    },
+    {
+      "title": "## 🛠️ Refactoring ve Bakım",
+      "labels": ["refactor", "refactoring", "maintenance", "performance"]
+    }
+  ],
+  "ignore_labels": [
+    "ignore",
+    "ignore-for-release"
+  ],
+  "sort": "ASC",
+  "template": "${{CHANGELOG}}\n\n## 🔄 Diğer Değişiklikler\n\n${{UNCATEGORIZED}}",
+  "pr_template": "- ${{TITLE}} (#${{NUMBER}})",
+  "empty_template": "Bu sürümde dikkate değer değişiklik bulunmamaktadır.",
+  "max_pull_requests": 100,
+  "max_back_track_time_days": 90,
+  "label_extractor": [
+    {
+      "pattern": "(.*feat|özellik):(.*)",
+      "target": "feature"
+    },
+    {
+      "pattern": "(.*fix|düzelt):(.*)",
+      "target": "fix"
+    },
+    {
+      "pattern": "(.*doc|dokuman|dokümantasyon):(.*)",
+      "target": "documentation"
+    },
+    {
+      "pattern": "(.*test):(.*)",
+      "target": "test"
+    },
+    {
+      "pattern": "(.*refactor|yeniden yapılandır):(.*)",
+      "target": "refactor"
+    }
+  ],
+  "duplicate_filter": {
+    "pattern": "[.*]",
+    "on_property": "title"
+  },
+  "transformers": [
+    {
+      "pattern": "[\\-\\*] (\\[(...|TEST|CI|SKIP)\\])( )?(.+?)\n(.+?[\\-\\*] )(.+)",
+      "target": "- $4\n  - $6"
+    }
+  ],
+  "custom_placeholders": [
+    {
+      "name": "AUTHOR",
+      "source": "AUTHOR",
+      "transformer": {
+        "pattern": "(.*)",
+        "target": "[@$1](https://github.com/$1)"
+      }
+    }
+  ]
+} 

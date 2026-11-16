@@ -1,694 +1,393 @@
+﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use eframe::egui;
-use egui::{Color32, RichText, Stroke, Vec2};
-use poll_promise::Promise;
-use rfd::FileDialog;
-use std::fs;
-use std::path::PathBuf;
-use turk_lang::{
-    ast::{AktivasyonFonksiyonu, Deyim, OptimizerTipi, Program},
-    parser::model_parser::ModelParser,
-    token::Token,
-};
-use logos::Logos;
+use egui_plot::{Legend, Line, Plot, PlotPoints};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::Duration;
+use turk::{EgitimIlerleme, TurkDil};
 
-const TURK_MAVİ: Color32 = Color32::from_rgb(0, 120, 212);
-const TURK_KOYU_MAVİ: Color32 = Color32::from_rgb(0, 80, 170);
-const TURK_AÇIK_MAVİ: Color32 = Color32::from_rgb(100, 181, 246);
-const TURK_MOR: Color32 = Color32::from_rgb(93, 53, 132);
-const TURK_YEŞİL: Color32 = Color32::from_rgb(76, 175, 80);
-const TURK_KIRMIZI: Color32 = Color32::from_rgb(211, 47, 47);
-const TURK_GRİ: Color32 = Color32::from_rgb(95, 99, 104);
-const TURK_AÇIK_GRİ: Color32 = Color32::from_rgb(241, 243, 244);
-const TURK_KOYU_GRİ: Color32 = Color32::from_rgb(60, 64, 67);
+const TURK_MAVI: egui::Color32 = egui::Color32::from_rgb(0, 120, 212);
+const TURK_YESIL: egui::Color32 = egui::Color32::from_rgb(76, 175, 80);
+const TURK_TURUNCU: egui::Color32 = egui::Color32::from_rgb(255, 152, 0);
 
-/// TURK Makine Öğrenmesi GUI Uygulaması
+fn main() -> Result<(), eframe::Error> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([960.0, 720.0])
+            .with_min_inner_size([720.0, 520.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "TURK — Gorsel Stüdyo",
+        options,
+        Box::new(|_cc| Box::new(TurkGui::default())),
+    )
+}
+
 struct TurkGui {
-    kod: String,
-    program: Option<Program>,
-    hata_mesajı: Option<String>,
-    çıktı: String,
-    tema_koyu: bool,
-    dosya_yolu: Option<PathBuf>,
-    modeller: Vec<ModelGörselleştirme>,
-    aktif_sekme: Sekme,
-    örnek_kodlar: Vec<ÖrnekKod>,
-    çalıştırma_sonuçları: Option<Promise<Result<String, String>>>,
-}
-
-struct ModelGörselleştirme {
-    isim: String,
-    katmanlar: Vec<KatmanÖzellikleri>,
-    optimizer: String,
-    kayıp_fonksiyonu: String,
-}
-
-struct KatmanÖzellikleri {
-    nöron_sayısı: usize,
-    aktivasyon: String,
-}
-
-struct ÖrnekKod {
-    başlık: String,
-    açıklama: String,
-    kod: String,
-}
-
-#[derive(PartialEq)]
-enum Sekme {
-    Düzenleyici,
-    Görselleştirme,
-    Ayarlar,
-    Hakkında,
+    secili_model: String,
+    csv_yolu: String,
+    egitim_calisiyor: bool,
+    toplam_epoch: usize,
+    guncel_epoch: usize,
+    epoch_ilerleme: f32,
+    indeksleme_satir: usize,
+    egitim_asamasi: bool,
+    loss_gecmisi: Vec<f64>,
+    val_loss_gecmisi: Vec<f64>,
+    durum_mesaji: String,
+    hata: Option<String>,
+    egitim_rx: Option<Receiver<EgitimIlerleme>>,
 }
 
 impl Default for TurkGui {
     fn default() -> Self {
-        let örnek_kodlar = vec![
-            ÖrnekKod {
-                başlık: "Basit Sınıflandırıcı".to_string(),
-                açıklama: "XOR kapısı benzeri bir örnek için basit bir sınıflandırıcı".to_string(),
-                kod: r#"Model sinir_agi {
-    Katman(3, Aktivasyon=Relu)
-    Katman(5, Aktivasyon=Relu)
-    Katman(2, Aktivasyon=Softmax)
-    OgrenmeOrani=0,1
-    Kayip="cross_entropy"
-    Batch=32
-    Epoch=5
-}
-
-Veri x_train = [[1,0,0], [0,1,0], [0,0,1]]
-Veri y_train = [[1,0], [0,1], [1,0]]
-
-Egit(sinir_agi, x_train, y_train)
-
-Veri test_verisi = [1,0,0]
-Tahmin(sinir_agi, test_verisi)"#.to_string(),
-            },
-            ÖrnekKod {
-                başlık: "MNIST Sınıflandırıcı".to_string(),
-                açıklama: "El yazısı rakamları tanıyan bir sinir ağı modeli".to_string(),
-                kod: r#"Model mnist_model {
-    Katman(784, Aktivasyon=Relu)
-    Katman(128, Aktivasyon=Relu)
-    Katman(64, Aktivasyon=Relu)
-    Katman(10, Aktivasyon=Softmax)
-    OgrenmeOrani=0,001
-    Optimizer="Adam"
-    Kayip="categorical_crossentropy"
-    Batch=64
-    Epoch=10
-}
-
-VeriSeti mnist {
-    Kaynak="mnist"
-    EgitimOran=0.8
-    TestOran=0.2
-}
-
-Egit(mnist_model, mnist.egitim_x, mnist.egitim_y)
-Degerlendir(mnist_model, mnist.test_x, mnist.test_y)
-
-Kaydet(mnist_model, "mnist_model.json")"#.to_string(),
-            },
-        ];
-
         Self {
-            kod: örnek_kodlar[0].kod.clone(),
-            program: None,
-            hata_mesajı: None,
-            çıktı: String::new(),
-            tema_koyu: true,
-            dosya_yolu: None,
-            modeller: Vec::new(),
-            aktif_sekme: Sekme::Düzenleyici,
-            örnek_kodlar,
-            çalıştırma_sonuçları: None,
-        }
-    }
-}
-
-impl eframe::App for TurkGui {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.tema_koyu {
-            ctx.set_visuals(egui::Visuals::dark());
-        } else {
-            ctx.set_visuals(egui::Visuals::light());
-        }
-
-        self.üst_panel_göster(ctx);
-        self.sol_panel_göster(ctx);
-
-        match self.aktif_sekme {
-            Sekme::Düzenleyici => self.kod_editörü_göster(ctx),
-            Sekme::Görselleştirme => self.görselleştirme_göster(ctx),
-            Sekme::Ayarlar => self.ayarlar_göster(ctx),
-            Sekme::Hakkında => self.hakkında_göster(ctx),
-        }
-
-        if !self.çıktı.is_empty() {
-            self.alt_panel_göster(ctx);
-        }
-        
-        // Çalıştırma sonuçlarını işle
-        if let Some(promise) = &self.çalıştırma_sonuçları {
-            if let Some(result) = promise.ready() {
-                match result {
-                    Ok(output) => {
-                        self.çıktı = output.clone();
-                        self.hata_mesajı = None;
-                    }
-                    Err(err) => {
-                        self.hata_mesajı = Some(err.clone());
-                    }
-                }
-                self.çalıştırma_sonuçları = None;
-            } else {
-                // İşlem hala devam ediyor, bir yükleniyor göstergesi göster
-                egui::Window::new("Çalıştırılıyor")
-                    .collapsible(false)
-                    .resizable(false)
-                    .show(ctx, |ui| {
-                        ui.label("Program çalıştırılıyor...");
-                        ui.spinner();
-                    });
-            }
+            secili_model: "xor".to_string(),
+            csv_yolu: String::new(),
+            egitim_calisiyor: false,
+            toplam_epoch: 200,
+            guncel_epoch: 0,
+            epoch_ilerleme: 0.0,
+            indeksleme_satir: 0,
+            egitim_asamasi: false,
+            loss_gecmisi: Vec::new(),
+            val_loss_gecmisi: Vec::new(),
+            durum_mesaji: "Hazir — Model Zoo'dan egitim baslatabilirsiniz.".into(),
+            hata: None,
+            egitim_rx: None,
         }
     }
 }
 
 impl TurkGui {
-    fn üst_panel_göster(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("üst_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(RichText::new("TURK").color(TURK_MAVİ).strong());
-                ui.heading(" Programlama Dili");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(if self.tema_koyu { "☀" } else { "🌙" }).clicked() {
-                        self.tema_koyu = !self.tema_koyu;
-                    }
-                });
-            });
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                if ui.button("📄 Yeni").clicked() {
-                    self.kod = String::new();
-                    self.program = None;
-                    self.hata_mesajı = None;
-                    self.çıktı = String::new();
-                    self.dosya_yolu = None;
-                }
-
-                if ui.button("📂 Aç").clicked() {
-                    if let Some(path) = FileDialog::new()
-                        .add_filter("TURK Dosyası", &["turk"])
-                        .pick_file()
-                    {
-                        match fs::read_to_string(&path) {
-                            Ok(içerik) => {
-                                self.kod = içerik;
-                                self.dosya_yolu = Some(path);
-                                self.hata_mesajı = None;
-                            }
-                            Err(e) => {
-                                self.hata_mesajı = Some(format!("Dosya açılamadı: {}", e));
-                            }
-                        }
-                    }
-                }
-
-                if ui.button("💾 Kaydet").clicked() {
-                    if let Some(path) = &self.dosya_yolu {
-                        if let Err(e) = fs::write(path, &self.kod) {
-                            self.hata_mesajı = Some(format!("Dosya kaydedilemedi: {}", e));
-                        }
-                    } else {
-                        if let Some(path) = FileDialog::new()
-                            .add_filter("TURK Dosyası", &["turk"])
-                            .save_file()
-                        {
-                            if let Err(e) = fs::write(&path, &self.kod) {
-                                self.hata_mesajı = Some(format!("Dosya kaydedilemedi: {}", e));
-                            } else {
-                                self.dosya_yolu = Some(path);
-                            }
-                        }
-                    }
-                }
-
-                ui.separator();
-
-                if ui.button("🔍 Ayrıştır").clicked() {
-                    self.kodu_ayrıştır();
-                }
-
-                if ui
-                    .add(egui::Button::new(
-                        RichText::new("▶ Çalıştır").color(TURK_YEŞİL).strong(),
-                    ))
-                    .clicked()
-                {
-                    self.kodu_çalıştır();
-                }
-
-                if ui.button("🧹 Temizle").clicked() {
-                    self.çıktı = String::new();
-                    self.hata_mesajı = None;
-                }
-            });
-        });
+    fn mnist_modeli_mi(&self) -> bool {
+        self.secili_model.starts_with("mnist")
     }
 
-    fn sol_panel_göster(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("sol_panel")
-            .resizable(true)
-            .default_width(150.0)
-            .show(ctx, |ui| {
-                ui.heading("Menü");
-                ui.separator();
+    /// Egitim arka plan thread'inde — GUI thread'i bloklanmaz.
+    fn egitimi_baslat(&mut self) {
+        if self.egitim_calisiyor {
+            return;
+        }
 
-                if ui
-                    .selectable_label(self.aktif_sekme == Sekme::Düzenleyici, "📝 Kod Editörü")
-                    .clicked()
-                {
-                    self.aktif_sekme = Sekme::Düzenleyici;
+        if self.mnist_modeli_mi() && self.csv_yolu.trim().is_empty() {
+            self.hata = Some("MNIST modelleri icin mnist_train.csv yolu gerekli.".into());
+            return;
+        }
+
+        self.hata = None;
+        self.egitim_calisiyor = true;
+        self.epoch_ilerleme = 0.0;
+        self.guncel_epoch = 0;
+        self.indeksleme_satir = 0;
+        self.egitim_asamasi = false;
+        self.loss_gecmisi.clear();
+        self.val_loss_gecmisi.clear();
+        self.durum_mesaji = format!("Egitim baslatiliyor: {}...", self.secili_model);
+
+        let (tx, rx) = mpsc::channel();
+        self.egitim_rx = Some(rx);
+
+        let model_id = self.secili_model.clone();
+        let csv = if self.mnist_modeli_mi() {
+            Some(self.csv_yolu.clone())
+        } else {
+            None
+        };
+
+        thread::Builder::new()
+            .name(format!("turk-egitim-{model_id}"))
+            .spawn(move || {
+                let mut dil = TurkDil::new();
+                dil.egitim_kanali_ayarla(tx.clone());
+
+                if let Err(e) = dil.zoo_betik_calistir(&model_id, csv.as_deref()) {
+                    let _ = tx.send(EgitimIlerleme::Hata(e.to_string()));
                 }
+            })
+            .expect("egitim thread baslatilamadi");
+    }
 
-                if ui
-                    .selectable_label(
-                        self.aktif_sekme == Sekme::Görselleştirme,
-                        "📊 Görselleştirme",
-                    )
-                    .clicked()
-                {
-                    self.aktif_sekme = Sekme::Görselleştirme;
-                }
+    fn csv_dosya_sec(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("CSV", &["csv"])
+            .pick_file()
+        {
+            self.csv_yolu = path.display().to_string();
+        }
+    }
 
-                if ui
-                    .selectable_label(self.aktif_sekme == Sekme::Ayarlar, "⚙ Ayarlar")
-                    .clicked()
-                {
-                    self.aktif_sekme = Sekme::Ayarlar;
-                }
+    fn egitim_guncellemelerini_isle(&mut self, ctx: &egui::Context) {
+        let mut bitti = false;
+        let mut yenile = false;
 
-                if ui
-                    .selectable_label(self.aktif_sekme == Sekme::Hakkında, "ℹ Hakkında")
-                    .clicked()
-                {
-                    self.aktif_sekme = Sekme::Hakkında;
-                }
-
-                ui.separator();
-                ui.heading("Örnek Kodlar");
-
-                for (_i, örnek) in self.örnek_kodlar.iter().enumerate() {
-                    if ui.button(&örnek.başlık).clicked() {
-                        self.kod = örnek.kod.clone();
+        if let Some(rx) = &self.egitim_rx {
+            while let Ok(msg) = rx.try_recv() {
+                match msg {
+                    EgitimIlerleme::Indeksleme { satir } => {
+                        self.indeksleme_satir = satir;
+                        self.durum_mesaji = if satir == 0 {
+                            "Dogrulama seti bellege aliniyor...".into()
+                        } else {
+                            format!("CSV indeksleniyor: {satir} satir tarandi...")
+                        };
+                        yenile = true;
                     }
-                }
-            });
-    }
-
-    fn kod_editörü_göster(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Kod Editörü");
-
-            if let Some(hata) = &self.hata_mesajı {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("❌ Hata: {}", hata))
-                            .color(TURK_KIRMIZI)
-                            .strong(),
-                    );
-                });
-            }
-
-            let mut kod = self.kod.clone();
-            let _response = egui::ScrollArea::vertical()
-                .id_source("kod_editoru")
-                .show(ui, |ui| {
-                    ui.add_sized(
-                        ui.available_size(),
-                        egui::TextEdit::multiline(&mut kod)
-                            .code_editor()
-                            .desired_width(f32::INFINITY)
-                            .font(egui::TextStyle::Monospace),
-                    )
-                });
-
-            if kod != self.kod {
-                self.kod = kod;
-            }
-        });
-    }
-
-    fn görselleştirme_göster(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Model Görselleştirme");
-
-            if self.modeller.is_empty() {
-                ui.label("Görselleştirilecek model bulunamadı. Lütfen önce bir model tanımlayıp ayrıştırın.");
-                if ui.button("Mevcut kodu ayrıştır").clicked() {
-                    self.kodu_ayrıştır();
-                }
-            } else {
-                for model in &self.modeller {
-                    ui.collapsing(&model.isim, |ui| {
-                        let toplam_katman = model.katmanlar.len();
-                        
-                        ui.label(format!("Optimizer: {}", model.optimizer));
-                        ui.label(format!("Kayıp Fonksiyonu: {}", model.kayıp_fonksiyonu));
-                        ui.separator();
-                        
-                        ui.label("Model Mimarisi:");
-                        let ağaç_yüksekliği = 200.0;
-                        let genişlik = ui.available_width();
-                        
-                        // Ağaç diyagramı
-                        egui::Frame::canvas(ui.style()).show(ui, |ui| {
-                            let (response, painter) = ui.allocate_painter(
-                                Vec2::new(genişlik, ağaç_yüksekliği),
-                                egui::Sense::hover(),
-                            );
-                            
-                            let rect = response.rect;
-                            let katman_aralığı = rect.width() / (toplam_katman as f32 + 1.0);
-                            let x_başlangıç = rect.left() + katman_aralığı;
-                            
-                            // Giriş katmanı
-                            let giriş_x = x_başlangıç;
-                            let giriş_y = rect.center().y;
-                            let giriş_nöron = model.katmanlar[0].nöron_sayısı;
-                            let düğüm_renk = TURK_MAVİ;
-                            let düğüm_çap = 30.0;
-                            
-                            painter.circle_filled(
-                                egui::pos2(giriş_x, giriş_y),
-                                düğüm_çap,
-                                düğüm_renk,
-                            );
-                            
-                            painter.text(
-                                egui::pos2(giriş_x, giriş_y),
-                                egui::Align2::CENTER_CENTER,
-                                format!("{}", giriş_nöron),
-                                egui::FontId::proportional(14.0),
-                                ui.visuals().text_color(),
-                            );
-                            
-                            let mut önceki_x = giriş_x;
-                            let mut önceki_y = giriş_y;
-                            
-                            // Diğer katmanlar
-                            for (i, katman) in model.katmanlar.iter().enumerate().skip(1) {
-                                let katman_x = x_başlangıç + katman_aralığı * (i as f32 + 1.0);
-                                let katman_y = rect.center().y;
-                                
-                                // Bağlantı çizgileri
-                                painter.line_segment(
-                                    [
-                                        egui::pos2(önceki_x, önceki_y),
-                                        egui::pos2(katman_x, katman_y),
-                                    ],
-                                    Stroke::new(2.0, TURK_GRİ),
-                                );
-                                
-                                // Katman düğümü
-                                painter.circle_filled(
-                                    egui::pos2(katman_x, katman_y),
-                                    düğüm_çap,
-                                    if i == toplam_katman - 1 {
-                                        TURK_YEŞİL
-                                    } else {
-                                        TURK_MOR
-                                    },
-                                );
-                                
-                                // Nöron sayısı
-                                painter.text(
-                                    egui::pos2(katman_x, katman_y),
-                                    egui::Align2::CENTER_CENTER,
-                                    format!("{}", katman.nöron_sayısı),
-                                    egui::FontId::proportional(14.0),
-                                    ui.visuals().text_color(),
-                                );
-                                
-                                // Aktivasyon fonksiyonu
-                                painter.text(
-                                    egui::pos2(katman_x, katman_y + düğüm_çap + 5.0),
-                                    egui::Align2::CENTER_TOP,
-                                    &katman.aktivasyon,
-                                    egui::FontId::proportional(12.0),
-                                    ui.visuals().weak_text_color(),
-                                );
-                                
-                                önceki_x = katman_x;
-                                önceki_y = katman_y;
-                            }
-                        });
-                        
-                        ui.separator();
-                        
-                        // Katman detayları tablosu
-                        egui::Grid::new(format!("katmanlar_{}", model.isim))
-                            .striped(true)
-                            .spacing([10.0, 5.0])
-                            .show(ui, |ui| {
-                                ui.label(RichText::new("Katman").strong());
-                                ui.label(RichText::new("Nöron Sayısı").strong());
-                                ui.label(RichText::new("Aktivasyon").strong());
-                                ui.end_row();
-                                
-                                for (i, katman) in model.katmanlar.iter().enumerate() {
-                                    ui.label(format!("Katman {}", i + 1));
-                                    ui.label(format!("{}", katman.nöron_sayısı));
-                                    ui.label(&katman.aktivasyon);
-                                    ui.end_row();
-                                }
-                            });
-                    });
+                    EgitimIlerleme::Durum { mesaj } => {
+                        self.durum_mesaji = mesaj;
+                        yenile = true;
+                    }
+                    EgitimIlerleme::Epoch {
+                        epoch,
+                        toplam,
+                        train_loss,
+                        val_loss,
+                    } => {
+                        self.egitim_asamasi = true;
+                        self.toplam_epoch = toplam;
+                        self.guncel_epoch = epoch;
+                        self.epoch_ilerleme = epoch as f32 / toplam.max(1) as f32;
+                        self.loss_gecmisi.push(train_loss);
+                        if let Some(v) = val_loss {
+                            self.val_loss_gecmisi.push(v);
+                        }
+                        self.durum_mesaji = format!(
+                            "Epoch {epoch}/{toplam} — loss={train_loss:.6}{}",
+                            val_loss
+                                .map(|v| format!(", val_loss={v:.6}"))
+                                .unwrap_or_default()
+                        );
+                        yenile = true;
+                    }
+                    EgitimIlerleme::Tamamlandi {
+                        epoch_sayisi,
+                        en_iyi_train,
+                        en_iyi_val,
+                    } => {
+                        self.durum_mesaji = format!(
+                            "Egitim tamamlandi — {epoch_sayisi} epoch | \
+                             en iyi: loss={en_iyi_train:.6}{}",
+                            en_iyi_val
+                                .map(|v| format!(", val_loss={v:.6}"))
+                                .unwrap_or_default()
+                        );
+                        self.epoch_ilerleme = 1.0;
+                        self.guncel_epoch = epoch_sayisi;
+                        bitti = true;
+                        yenile = true;
+                    }
+                    EgitimIlerleme::Hata(e) => {
+                        self.hata = Some(e);
+                        bitti = true;
+                    }
                 }
             }
-        });
+        }
+
+        if bitti {
+            self.egitim_calisiyor = false;
+            self.egitim_rx = None;
+        }
+
+        // Kanaldan veri geldiyse hemen yeniden ciz; egitim devam ederken de periyodik repaint
+        if yenile {
+            ctx.request_repaint();
+        }
+        if self.egitim_calisiyor {
+            ctx.request_repaint_after(Duration::from_millis(33));
+        }
     }
 
-    fn ayarlar_göster(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Ayarlar");
-            
-            ui.checkbox(&mut self.tema_koyu, "Koyu Tema");
-            
-            ui.separator();
-            ui.heading("Kod Editörü Ayarları");
-            // Editör ayarları buraya eklenebilir
-            
-            ui.separator();
-            ui.heading("Çalışma Zamanı Ayarları");
-            // Çalışma ayarları buraya eklenebilir
-        });
-    }
+    fn loss_grafik_kutusu(&self, ui: &mut egui::Ui) {
+        egui::Frame::group(ui.style())
+            .fill(egui::Color32::from_gray(24))
+            .inner_margin(12.0)
+            .rounding(6.0)
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("Canli Egitim Grafigi")
+                        .strong()
+                        .color(TURK_MAVI),
+                );
+                ui.label(
+                    egui::RichText::new("Yesil: loss  |  Turuncu: val_loss  |  Surukle/zoom")
+                        .small()
+                        .weak(),
+                );
 
-    fn hakkında_göster(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(RichText::new("TURK Programlama Dili").color(TURK_MAVİ).strong());
-            
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label("Versiyon: ");
-                ui.label(RichText::new("0.1.0").strong());
-            });
-            
-            ui.separator();
-            
-            ui.label("TURK, Türkçe makine öğrenmesi ve yapay zeka uygulamaları geliştirmek için tasarlanmış açık kaynaklı bir programlama dilidir.");
-            
-            ui.separator();
-            
-            ui.heading("Özellikler");
-            ui.label("• Türkçe sözdizimi");
-            ui.label("• Makine öğrenmesi model tanımlamaları");
-            ui.label("• Veri işleme ve görselleştirme");
-            ui.label("• Kod analizi ve hata ayıklama");
-            
-            ui.separator();
-            
-            ui.heading("Bağlantılar");
-            ui.hyperlink_to("GitHub", "https://github.com/turk-lang/turk");
-            ui.hyperlink_to("Dokümantasyon", "https://turk-lang.github.io/turk/docs");
-            
-            ui.separator();
-            
-            ui.label("© 2023 TURK Dili Takımı. MIT Lisansı altında dağıtılmaktadır.");
-        });
-    }
-
-    fn alt_panel_göster(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("alt_panel")
-            .resizable(true)
-            .default_height(200.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Çıktı");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("🧹 Temizle").clicked() {
-                            self.çıktı = String::new();
-                        }
-                    });
-                });
-                ui.separator();
-
-                egui::ScrollArea::vertical()
-                    .id_source("çıktı_alanı")
-                    .show(ui, |ui| {
-                        ui.add_sized(
-                            ui.available_size(),
-                            egui::TextEdit::multiline(&mut self.çıktı.clone())
-                                .font(egui::TextStyle::Monospace)
-                                .interactive(false),
+                if self.loss_gecmisi.is_empty() {
+                    ui.add_space(80.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new(
+                                "Egitim baslayinca loss egrileri burada canli cizilir",
+                            )
+                            .weak(),
                         );
                     });
-            });
-    }
-
-    fn kodu_ayrıştır(&mut self) {
-        // TURK kodu ayrıştırma
-        
-        // Kodu tokenize et
-        let mut lexer = Token::lexer(&self.kod);
-        let mut tokens = Vec::new();
-        
-        while let Some(token) = lexer.next() {
-            match token {
-                Ok(token) => {
-                    let slice = lexer.slice().to_string();
-                    tokens.push((token, slice));
-                }
-                Err(_) => {
-                    self.hata_mesajı = Some("Sözdizimine ayrıştırma hatası oluştu.".to_string());
+                    ui.add_space(80.0);
                     return;
                 }
-            }
-        }
-        
-        let mut parser = ModelParser::new(tokens);
-        match parser.parse() {
-            Ok(program) => {
-                self.program = Some(program);
-                self.hata_mesajı = None;
-                self.çıktı = format!("Program başarıyla ayrıştırıldı.\n{:#?}", self.program.as_ref().unwrap());
-                
-                // Model görselleştirmeleri oluştur
-                self.modeller = Vec::new();
-                if let Some(ref program) = self.program {
-                    for deyim in &program.deyimler {
-                        if let Deyim::ModelTanimi { isim, ozellikler } = deyim {
-                            let mut katmanlar = Vec::new();
-                            
-                            for (_i, katman) in ozellikler.katmanlar.iter().enumerate() {
-                                let aktivasyon = match katman.aktivasyon {
-                                    AktivasyonFonksiyonu::Relu => String::from("ReLU"),
-                                    AktivasyonFonksiyonu::Sigmoid => String::from("Sigmoid"),
-                                    AktivasyonFonksiyonu::Tanh => String::from("Tanh"),
-                                    AktivasyonFonksiyonu::Softmax => String::from("Softmax"),
-                                    AktivasyonFonksiyonu::LeakyRelu(alpha) => format!("LeakyReLU(α={})", alpha),
-                                    AktivasyonFonksiyonu::Swish => String::from("Swish"),
-                                };
-                                
-                                katmanlar.push(KatmanÖzellikleri {
-                                    nöron_sayısı: katman.noron_sayisi as usize,
-                                    aktivasyon: aktivasyon.to_string(),
-                                });
-                            }
-                            
-                            let optimizer = match ozellikler.optimizer {
-                                OptimizerTipi::SGD { lr, .. } => format!("SGD (lr={})", lr),
-                                OptimizerTipi::Adam { lr, .. } => format!("Adam (lr={})", lr),
-                                OptimizerTipi::AdamW { lr, weight_decay, .. } => format!("AdamW (lr={}, weight_decay={})", lr, weight_decay),
-                                OptimizerTipi::RMSProp { lr, rho, .. } => format!("RMSProp (lr={}, rho={})", lr, rho),
-                            };
-                            
-                            let kayıp_fonksiyonu = match ozellikler.kayip_fonksiyonu {
-                                turk_lang::ast::KayipFonksiyonu::MSE => String::from("MSE"),
-                                turk_lang::ast::KayipFonksiyonu::CrossEntropy => String::from("Cross Entropy"),
-                                turk_lang::ast::KayipFonksiyonu::BinaryCrossEntropy => String::from("Binary Cross Entropy"),
-                                turk_lang::ast::KayipFonksiyonu::HuberLoss(delta) => format!("Huber Loss (δ={})", delta),
-                                turk_lang::ast::KayipFonksiyonu::FocalLoss(gamma) => format!("Focal Loss (γ={})", gamma),
-                            };
-                            
-                            self.modeller.push(ModelGörselleştirme {
-                                isim: isim.clone(),
-                                katmanlar,
-                                optimizer,
-                                kayıp_fonksiyonu: kayıp_fonksiyonu.to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-            Err(err) => {
-                self.hata_mesajı = Some(format!("Ayrıştırma hatası: {}", err));
-                self.program = None;
-            }
-        }
-    }
 
-    fn kodu_çalıştır(&mut self) {
-        let kod = self.kod.clone();
-        
-        // Asenkron çalıştırma için Promise oluştur
-        let (sender, promise) = Promise::new();
-        self.çalıştırma_sonuçları = Some(promise);
-        
-        // Arka planda çalıştır
-        std::thread::spawn(move || {
-            // TURK kodu ayrıştırma
-            
-            // Kodu tokenize et
-            let mut lexer = Token::lexer(&kod);
-            let mut tokens = Vec::new();
-            
-            while let Some(token) = lexer.next() {
-                match token {
-                    Ok(token) => {
-                        let slice = lexer.slice().to_string();
-                        tokens.push((token, slice));
+                let loss_pts: PlotPoints = self
+                    .loss_gecmisi
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &y)| [i as f64 + 1.0, y])
+                    .collect();
+
+                let loss_line = Line::new(loss_pts)
+                    .name("loss")
+                    .color(TURK_YESIL)
+                    .width(2.0);
+
+                Plot::new("egitim_loss_plot")
+                    .height(ui.available_height().max(240.0))
+                    .width(ui.available_width())
+                    .x_axis_label("Epoch")
+                    .y_axis_label("Kayip")
+                    .legend(Legend::default())
+                    .allow_zoom(true)
+                    .allow_drag(true)
+                    .allow_scroll(true)
+                    .show(ui, |plot_ui| {
+                        plot_ui.line(loss_line);
+                        if !self.val_loss_gecmisi.is_empty() {
+                            let val_pts: PlotPoints = self
+                                .val_loss_gecmisi
+                                .iter()
+                                .enumerate()
+                                .map(|(i, &y)| [i as f64 + 1.0, y])
+                                .collect();
+                            plot_ui.line(
+                                Line::new(val_pts)
+                                    .name("val_loss")
+                                    .color(TURK_TURUNCU)
+                                    .width(2.0),
+                            );
+                        }
+                    });
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if let Some(&loss) = self.loss_gecmisi.last() {
+                        ui.label(format!("Son loss: {loss:.6}"));
                     }
-                    Err(_) => {
-                        return sender.send(Err("Sözdizimine ayrıştırma hatası oluştu.".to_string()));
+                    if let Some(&val) = self.val_loss_gecmisi.last() {
+                        ui.separator();
+                        ui.label(format!("Son val_loss: {val:.6}"));
                     }
-                }
-            }
-            
-            let mut parser = ModelParser::new(tokens);
-            match parser.parse() {
-                Ok(program) => {
-                    // TODO: Gerçek çalıştırma kodu burada olacak
-                    let sonuç = format!("Program başarıyla çalıştırıldı.\nSonuç: {:?}", program);
-                    sender.send(Ok(sonuç));
-                }
-                Err(err) => {
-                    sender.send(Err(format!("Ayrıştırma hatası: {}", err)));
-                }
-            }
-        });
+                    ui.separator();
+                    ui.label(format!("N = {} epoch", self.loss_gecmisi.len()));
+                });
+            });
     }
 }
 
-fn main() -> Result<(), eframe::Error> {
-    env_logger::init();
-    
-    let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::Vec2::new(1280.0, 720.0)),
-        min_window_size: Some(egui::Vec2::new(800.0, 600.0)),
-        resizable: true,
-        vsync: true,
-        ..Default::default()
-    };
-    
-    eframe::run_native(
-        "TURK Programlama Dili",
-        options,
-        Box::new(|_cc| Box::new(TurkGui::default()))
-    )
-} 
+impl eframe::App for TurkGui {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.egitim_guncellemelerini_isle(ctx);
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading(
+                egui::RichText::new("TURK Model Zoo — Gorsel Egitim Paneli")
+                    .strong()
+                    .color(TURK_MAVI),
+            );
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Model:");
+                egui::ComboBox::from_id_source("model_sec")
+                    .selected_text(&self.secili_model)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.secili_model, "xor".into(), "XOR Siniflandirici");
+                        ui.selectable_value(
+                            &mut self.secili_model,
+                            "mnist_mlp".into(),
+                            "MNIST MLP (784→128→10)",
+                        );
+                        ui.selectable_value(
+                            &mut self.secili_model,
+                            "mnist_cnn".into(),
+                            "MNIST CNN",
+                        );
+                    });
+            });
+
+            if self.mnist_modeli_mi() {
+                ui.horizontal(|ui| {
+                    ui.label("CSV:");
+                    ui.text_edit_singleline(&mut self.csv_yolu);
+                    if ui.button("Dosya Sec...").clicked() {
+                        self.csv_dosya_sec();
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(
+                        "mnist_train.csv — 784 piksel + label (lazy stream, batch=64)",
+                    )
+                    .small()
+                    .weak(),
+                );
+            }
+
+            ui.add_space(6.0);
+
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!self.egitim_calisiyor, egui::Button::new("Egitimi Baslat"))
+                    .clicked()
+                {
+                    self.egitimi_baslat();
+                }
+                if self.egitim_calisiyor {
+                    ui.spinner();
+                    ui.label("Arka planda calisiyor (GUI serbest)...");
+                }
+            });
+
+            if self.egitim_calisiyor || self.guncel_epoch > 0 {
+                if self.egitim_calisiyor && !self.egitim_asamasi {
+                    let metin = if self.indeksleme_satir == 0 {
+                        "CSV hazirlaniyor...".to_string()
+                    } else {
+                        format!("Indeksleme: {} satir", self.indeksleme_satir)
+                    };
+                    ui.add(egui::ProgressBar::new(-1.0).animate(true).text(metin));
+                }
+                if self.egitim_asamasi || self.guncel_epoch > 0 {
+                    ui.add(
+                        egui::ProgressBar::new(self.epoch_ilerleme).text(format!(
+                            "Epoch {}/{}",
+                            self.guncel_epoch, self.toplam_epoch
+                        )),
+                    );
+                }
+            }
+
+            ui.label(&self.durum_mesaji);
+
+            if let Some(h) = &self.hata {
+                ui.colored_label(egui::Color32::RED, format!("Hata: {h}"));
+            }
+
+            ui.add_space(6.0);
+            ui.separator();
+
+            // Grafik kutusu — kalan alani doldur
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), ui.available_height()),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    self.loss_grafik_kutusu(ui);
+                },
+            );
+        });
+    }
+}

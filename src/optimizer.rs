@@ -1,443 +1,743 @@
-use crate::{Result, TurkError};
-use ndarray::Array2;
+use crate::error::{TurkError, Result};
+use ndarray::{Array2, ArrayView2};
 use serde::{Serialize, Deserialize};
 use std::fmt;
-use std::collections::HashMap;
 
-/// Optimizer trait - ağırlık güncellemeleri için
+/// Optimizer trait'i - Tüm optimizasyon algoritmaları bu trait'i implemente etmelidir
 pub trait Optimizer: fmt::Debug + Send + Sync {
-    /// Parametreleri ve gradyanları alarak güncelleme yapar
-    fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()>;
+    /// Ağırlık ve bias değerlerini gradyanlarına göre günceller
+    fn update(
+        &self,
+        weights: &mut Array2<f64>,
+        biases: &mut Array2<f64>,
+        grad_weights: &ArrayView2<f64>,
+        grad_biases: &ArrayView2<f64>
+    ) -> Result<()>;
     
     /// Öğrenme oranını döndürür
-    fn learning_rate(&self) -> f32;
+    fn learning_rate(&self) -> f64;
     
-    /// Optimizer tipini döndürür
-    fn optimizer_type(&self) -> &'static str;
+    /// Öğrenme oranını ayarlar
+    fn set_learning_rate(&mut self, learning_rate: f64);
+    
+    /// Optimizer durumunu sıfırlar
+    fn reset(&mut self);
     
     /// Optimizer'ı klonlar
     fn clone_box(&self) -> Box<dyn Optimizer>;
     
-    /// Parametre ismi için state'i kaldırır
-    fn reset_state_for(&mut self, param_name: &str);
-    
-    /// Tüm state'i kaldırır
-    fn reset_state(&mut self);
+    /// Optimizer'ın tipini döndürür
+    fn optimizer_type(&self) -> &'static str;
 }
 
-/// Stokastik Gradient İniş (SGD) optimizer
+/// Optimizer için Clone trait'i implementasyonu
+impl Clone for Box<dyn Optimizer> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+/// Stokastik Gradyan İnişi (SGD) optimizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SGD {
-    learning_rate: f32,
-    momentum: f32,
-    velocity: HashMap<String, Array2<f32>>,
+    /// Öğrenme oranı
+    learning_rate: f64,
+    /// Momentum değeri (isteğe bağlı)
+    momentum: Option<f64>,
+    /// Nesterov momentum'u kullan
+    nesterov: bool,
+    /// Hızlar (momentum için)
+    velocity_weights: Option<Array2<f64>>,
+    /// Hızlar (bias için)
+    velocity_biases: Option<Array2<f64>>,
+    /// İterasyon sayısı
+    iterations: usize,
+    /// Öğrenme oranının azalma oranı
+    decay: f64,
 }
 
 impl SGD {
-    pub fn new(learning_rate: f32) -> Self {
-        Self {
-            learning_rate,
-            momentum: 0.0,
-            velocity: HashMap::new(),
-        }
-    }
-    
-    pub fn with_momentum(learning_rate: f32, momentum: f32) -> Self {
+    /// Yeni bir SGD optimizer oluşturur
+    pub fn new(learning_rate: f64, momentum: Option<f64>, nesterov: bool) -> Self {
         Self {
             learning_rate,
             momentum,
-            velocity: HashMap::new(),
+            nesterov,
+            velocity_weights: None,
+            velocity_biases: None,
+            iterations: 0,
+            decay: 0.0,
         }
+    }
+    
+    /// Varsayılan parametrelerle yeni bir SGD optimizer oluşturur
+    pub fn default() -> Self {
+        Self::new(0.01, None, false)
     }
 }
 
 impl Optimizer for SGD {
-    fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
-        if params.shape() != grads.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "SGD step: Parametre şekli: {:?}, Gradyan şekli: {:?}",
-                params.shape(),
-                grads.shape()
+    fn update(
+        &self,
+        weights: &mut Array2<f64>,
+        biases: &mut Array2<f64>,
+        grad_weights: &ArrayView2<f64>,
+        grad_biases: &ArrayView2<f64>
+    ) -> Result<()> {
+        // Boyut kontrolü
+        if weights.shape() != grad_weights.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Ağırlık ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                weights.shape(), grad_weights.shape()
             )));
         }
         
-        let param_key = format!("{:p}", params.as_ptr());
+        if biases.shape() != grad_biases.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Bias ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                biases.shape(), grad_biases.shape()
+            )));
+        }
         
-        if self.momentum > 0.0 {
-            // Momentum kullanıyoruz
-            let velocity = self.velocity.entry(param_key)
-                .or_insert_with(|| Array2::zeros(params.raw_dim()));
+        // Öğrenme oranını hesapla (decay ile)
+        let actual_lr = self.learning_rate / (1.0 + self.decay * self.iterations as f64);
+        
+        // Gradyanları öğrenme oranıyla çarp
+        let weight_updates = grad_weights * actual_lr;
+        let bias_updates = grad_biases * actual_lr;
+        
+        // Momentum kullanılıyorsa
+        if let Some(momentum) = self.momentum {
+            let mut self_mut = self.clone();
             
-            // v = momentum * v - learning_rate * grads
-            *velocity = &*velocity * self.momentum - &(grads * self.learning_rate);
+            // Velocity'i ilk kez oluştur (lazy initialization)
+            if self_mut.velocity_weights.is_none() {
+                self_mut.velocity_weights = Some(Array2::zeros(weights.dim()));
+            }
             
-            // params += v
-            *params += &*velocity;
+            if self_mut.velocity_biases.is_none() {
+                self_mut.velocity_biases = Some(Array2::zeros(biases.dim()));
+            }
+            
+            let v_w = self_mut.velocity_weights.as_mut().unwrap();
+            let v_b = self_mut.velocity_biases.as_mut().unwrap();
+            
+            // Nesterov momentum kullanılıyorsa
+            if self.nesterov {
+                // v = momentum * v - lr * grad
+                *v_w = &(v_w.clone() * momentum) - &weight_updates;
+                *v_b = &(v_b.clone() * momentum) - &bias_updates;
+                
+                // params = params + momentum * v - lr * grad
+                *weights = &*weights + &(&*v_w * momentum) - &weight_updates;
+                *biases = &*biases + &(&*v_b * momentum) - &bias_updates;
+            } else {
+                // v = momentum * v - lr * grad
+                *v_w = &(v_w.clone() * momentum) - &weight_updates;
+                *v_b = &(v_b.clone() * momentum) - &bias_updates;
+                
+                // params = params + v
+                *weights = &*weights + &*v_w;
+                *biases = &*biases + &*v_b;
+            }
         } else {
-            // Standart SGD
-            *params -= &(grads * self.learning_rate);
+            // Normal SGD: params = params - lr * grad
+            *weights = &*weights - &weight_updates;
+            *biases = &*biases - &bias_updates;
         }
         
         Ok(())
     }
-
-    fn learning_rate(&self) -> f32 {
+    
+    fn optimizer_type(&self) -> &'static str {
+        "sgd"
+    }
+    
+    fn learning_rate(&self) -> f64 {
         self.learning_rate
     }
     
-    fn optimizer_type(&self) -> &'static str {
-        if self.momentum > 0.0 {
-            "sgd_momentum"
-        } else {
-            "sgd"
-        }
+    fn set_learning_rate(&mut self, learning_rate: f64) {
+        self.learning_rate = learning_rate;
     }
     
     fn clone_box(&self) -> Box<dyn Optimizer> {
         Box::new(self.clone())
     }
     
-    fn reset_state_for(&mut self, param_name: &str) {
-        self.velocity.remove(param_name);
-    }
-    
-    fn reset_state(&mut self) {
-        self.velocity.clear();
+    fn reset(&mut self) {
+        self.velocity_weights = None;
+        self.velocity_biases = None;
     }
 }
 
 /// Adam optimizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Adam {
-    learning_rate: f32,
-    beta1: f32,
-    beta2: f32,
-    epsilon: f32,
+    /// Öğrenme oranı
+    learning_rate: f64,
+    /// Beta1 (ilk moment için momentum faktörü)
+    beta1: f64,
+    /// Beta2 (ikinci moment için momentum faktörü)
+    beta2: f64,
+    /// Epsilon (sayısal stabilite için)
+    epsilon: f64,
+    /// İlk moment (weights)
+    m_weights: Option<Array2<f64>>,
+    /// İlk moment (biases)
+    m_biases: Option<Array2<f64>>,
+    /// İkinci moment (weights)
+    v_weights: Option<Array2<f64>>,
+    /// İkinci moment (biases)
+    v_biases: Option<Array2<f64>>,
+    /// Adım sayacı
     t: usize,
-    m: HashMap<String, Array2<f32>>,     // Birinci moment (gradyan ortalaması)
-    v: HashMap<String, Array2<f32>>,     // İkinci moment (gradyan karelerinin ortalaması)
 }
 
 impl Adam {
-    pub fn new(learning_rate: f32) -> Self {
-        Self {
-            learning_rate,
-            beta1: 0.9,
-            beta2: 0.999,
-            epsilon: 1e-8,
-            t: 0,
-            m: HashMap::new(),
-            v: HashMap::new(),
-        }
-    }
-    
-    pub fn with_betas(learning_rate: f32, beta1: f32, beta2: f32, epsilon: f32) -> Self {
+    /// Yeni bir Adam optimizer oluşturur
+    pub fn new(learning_rate: f64, beta1: f64, beta2: f64, epsilon: f64) -> Self {
         Self {
             learning_rate,
             beta1,
             beta2,
             epsilon,
+            m_weights: None,
+            m_biases: None,
+            v_weights: None,
+            v_biases: None,
             t: 0,
-            m: HashMap::new(),
-            v: HashMap::new(),
         }
+    }
+    
+    /// Varsayılan parametrelerle yeni bir Adam optimizer oluşturur
+    pub fn default() -> Self {
+        Self::new(0.001, 0.9, 0.999, 1e-8)
     }
 }
 
 impl Optimizer for Adam {
-    fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
-        if params.shape() != grads.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Adam step: Parametre şekli: {:?}, Gradyan şekli: {:?}",
-                params.shape(),
-                grads.shape()
+    fn update(
+        &self,
+        weights: &mut Array2<f64>,
+        biases: &mut Array2<f64>,
+        grad_weights: &ArrayView2<f64>,
+        grad_biases: &ArrayView2<f64>
+    ) -> Result<()> {
+        // Boyut kontrolü
+        if weights.shape() != grad_weights.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Ağırlık ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                weights.shape(), grad_weights.shape()
             )));
         }
-
-        let param_key = format!("{:p}", params.as_ptr());
-        self.t += 1;
-        let t = self.t as f32;
-
-        // Momenti başlat veya al
-        let m = self.m.entry(param_key.clone())
-            .or_insert_with(|| Array2::zeros(params.raw_dim()));
         
-        // Hızı başlat veya al
-        let v = self.v.entry(param_key)
-            .or_insert_with(|| Array2::zeros(params.raw_dim()));
+        if biases.shape() != grad_biases.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Bias ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                biases.shape(), grad_biases.shape()
+            )));
+        }
         
-        // Moment ve hız güncellemeleri
-        *m = &*m * self.beta1 + &(grads * (1.0 - self.beta1));
-        *v = &*v * self.beta2 + &(grads.map(|x| x * x) * (1.0 - self.beta2));
-
-        // Bias düzeltmeleri
-        let m_hat = &*m / (1.0 - self.beta1.powf(t));
-        let v_hat = &*v / (1.0 - self.beta2.powf(t));
-
+        let mut self_mut = self.clone();
+        self_mut.t += 1;
+        
+        // İlk momenti ilk kez oluştur
+        if self_mut.m_weights.is_none() {
+            self_mut.m_weights = Some(Array2::zeros(weights.dim()));
+        }
+        
+        if self_mut.m_biases.is_none() {
+            self_mut.m_biases = Some(Array2::zeros(biases.dim()));
+        }
+        
+        // İkinci momenti ilk kez oluştur
+        if self_mut.v_weights.is_none() {
+            self_mut.v_weights = Some(Array2::zeros(weights.dim()));
+        }
+        
+        if self_mut.v_biases.is_none() {
+            self_mut.v_biases = Some(Array2::zeros(biases.dim()));
+        }
+        
+        let m_w = self_mut.m_weights.as_mut().unwrap();
+        let m_b = self_mut.m_biases.as_mut().unwrap();
+        let v_w = self_mut.v_weights.as_mut().unwrap();
+        let v_b = self_mut.v_biases.as_mut().unwrap();
+        
+        // İlk moment güncellemesi (momentumlu gradyan)
+        *m_w = &(m_w.clone() * self.beta1) + &(grad_weights * (1.0 - self.beta1));
+        *m_b = &(m_b.clone() * self.beta1) + &(grad_biases * (1.0 - self.beta1));
+        
+        // İkinci moment güncellemesi (gradyanın karesi)
+        *v_w = &(v_w.clone() * self.beta2) + &(grad_weights.mapv(|g| g * g) * (1.0 - self.beta2));
+        *v_b = &(v_b.clone() * self.beta2) + &(grad_biases.mapv(|g| g * g) * (1.0 - self.beta2));
+        
+        // Bias düzeltmesi
+        let m_w_hat = &*m_w / (1.0 - self.beta1.powi(self_mut.t as i32));
+        let m_b_hat = &*m_b / (1.0 - self.beta1.powi(self_mut.t as i32));
+        let v_w_hat = &*v_w / (1.0 - self.beta2.powi(self_mut.t as i32));
+        let v_b_hat = &*v_b / (1.0 - self.beta2.powi(self_mut.t as i32));
+        
         // Parametre güncellemesi
-        *params -= &(m_hat * self.learning_rate / (v_hat.map(|x| x.sqrt()) + self.epsilon));
+        *weights = &*weights - (self.learning_rate * &m_w_hat / &(v_w_hat.mapv(|v| v.sqrt()) + self.epsilon));
+        *biases = &*biases - (self.learning_rate * &m_b_hat / &(v_b_hat.mapv(|v| v.sqrt()) + self.epsilon));
         
         Ok(())
     }
-
-    fn learning_rate(&self) -> f32 {
+    
+    fn learning_rate(&self) -> f64 {
         self.learning_rate
     }
     
-    fn optimizer_type(&self) -> &'static str {
-        "adam"
+    fn set_learning_rate(&mut self, learning_rate: f64) {
+        self.learning_rate = learning_rate;
+    }
+    
+    fn reset(&mut self) {
+        self.m_weights = None;
+        self.m_biases = None;
+        self.v_weights = None;
+        self.v_biases = None;
+        self.t = 0;
     }
     
     fn clone_box(&self) -> Box<dyn Optimizer> {
         Box::new(self.clone())
     }
     
-    fn reset_state_for(&mut self, param_name: &str) {
-        self.m.remove(param_name);
-        self.v.remove(param_name);
-    }
-    
-    fn reset_state(&mut self) {
-        self.t = 0;
-        self.m.clear();
-        self.v.clear();
+    fn optimizer_type(&self) -> &'static str {
+        "Adam"
     }
 }
 
-/// AdamW optimizer - Ağırlık aşınması (weight decay) ile Adam
+/// AdamW optimizer (Adam + Ağırlık bozunumu)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdamW {
-    learning_rate: f32,
-    beta1: f32,
-    beta2: f32,
-    epsilon: f32,
-    weight_decay: f32,
+    /// Öğrenme oranı
+    learning_rate: f64,
+    /// Beta1 (ilk moment için momentum faktörü)
+    beta1: f64,
+    /// Beta2 (ikinci moment için momentum faktörü)
+    beta2: f64,
+    /// Epsilon (sayısal stabilite için)
+    epsilon: f64,
+    /// Ağırlık bozunumu
+    weight_decay: f64,
+    /// İlk moment (weights)
+    m_weights: Option<Array2<f64>>,
+    /// İlk moment (biases)
+    m_biases: Option<Array2<f64>>,
+    /// İkinci moment (weights)
+    v_weights: Option<Array2<f64>>,
+    /// İkinci moment (biases)
+    v_biases: Option<Array2<f64>>,
+    /// Adım sayacı
     t: usize,
-    m: HashMap<String, Array2<f32>>,
-    v: HashMap<String, Array2<f32>>,
 }
 
 impl AdamW {
-    pub fn new(learning_rate: f32, weight_decay: f32) -> Self {
-        Self {
-            learning_rate,
-            beta1: 0.9,
-            beta2: 0.999,
-            epsilon: 1e-8,
-            weight_decay,
-            t: 0,
-            m: HashMap::new(),
-            v: HashMap::new(),
-        }
-    }
-    
-    pub fn with_betas(learning_rate: f32, weight_decay: f32, beta1: f32, beta2: f32, epsilon: f32) -> Self {
+    /// Yeni bir AdamW optimizer oluşturur
+    pub fn new(learning_rate: f64, beta1: f64, beta2: f64, epsilon: f64, weight_decay: f64) -> Self {
         Self {
             learning_rate,
             beta1,
             beta2,
             epsilon,
             weight_decay,
+            m_weights: None,
+            m_biases: None,
+            v_weights: None,
+            v_biases: None,
             t: 0,
-            m: HashMap::new(),
-            v: HashMap::new(),
         }
+    }
+    
+    /// Varsayılan parametrelerle yeni bir AdamW optimizer oluşturur
+    pub fn default() -> Self {
+        Self::new(0.001, 0.9, 0.999, 1e-8, 0.01)
     }
 }
 
 impl Optimizer for AdamW {
-    fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
-        if params.shape() != grads.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "AdamW step: Parametre şekli: {:?}, Gradyan şekli: {:?}",
-                params.shape(),
-                grads.shape()
+    fn update(
+        &self,
+        weights: &mut Array2<f64>,
+        biases: &mut Array2<f64>,
+        grad_weights: &ArrayView2<f64>,
+        grad_biases: &ArrayView2<f64>
+    ) -> Result<()> {
+        // Boyut kontrolü
+        if weights.shape() != grad_weights.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Ağırlık ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                weights.shape(), grad_weights.shape()
             )));
         }
-
-        let param_key = format!("{:p}", params.as_ptr());
-        self.t += 1;
-        let t = self.t as f32;
-
-        // Momenti başlat veya al
-        let m = self.m.entry(param_key.clone())
-            .or_insert_with(|| Array2::zeros(params.raw_dim()));
         
-        // Hızı başlat veya al
-        let v = self.v.entry(param_key)
-            .or_insert_with(|| Array2::zeros(params.raw_dim()));
+        if biases.shape() != grad_biases.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Bias ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                biases.shape(), grad_biases.shape()
+            )));
+        }
         
-        // Moment ve hız güncellemeleri - standart Adam gibi
-        *m = &*m * self.beta1 + &(grads * (1.0 - self.beta1));
-        *v = &*v * self.beta2 + &(grads.map(|x| x * x) * (1.0 - self.beta2));
-
-        // Bias düzeltmeleri
-        let m_hat = &*m / (1.0 - self.beta1.powf(t));
-        let v_hat = &*v / (1.0 - self.beta2.powf(t));
+        let mut self_mut = self.clone();
+        self_mut.t += 1;
         
-        // AdamW: Önce ağırlık aşınması uygula, sonra Adam güncellemesi
-        *params *= 1.0 - self.learning_rate * self.weight_decay;
-        *params -= &(m_hat * self.learning_rate / (v_hat.map(|x| x.sqrt()) + self.epsilon));
+        // İlk momenti ilk kez oluştur
+        if self_mut.m_weights.is_none() {
+            self_mut.m_weights = Some(Array2::zeros(weights.dim()));
+        }
+        
+        if self_mut.m_biases.is_none() {
+            self_mut.m_biases = Some(Array2::zeros(biases.dim()));
+        }
+        
+        // İkinci momenti ilk kez oluştur
+        if self_mut.v_weights.is_none() {
+            self_mut.v_weights = Some(Array2::zeros(weights.dim()));
+        }
+        
+        if self_mut.v_biases.is_none() {
+            self_mut.v_biases = Some(Array2::zeros(biases.dim()));
+        }
+        
+        let m_w = self_mut.m_weights.as_mut().unwrap();
+        let m_b = self_mut.m_biases.as_mut().unwrap();
+        let v_w = self_mut.v_weights.as_mut().unwrap();
+        let v_b = self_mut.v_biases.as_mut().unwrap();
+        
+        // Ağırlık bozunumu (weight decay) uygulaması - AdamW'nin özelliği
+        let weight_decay_term = &*weights * self.weight_decay;
+        
+        // İlk moment güncellemesi (momentumlu gradyan)
+        *m_w = &(m_w.clone() * self.beta1) + &(grad_weights * (1.0 - self.beta1));
+        *m_b = &(m_b.clone() * self.beta1) + &(grad_biases * (1.0 - self.beta1));
+        
+        // İkinci moment güncellemesi (gradyanın karesi)
+        *v_w = &(v_w.clone() * self.beta2) + &(grad_weights.mapv(|g| g * g) * (1.0 - self.beta2));
+        *v_b = &(v_b.clone() * self.beta2) + &(grad_biases.mapv(|g| g * g) * (1.0 - self.beta2));
+        
+        // Bias düzeltmesi
+        let m_w_hat = &*m_w / (1.0 - self.beta1.powi(self_mut.t as i32));
+        let m_b_hat = &*m_b / (1.0 - self.beta1.powi(self_mut.t as i32));
+        let v_w_hat = &*v_w / (1.0 - self.beta2.powi(self_mut.t as i32));
+        let v_b_hat = &*v_b / (1.0 - self.beta2.powi(self_mut.t as i32));
+        
+        // Parametre güncellemesi (AdamW'ye özel olarak weight decay terimi eklenmiş)
+        *weights = &*weights - (self.learning_rate * (&m_w_hat / &(v_w_hat.mapv(|v| v.sqrt()) + self.epsilon) + &weight_decay_term));
+        *biases = &*biases - (self.learning_rate * &m_b_hat / &(v_b_hat.mapv(|v| v.sqrt()) + self.epsilon));
         
         Ok(())
     }
-
-    fn learning_rate(&self) -> f32 {
+    
+    fn learning_rate(&self) -> f64 {
         self.learning_rate
     }
     
-    fn optimizer_type(&self) -> &'static str {
-        "adamw"
+    fn set_learning_rate(&mut self, learning_rate: f64) {
+        self.learning_rate = learning_rate;
+    }
+    
+    fn reset(&mut self) {
+        self.m_weights = None;
+        self.m_biases = None;
+        self.v_weights = None;
+        self.v_biases = None;
+        self.t = 0;
     }
     
     fn clone_box(&self) -> Box<dyn Optimizer> {
         Box::new(self.clone())
     }
     
-    fn reset_state_for(&mut self, param_name: &str) {
-        self.m.remove(param_name);
-        self.v.remove(param_name);
-    }
-    
-    fn reset_state(&mut self) {
-        self.t = 0;
-        self.m.clear();
-        self.v.clear();
+    fn optimizer_type(&self) -> &'static str {
+        "AdamW"
     }
 }
 
 /// RMSProp optimizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RMSProp {
-    learning_rate: f32,
-    decay_rate: f32,
-    epsilon: f32,
-    cache: HashMap<String, Array2<f32>>,
+    /// Öğrenme oranı
+    learning_rate: f64,
+    /// Bozunum oranı
+    decay: f64,
+    /// Epsilon (sayısal stabilite için)
+    epsilon: f64,
+    /// Kare gradyan ortalaması (weights)
+    cache_weights: Option<Array2<f64>>,
+    /// Kare gradyan ortalaması (biases)
+    cache_biases: Option<Array2<f64>>,
 }
 
 impl RMSProp {
-    pub fn new(learning_rate: f32) -> Self {
+    /// Yeni bir RMSProp optimizer oluşturur
+    pub fn new(learning_rate: f64, decay: f64, epsilon: f64) -> Self {
         Self {
             learning_rate,
-            decay_rate: 0.9,
-            epsilon: 1e-8,
-            cache: HashMap::new(),
+            decay,
+            epsilon,
+            cache_weights: None,
+            cache_biases: None,
         }
     }
     
-    pub fn with_decay(learning_rate: f32, decay_rate: f32, epsilon: f32) -> Self {
-        Self {
-            learning_rate,
-            decay_rate,
-            epsilon,
-            cache: HashMap::new(),
-        }
+    /// Varsayılan parametrelerle yeni bir RMSProp optimizer oluşturur
+    pub fn default() -> Self {
+        Self::new(0.001, 0.9, 1e-8)
     }
 }
 
 impl Optimizer for RMSProp {
-    fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>) -> Result<()> {
-        if params.shape() != grads.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "RMSProp step: Parametre şekli: {:?}, Gradyan şekli: {:?}",
-                params.shape(),
-                grads.shape()
+    fn update(
+        &self,
+        weights: &mut Array2<f64>,
+        biases: &mut Array2<f64>,
+        grad_weights: &ArrayView2<f64>,
+        grad_biases: &ArrayView2<f64>
+    ) -> Result<()> {
+        // Boyut kontrolü
+        if weights.shape() != grad_weights.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Ağırlık ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                weights.shape(), grad_weights.shape()
             )));
         }
-
-        let param_key = format!("{:p}", params.as_ptr());
         
-        // Cache başlat veya al
-        let cache = self.cache.entry(param_key)
-            .or_insert_with(|| Array2::zeros(params.raw_dim()));
-
-        // Cache güncelleme: decay_rate * cache + (1 - decay_rate) * grads^2
-        *cache = &*cache * self.decay_rate + &(grads.map(|x| x * x) * (1.0 - self.decay_rate));
-
-        // Parametre güncellemesi: params -= learning_rate * grads / sqrt(cache + epsilon)
-        *params -= &(grads * self.learning_rate / cache.map(|x| (x + self.epsilon).sqrt()));
+        if biases.shape() != grad_biases.shape() {
+            return Err(TurkError::shape_mismatch(&format!(
+                "Bias ve gradyan boyutları uyuşmuyor: {:?} vs {:?}",
+                biases.shape(), grad_biases.shape()
+            )));
+        }
+        
+        // Cache'i ilk kez oluştur (lazy initialization)
+        let mut self_mut = self.clone();
+        
+        if self_mut.cache_weights.is_none() {
+            self_mut.cache_weights = Some(Array2::zeros(weights.dim()));
+        }
+        
+        if self_mut.cache_biases.is_none() {
+            self_mut.cache_biases = Some(Array2::zeros(biases.dim()));
+        }
+        
+        let cache_w = self_mut.cache_weights.as_mut().unwrap();
+        let cache_b = self_mut.cache_biases.as_mut().unwrap();
+        
+        // Cache güncellemesi (gradyanın karesi)
+        *cache_w = &(cache_w.clone() * self.decay) + &(grad_weights.mapv(|g| g * g) * (1.0 - self.decay));
+        *cache_b = &(cache_b.clone() * self.decay) + &(grad_biases.mapv(|g| g * g) * (1.0 - self.decay));
+        
+        // Parametre güncellemesi
+        *weights = &*weights - &(self.learning_rate * grad_weights / &(cache_w.mapv(|c| (c + self.epsilon).sqrt())));
+        *biases = &*biases - &(self.learning_rate * grad_biases / &(cache_b.mapv(|c| (c + self.epsilon).sqrt())));
         
         Ok(())
     }
-
-    fn learning_rate(&self) -> f32 {
+    
+    fn learning_rate(&self) -> f64 {
         self.learning_rate
     }
     
-    fn optimizer_type(&self) -> &'static str {
-        "rmsprop"
+    fn set_learning_rate(&mut self, learning_rate: f64) {
+        self.learning_rate = learning_rate;
+    }
+    
+    fn reset(&mut self) {
+        self.cache_weights = None;
+        self.cache_biases = None;
     }
     
     fn clone_box(&self) -> Box<dyn Optimizer> {
         Box::new(self.clone())
     }
     
-    fn reset_state_for(&mut self, param_name: &str) {
-        self.cache.remove(param_name);
+    fn optimizer_type(&self) -> &'static str {
+        "RMSProp"
     }
-    
-    fn reset_state(&mut self) {
-        self.cache.clear();
+}
+
+/// Optimizer tipine göre optimizer oluşturur
+pub fn create_optimizer(optimizer_type: &str) -> Result<Box<dyn Optimizer>> {
+    match optimizer_type.to_lowercase().as_str() {
+        "sgd" => Ok(Box::new(SGD::default())),
+        "adam" => Ok(Box::new(Adam::default())),
+        "adamw" => Ok(Box::new(AdamW::default())),
+        "rmsprop" => Ok(Box::new(RMSProp::default())),
+        _ => Err(TurkError::ValueError(format!("Bilinmeyen optimizer: {}", optimizer_type)))
+    }
+}
+
+/// Model yükleme için parametrelerden optimizer oluşturur
+pub fn create_optimizer_from_params(
+    optimizer_type: &str,
+    learning_rate: f64,
+    momentum: Option<f64>,
+    beta1: Option<f64>,
+    beta2: Option<f64>,
+    epsilon: Option<f64>,
+    weight_decay: Option<f64>
+) -> Result<Box<dyn Optimizer>> {
+    match optimizer_type.to_lowercase().as_str() {
+        "sgd" => {
+            let momentum_val = momentum.unwrap_or(0.0);
+            let nesterov = momentum_val > 0.0;
+            Ok(Box::new(SGD::new(learning_rate, momentum, nesterov)))
+        }
+        "adam" => {
+            let beta1_val = beta1.unwrap_or(0.9);
+            let beta2_val = beta2.unwrap_or(0.999);
+            let epsilon_val = epsilon.unwrap_or(1e-8);
+            Ok(Box::new(Adam::new(learning_rate, beta1_val, beta2_val, epsilon_val)))
+        }
+        "adamw" => {
+            let beta1_val = beta1.unwrap_or(0.9);
+            let beta2_val = beta2.unwrap_or(0.999);
+            let epsilon_val = epsilon.unwrap_or(1e-8);
+            let weight_decay_val = weight_decay.unwrap_or(0.01);
+            Ok(Box::new(AdamW::new(learning_rate, beta1_val, beta2_val, epsilon_val, weight_decay_val)))
+        }
+        "rmsprop" => {
+            let decay = beta1.unwrap_or(0.9);
+            let epsilon_val = epsilon.unwrap_or(1e-8);
+            Ok(Box::new(RMSProp::new(learning_rate, decay, epsilon_val)))
+        }
+        _ => Err(TurkError::ValueError(format!("Bilinmeyen optimizer: {}", optimizer_type)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array2;
-
+    use ndarray::array;
+    use approx::assert_abs_diff_eq;
+    
     #[test]
-    fn test_sgd_step() {
-        let mut optimizer = SGD::new(0.01);
-        let mut params = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        let grads = Array2::from_shape_vec((2, 2), vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+    fn test_sgd() {
+        let mut weights = array![[1.0, 2.0], [3.0, 4.0]];
+        let mut biases = array![[0.5, 0.5]];
+        let grad_weights = array![[0.1, 0.2], [0.3, 0.4]];
+        let grad_biases = array![[0.05, 0.05]];
         
-        // Standart SGD
-        optimizer.step(&mut params, &grads).unwrap();
-        assert_eq!(params.shape(), &[2, 2]);
+        let sgd = SGD::new(0.1, None, false);
+        sgd.update(&mut weights, &mut biases, &grad_weights.view(), &grad_biases.view()).unwrap();
         
-        // Momentum ile SGD
-        let mut optimizer_momentum = SGD::with_momentum(0.01, 0.9);
-        let mut params2 = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        // weights -= lr * grad_weights
+        assert_abs_diff_eq!(weights[[0, 0]], 0.99, epsilon = 1e-5);
+        assert_abs_diff_eq!(weights[[0, 1]], 1.98, epsilon = 1e-5);
+        assert_abs_diff_eq!(weights[[1, 0]], 2.97, epsilon = 1e-5);
+        assert_abs_diff_eq!(weights[[1, 1]], 3.96, epsilon = 1e-5);
         
-        optimizer_momentum.step(&mut params2, &grads).unwrap();
-        assert_eq!(params2.shape(), &[2, 2]);
-    }
-
-    #[test]
-    fn test_adam_step() {
-        let mut optimizer = Adam::new(0.01);
-        let mut params = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        let grads = Array2::from_shape_vec((2, 2), vec![0.1, 0.2, 0.3, 0.4]).unwrap();
-        
-        optimizer.step(&mut params, &grads).unwrap();
-        assert_eq!(params.shape(), &[2, 2]);
-        
-        // Özel beta değerleri ile
-        let mut optimizer_custom = Adam::with_betas(0.01, 0.8, 0.99, 1e-10);
-        let mut params2 = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        
-        optimizer_custom.step(&mut params2, &grads).unwrap();
-        assert_eq!(params2.shape(), &[2, 2]);
+        // biases -= lr * grad_biases
+        assert_abs_diff_eq!(biases[[0, 0]], 0.495, epsilon = 1e-5);
+        assert_abs_diff_eq!(biases[[0, 1]], 0.495, epsilon = 1e-5);
     }
     
     #[test]
-    fn test_adamw_step() {
-        let mut optimizer = AdamW::new(0.01, 0.01);
-        let mut params = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        let grads = Array2::from_shape_vec((2, 2), vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+    fn test_sgd_momentum() {
+        let mut weights = array![[1.0, 2.0], [3.0, 4.0]];
+        let mut biases = array![[0.5, 0.5]];
+        let grad_weights = array![[0.1, 0.2], [0.3, 0.4]];
+        let grad_biases = array![[0.05, 0.05]];
         
-        optimizer.step(&mut params, &grads).unwrap();
-        assert_eq!(params.shape(), &[2, 2]);
+        let sgd = SGD::new(0.1, Some(0.9), false);
+        sgd.update(&mut weights, &mut biases, &grad_weights.view(), &grad_biases.view()).unwrap();
+        
+        // Momentum için ilk adım: v = -lr * grad
+        // weights += v
+        assert_abs_diff_eq!(weights[[0, 0]], 0.99, epsilon = 1e-5);
+        assert_abs_diff_eq!(weights[[0, 1]], 1.98, epsilon = 1e-5);
+        assert_abs_diff_eq!(weights[[1, 0]], 2.97, epsilon = 1e-5);
+        assert_abs_diff_eq!(weights[[1, 1]], 3.96, epsilon = 1e-5);
     }
     
     #[test]
-    fn test_rmsprop_step() {
-        let mut optimizer = RMSProp::new(0.01);
-        let mut params = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        let grads = Array2::from_shape_vec((2, 2), vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+    fn test_adam() {
+        let mut weights = array![[1.0, 2.0], [3.0, 4.0]];
+        let mut biases = array![[0.5, 0.5]];
+        let grad_weights = array![[0.1, 0.2], [0.3, 0.4]];
+        let grad_biases = array![[0.05, 0.05]];
         
-        optimizer.step(&mut params, &grads).unwrap();
-        assert_eq!(params.shape(), &[2, 2]);
+        let adam = Adam::new(0.001, 0.9, 0.999, 1e-8);
+        adam.update(&mut weights, &mut biases, &grad_weights.view(), &grad_biases.view()).unwrap();
+        
+        // Adam ilk adımda değişiklik küçük olacaktır
+        // Sadece bir şeylerin değiştiğini kontrol edelim
+        assert!(weights[[0, 0]] < 1.0);
+        assert!(weights[[0, 1]] < 2.0);
+        assert!(weights[[1, 0]] < 3.0);
+        assert!(weights[[1, 1]] < 4.0);
+    }
+    
+    #[test]
+    fn test_adamw() {
+        let mut weights = array![[1.0, 2.0], [3.0, 4.0]];
+        let mut biases = array![[0.5, 0.5]];
+        let grad_weights = array![[0.1, 0.2], [0.3, 0.4]];
+        let grad_biases = array![[0.05, 0.05]];
+        
+        let adamw = AdamW::new(0.001, 0.9, 0.999, 1e-8, 0.01);
+        adamw.update(&mut weights, &mut biases, &grad_weights.view(), &grad_biases.view()).unwrap();
+        
+        // AdamW ilk adımda değişiklik küçük olacaktır
+        // Sadece bir şeylerin değiştiğini kontrol edelim
+        assert!(weights[[0, 0]] < 1.0);
+        assert!(weights[[0, 1]] < 2.0);
+        assert!(weights[[1, 0]] < 3.0);
+        assert!(weights[[1, 1]] < 4.0);
+    }
+    
+    #[test]
+    fn test_rmsprop() {
+        let mut weights = array![[1.0, 2.0], [3.0, 4.0]];
+        let mut biases = array![[0.5, 0.5]];
+        let grad_weights = array![[0.1, 0.2], [0.3, 0.4]];
+        let grad_biases = array![[0.05, 0.05]];
+        
+        let rmsprop = RMSProp::new(0.001, 0.9, 1e-8);
+        rmsprop.update(&mut weights, &mut biases, &grad_weights.view(), &grad_biases.view()).unwrap();
+        
+        // RMSProp ilk adımda değişiklik küçük olacaktır
+        // Sadece bir şeylerin değiştiğini kontrol edelim
+        assert!(weights[[0, 0]] < 1.0);
+        assert!(weights[[0, 1]] < 2.0);
+        assert!(weights[[1, 0]] < 3.0);
+        assert!(weights[[1, 1]] < 4.0);
+    }
+    
+    #[test]
+    fn test_optimizer_factory() {
+        let sgd = create_optimizer("sgd").unwrap();
+        assert_eq!(sgd.learning_rate(), 0.01);
+        
+        let adam = create_optimizer("adam").unwrap();
+        assert_eq!(adam.learning_rate(), 0.001);
+        
+        let adamw = create_optimizer("adamw").unwrap();
+        assert_eq!(adamw.learning_rate(), 0.001);
+        
+        let rmsprop = create_optimizer("rmsprop").unwrap();
+        assert_eq!(rmsprop.learning_rate(), 0.001);
+        
+        let result = create_optimizer("unknown");
+        assert!(result.is_err());
+    }
+    
+    #[test]
+    fn test_optimizer_from_params() {
+        let sgd = create_optimizer_from_params("sgd", 0.05, Some(0.9), None, None, None, None).unwrap();
+        assert_eq!(sgd.learning_rate(), 0.05);
+        
+        let adam = create_optimizer_from_params("adam", 0.01, None, Some(0.8), Some(0.99), Some(1e-6), None).unwrap();
+        assert_eq!(adam.learning_rate(), 0.01);
+        
+        let adamw = create_optimizer_from_params("adamw", 0.02, None, None, None, None, Some(0.005)).unwrap();
+        assert_eq!(adamw.learning_rate(), 0.02);
+        
+        let rmsprop = create_optimizer_from_params("rmsprop", 0.03, None, Some(0.85), None, Some(1e-7), None).unwrap();
+        assert_eq!(rmsprop.learning_rate(), 0.03);
     }
 } 

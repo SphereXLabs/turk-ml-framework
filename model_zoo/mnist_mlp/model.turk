@@ -1,0 +1,14 @@
+# TÜRK Model Zoo — MNIST MLP
+# Girdi: mnist_train.csv (784 piksel + label)
+# CSV olustur: cargo run --example mnist_csv_export -- mnist_train.csv 5000
+
+model_olustur()
+katman_ekle(yogun(784, 128, relu))
+katman_ekle(dropout(0.2))
+katman_ekle(yogun(128, 10, sigmoid))
+derle(adam, loss=mse, ogrenme_orani=0.001)
+model_bilgisi()
+
+# veri_yukle GUI/CLI tarafindan enjekte edilir
+egit(10, 64, sabir=3)
+kaydet("mnist_mlp_model.json")

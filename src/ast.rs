@@ -1,374 +1,851 @@
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
+use serde::{Serialize, Deserialize};
+use std::fmt;
+use std::collections::HashMap;
+use crate::token::Token;
+use crate::error::TurkError;
+use ndarray::{Array2, ArrayView2};
+
+/// Operatör
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
-    Toplama,
-    Cikarma,
-    Carpma,
-    Bolme,
-    ModOperator,
-    MatrisCarpim,
-    NoktaCarpim,
-    Transpoze,
-    Ustlu,  // Üs alma operatörü (^)
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum KarsilastirmaOperator {
-    EsitMi,
-    EsitDegilMi,
-    BuyukMu,
-    KucukMu,
-    BuyukEsitMi,
-    KucukEsitMi,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum MantiksalOperator {
+    /// Toplama
+    Topla,
+    /// Çıkarma
+    Cikar,
+    /// Çarpma
+    Carp,
+    /// Bölme
+    Bol,
+    /// Eşitlik
+    Esit,
+    /// Eşit değil
+    EsitDegil,
+    /// Büyük
+    Buyuk,
+    /// Küçük
+    Kucuk,
+    /// Büyük eşit
+    BuyukEsit,
+    /// Küçük eşit
+    KucukEsit,
+    /// Ve
     Ve,
+    /// Veya
     Veya,
+    /// Değil
+    Degil,
+    /// Artı
+    Artı,
+    /// Eksi
+    Eksi,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum IstatistikselIslemTipi {
-    Ortalama,
-    Medyan,
-    Mod,
-    StandartSapma,
-    MinMax,
-    Varyans,
-    Korelasyon,
-}
-
-#[derive(Debug, Clone)]
-pub enum AktivasyonFonksiyonu {
-    Relu,
-    LeakyRelu(f64),  // alpha parametresi
-    Sigmoid,
-    Tanh,
-    Softmax,
-    Swish,
-}
-
-#[derive(Debug, Clone)]
-pub enum KayipFonksiyonu {
-    MSE,
-    CrossEntropy,
-    BinaryCrossEntropy,
-    HuberLoss(f64),  // delta parametresi
-    FocalLoss(f64),  // gamma parametresi
-}
-
-#[derive(Debug, Clone)]
-pub enum OptimizerTipi {
-    SGD {
-        lr: f64,
-        momentum: Option<f64>,
-        nesterov: Option<bool>,
-    },
-    Adam {
-        lr: f64,
-        beta1: f64,
-        beta2: f64,
-        epsilon: f64,
-    },
-    AdamW {
-        lr: f64,
-        weight_decay: f64,
-        beta1: f64,
-        beta2: f64,
-    },
-    RMSProp {
-        lr: f64,
-        rho: f64,
-        epsilon: f64,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub enum KernelInitializer {
-    Xavier,
-    HeNormal,
-    Zeros,
-    Ones,
-    RandomNormal(f64), // standart sapma
-}
-
-#[derive(Debug, Clone)]
-pub enum KatmanTipi {
-    Yogun,
-    Evrisimli {
-        filtre_sayisi: i64,
-        filtre_boyutu: (i64, i64),
-        adim: (i64, i64),
-        padding: String, // "same" veya "valid"
-    },
-    Havuzlama {
-        boyut: (i64, i64),
-        adim: (i64, i64),
-        tip: String, // "max" veya "average"
-    },
-    DropOut(f64),
-    BatchNormalization,
-    RNN {
-        gizli_boyut: i64,
-        bidirectional: bool,
-    },
-    LSTM {
-        gizli_boyut: i64,
-        bidirectional: bool,
-    },
-    GRU {
-        gizli_boyut: i64,
-        bidirectional: bool,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct KatmanOzellikleri {
-    pub katman_tipi: KatmanTipi,
-    pub noron_sayisi: i64,
-    pub aktivasyon: AktivasyonFonksiyonu,
-    pub kernel_initializer: Option<KernelInitializer>,
-    pub bias_initializer: Option<KernelInitializer>,
-    pub dropout_rate: Option<f64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModelOzellikleri {
-    pub katmanlar: Vec<KatmanOzellikleri>,
-    pub optimizer: OptimizerTipi,
-    pub kayip_fonksiyonu: KayipFonksiyonu,
-    pub batch_boyutu: i64,
-    pub epoch_sayisi: i64,
-    pub metrikler: Option<Vec<String>>,
-    pub erken_durdurma: Option<i64>, // sabır değeri (patience)
-}
-
-#[derive(Debug, Clone)]
+/// İfade
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Ifade {
-    Sayi(i64),
-    OndalikSayi(f64),  // Ondalık sayı desteği
+    /// Sayı
+    Sayi(f64),
+    /// Metin
     Metin(String),
-    Mantiksal(bool),
+    /// Değişken
     Degisken(String),
-    Dizi(Vec<Ifade>),
-    Liste(Vec<Ifade>),
-    Parantez(Box<Ifade>),
-    NoktaNotasyonu {
-        nesne: Box<Ifade>,
-        ozellik: String,
+    /// İkili işlem
+    Binary {
+        /// Operatör
+        op: Operator,
+        /// Sol ifade
+        left: Box<Ifade>,
+        /// Sağ ifade
+        right: Box<Ifade>,
     },
-    FonksiyonCagrisi {
-        fonksiyon: Box<Ifade>,
+    /// Tekli işlem
+    Unary {
+        /// Operatör
+        op: Operator,
+        /// İfade
+        expr: Box<Ifade>,
+    },
+    /// Fonksiyon çağrısı
+    FonksiyonCagir {
+        /// Fonksiyon ismi
+        isim: String,
+        /// Argümanlar
         argumanlar: Vec<Ifade>,
     },
-    IkiliIslem {
-        sol: Box<Ifade>,
-        operator: Operator,
-        sag: Box<Ifade>,
+    /// Dizi
+    Dizi(Vec<Ifade>),
+    /// Sözlük
+    Sozluk(Vec<(String, Ifade)>),
+    /// Koşul
+    Kosul {
+        /// Koşul
+        kosul: Box<Ifade>,
+        /// Doğru durum
+        dogru: Box<Ifade>,
+        /// Yanlış durum
+        yanlis: Box<Ifade>,
     },
-    KarsilastirmaIfadesi {
-        sol: Box<Ifade>,
-        operator: KarsilastirmaOperator,
-        sag: Box<Ifade>,
+    /// Döngü
+    Dongu {
+        /// Başlangıç
+        baslangic: Box<Ifade>,
+        /// Koşul
+        kosul: Box<Ifade>,
+        /// Adım
+        adim: Box<Ifade>,
+        /// Gövde
+        gövde: Box<Ifade>,
     },
-    MantiksalIfade {
-        sol: Box<Ifade>,
-        operator: MantiksalOperator,
-        sag: Box<Ifade>,
-    },
-    IstatistikselIslem {
-        islem_tipi: IstatistikselIslemTipi,
-        veri: Box<Ifade>,
-    },
-    DiziErisim {
+    /// İçin döngüsü
+    IcinDongu {
+        /// Değişken
+        degisken: String,
+        /// Dizi
         dizi: Box<Ifade>,
-        indeks: Box<Ifade>,
+        /// Gövde
+        gövde: Box<Ifade>,
     },
-    MatrisOlustur { satirlar: Vec<Vec<Ifade>> },
-    DiziOlusturucu { baslangic: Box<Ifade>, bitis: Box<Ifade>, artis: Option<Box<Ifade>> },
-    ModelOlustur {
+    /// Döndür
+    Dondur(Box<Ifade>),
+    /// Kes
+    Kes,
+    /// Devam
+    Devam,
+    /// Boş
+    Bos,
+}
+
+/// Deyim
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Deyim {
+    /// İfade
+    Ifade(Ifade),
+    /// Atama
+    Atama {
+        /// İsim
+        isim: String,
+        /// Değer
+        deger: Ifade,
+    },
+    /// Veri tanımı
+    VeriTanimi {
+        /// İsim
+        isim: String,
+        /// Değer
+        deger: Box<Ifade>,
+    },
+    /// Model tanımı
+    ModelTanimi {
+        /// İsim
+        isim: String,
+        /// Özellikler
         ozellikler: ModelOzellikleri,
     },
-    MatrisIslem {
-        sol: Box<Ifade>,
-        operator: MatrisOperator,
-        sag: Box<Ifade>,
+    /// Eğit
+    Egit {
+        /// Model
+        model: String,
+        /// Veri
+        veri: String,
+        /// Hedef
+        hedef: String,
+        /// Batch boyutu
+        batch_boyutu: i64,
+        /// Epoch sayısı
+        epoch_sayisi: i64,
+        /// Metrikler
+        metrikler: Option<Vec<String>>,
+        /// Erken durdurma
+        erken_durdurma: Option<i64>,
     },
-    VeriYukleme {
-        dosya_yolu: String,
-        format: Option<String>,   // "csv", "json", "npz" gibi
+    /// Tahmin
+    Tahmin {
+        /// Model
+        model: String,
+        /// Veri
+        veri: String,
     },
-    VeriBolme {
-        veri: Box<Ifade>,
-        oran: f64,
-        karistir: bool,
+    /// Eğer
+    Eger {
+        /// Koşul
+        kosul: Ifade,
+        /// Doğru durum
+        dogru: Vec<Deyim>,
+        /// Yanlış durum
+        yanlis: Option<Vec<Deyim>>,
     },
-    VeriOnIsleme {
-        veri: Box<Ifade>,
-        islem_tipi: String,  // "normallestir", "standartlastir", "one_hot" gibi
-        parametreler: Option<Vec<Ifade>>,
+    /// Döngü
+    Dongu {
+        /// Koşul
+        kosul: Ifade,
+        /// Gövde
+        gövde: Vec<Deyim>,
     },
-    Lambda {
+    /// İçin döngüsü
+    IcinDongu {
+        /// Değişken
+        degisken: String,
+        /// Dizi
+        dizi: Ifade,
+        /// Gövde
+        gövde: Vec<Deyim>,
+    },
+    /// Döndür
+    Dondur(Ifade),
+    /// Fonksiyon tanımı
+    FonksiyonTanimi {
+        /// İsim
+        isim: String,
+        /// Parametreler
         parametreler: Vec<String>,
-        govde: Box<Ifade>,
+        /// Gövde
+        gövde: Vec<Deyim>,
     },
 }
 
-#[derive(Debug, Clone)]
-pub enum Deyim {
-    DegiskenTanimi { isim: String, deger: Ifade },
-    IfadeDeyimi(Ifade),
-    EgerDeyimi { kosul: Ifade, govde: Box<Vec<Deyim>>, degilse_govde: Option<Box<Vec<Deyim>>> },
-    DonguDeyimi { kosul: Ifade, govde: Box<Vec<Deyim>> },
-    IcinDongusu { degisken: String, dizi: Ifade, govde: Box<Vec<Deyim>> },
-    KirDeyimi,
-    DevamDeyimi,
-    DondurDeyimi(Ifade),
-    FonksiyonTanimi { isim: String, parametreler: Vec<String>, govde: Box<Vec<Deyim>> },
-    Blok(Vec<Deyim>),
-    ModelTanimi { isim: String, ozellikler: ModelOzellikleri },
-    ModelEgitimi { model: String, egitim_verisi: Ifade, etiketler: Ifade },
-    Tahmin { model: String, girdi: Ifade },
-    Atama { isim: String, deger: Ifade },
-    Ifade(Ifade),
-    VeriTanimi { isim: String, deger: Box<Ifade> },
-    Egitim { model: String, x_train: Box<Ifade>, y_train: Box<Ifade> },
-    ModelKaydetme { model: String, dosya_yolu: String },
-    ModelYukleme { isim: String, dosya_yolu: String },
-    ModelDegerlendirme { model: String, test_verisi: Ifade, test_etiketleri: Ifade },
-    ModelOzeti { model: String },
-    VeriGorsellestirme { veri: Ifade, grafik_tipi: String, baslik: Option<String> },
-    ImportDeyimi { modul: String, as_isim: Option<String> },
-    TryCatch { try_govde: Box<Vec<Deyim>>, catch_degisken: String, catch_govde: Box<Vec<Deyim>> },
-    LambdaTanimi { isim: String, lambda: Ifade },
+/// Katman tipi
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum KatmanTipi {
+    /// Yoğun katman
+    Dense,
+    /// Evrişimli katman
+    Conv2D,
+    /// Maksimum havuzlama katmanı
+    MaxPool2D,
+    /// Düzleştirme katmanı
+    Flatten,
 }
 
-#[derive(Debug, Clone)]
+/// Katman özellikleri
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KatmanOzellikleri {
+    /// Katman tipi
+    pub tip: KatmanTipi,
+    /// Birim sayısı
+    pub birimler: Option<i64>,
+    /// Aktivasyon fonksiyonu
+    pub aktivasyon: Option<String>,
+    /// Kernel boyutu
+    pub kernel_boyutu: Option<i64>,
+    /// Stride
+    pub strides: Option<i64>,
+    /// Padding
+    pub padding: Option<String>,
+    /// Dropout oranı
+    pub dropout: Option<f64>,
+}
+
+/// Aktivasyon
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Aktivasyon {
+    /// ReLU
+    ReLU,
+    /// Sigmoid
+    Sigmoid,
+    /// Tanh
+    Tanh,
+    /// Softmax
+    Softmax,
+    /// LeakyReLU
+    LeakyReLU(f64),
+    /// Swish
+    Swish,
+    /// Hiçbiri
+    Yok,
+}
+
+/// Optimimizer tipi
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OptimizerTipi {
+    /// SGD
+    SGD {
+        /// Öğrenme oranı
+        lr: f64,
+        /// Momentum
+        momentum: Option<f64>,
+        /// Nesterov
+        nesterov: Option<bool>,
+    },
+    /// Adam
+    Adam {
+        /// Öğrenme oranı
+        lr: f64,
+        /// Beta1
+        beta1: Option<f64>,
+        /// Beta2
+        beta2: Option<f64>,
+        /// Epsilon
+        epsilon: Option<f64>,
+    },
+    /// AdamW
+    AdamW {
+        /// Öğrenme oranı
+        lr: f64,
+        /// Beta1
+        beta1: Option<f64>,
+        /// Beta2
+        beta2: Option<f64>,
+        /// Epsilon
+        epsilon: Option<f64>,
+        /// Weight decay
+        weight_decay: Option<f64>,
+    },
+    /// RMSProp
+    RMSProp {
+        /// Öğrenme oranı
+        lr: f64,
+        /// Rho
+        rho: Option<f64>,
+        /// Epsilon
+        epsilon: Option<f64>,
+    },
+}
+
+/// Kayıp fonksiyonu
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum KayipFonksiyonu {
+    /// MSE
+    MSE,
+    /// MAE
+    MAE,
+    /// Categorical Cross Entropy
+    CrossEntropy,
+    /// Binary Cross Entropy
+    BinaryCrossEntropy,
+    /// Huber Loss
+    HuberLoss(f64),
+}
+
+/// Model özellikleri
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelOzellikleri {
+    /// Katmanlar
+    pub katmanlar: Vec<Katman>,
+    /// Optimizer
+    pub optimizer: OptimizerTipi,
+    /// Kayıp fonksiyonu
+    pub kayip_fonksiyonu: KayipFonksiyonu,
+    /// Batch boyutu
+    pub batch_boyutu: usize,
+    /// Epoch sayısı
+    pub epoch_sayisi: usize,
+    /// Erken durdurma
+    pub erken_durdurma: Option<bool>,
+    /// Metrikler
+    pub metrikler: Option<Vec<Metrik>>,
+}
+
+impl ModelOzellikleri {
+    /// Yeni bir model özellikleri
+    pub fn new() -> Self {
+        Self {
+            katmanlar: Vec::new(),
+            kayip_fonksiyonu: KayipFonksiyonu::MSE,
+            optimizer: OptimizerTipi::SGD {
+                lr: 0.01,
+                momentum: None,
+                nesterov: None,
+            },
+            batch_boyutu: 32,
+            epoch_sayisi: 10,
+            erken_durdurma: None,
+            metrikler: Some(vec![Metrik::Accuracy]),
+        }
+    }
+}
+
+/// Program
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Program {
+    /// Deyimler
     pub deyimler: Vec<Deyim>,
 }
 
-#[derive(Debug, Clone)]
-pub enum MatrisOperator {
-    Carpim,     // @
-    NoktaCarpim, // .
-    Transpoze,   // ~
-}
-
-#[derive(Debug, Clone)]
-pub struct YapayZekaModeli {
-    pub ozellikler: ModelOzellikleri,
-    pub egitilmis: bool,
-    pub egitim_metrikleri: Option<Vec<(String, f64)>>,
-}
-
-use crate::{Result, TurkError};
-use ndarray::Array2;
-
-#[derive(Debug, Clone)]
-pub enum DegerTipi {
-    Sayi(f32),
-    Metin(String),
-    Mantiksal(bool),
-    Dizi(Vec<DegerTipi>),
-    Model(ModelOzellikleri),
-    Birim,
-    VeriKumesi {
-        x: Array2<f32>,
-        y: Option<Array2<f32>>,
-        oznitelik_isimleri: Option<Vec<String>>,
-        sinif_isimleri: Option<Vec<String>>,
-    },
-}
-
-impl DegerTipi {
-    pub fn to_array(&self) -> Result<Array2<f32>> {
+impl fmt::Display for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            DegerTipi::Dizi(elemanlar) => {
-                // İlk boyutu bulalım (satır sayısı)
-                let satir_sayisi = elemanlar.len();
-                if satir_sayisi == 0 {
-                    return Err(TurkError::TypeError("Boş dizi Array2'ye dönüştürülemez".to_string()));
-                }
-                
-                // Düz bir dizi mi yoksa iki boyutlu bir dizi mi kontrol edelim
-                let is_nested = elemanlar.iter().any(|e| matches!(e, DegerTipi::Dizi(_)));
-                
-                if is_nested {
-                    // İç dizilerin boyutunu kontrol edelim (sütun sayısı)
-                    let mut sutun_sayisi = 0;
-                    let mut data = Vec::new();
-                    
-                    for eleman in elemanlar {
-                        if let DegerTipi::Dizi(ic_dizi) = eleman {
-                            if sutun_sayisi == 0 {
-                                sutun_sayisi = ic_dizi.len();
-                            } else if ic_dizi.len() != sutun_sayisi {
-                                return Err(TurkError::ShapeMismatch(
-                                    format!("İç dizilerin boyutları farklı: beklenen {}, alınan {}", 
-                                            sutun_sayisi, ic_dizi.len())
-                                ));
-                            }
-                            
-                            // İç diziyi düzleştirelim
-                            for ic_eleman in ic_dizi {
-                                if let DegerTipi::Sayi(x) = ic_eleman {
-                                    data.push(*x as f32);
-                                } else {
-                                    return Err(TurkError::TypeError(
-                                        "İç dizi elemanları sayı olmalıdır".to_string()
-                                    ));
-                                }
-                            }
-                        } else {
-                            return Err(TurkError::TypeError(
-                                "Dizi içindeki elemanlar dizi olmalıdır".to_string()
-                            ));
-                        }
+            Operator::Topla => write!(f, "+"),
+            Operator::Cikar => write!(f, "-"),
+            Operator::Carp => write!(f, "*"),
+            Operator::Bol => write!(f, "/"),
+            Operator::Esit => write!(f, "=="),
+            Operator::EsitDegil => write!(f, "!="),
+            Operator::Buyuk => write!(f, ">"),
+            Operator::Kucuk => write!(f, "<"),
+            Operator::BuyukEsit => write!(f, ">="),
+            Operator::KucukEsit => write!(f, "<="),
+            Operator::Ve => write!(f, "&&"),
+            Operator::Veya => write!(f, "||"),
+            Operator::Degil => write!(f, "!"),
+            Operator::Artı => write!(f, "+"),
+            Operator::Eksi => write!(f, "-"),
+        }
+    }
+}
+
+impl fmt::Display for Ifade {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Ifade::Sayi(n) => write!(f, "{}", n),
+            Ifade::Metin(s) => write!(f, "{}", s),
+            Ifade::Degisken(s) => write!(f, "{}", s),
+            Ifade::Binary { op, left, right } => write!(f, "({} {} {})", left, op, right),
+            Ifade::Unary { op, expr } => write!(f, "({} {})", op, expr),
+            Ifade::FonksiyonCagir { isim, argumanlar } => {
+                write!(f, "{}(", isim)?;
+                for (i, arg) in argumanlar.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
                     }
-                    
-                    // (satır, sütun) şeklinde iki boyutlu matris oluştur
-                    let shape = (satir_sayisi, sutun_sayisi);
-                    Array2::from_shape_vec(shape, data)
-                        .map_err(|e| TurkError::ShapeMismatch(format!("Dizi şekli uyumsuzluğu: {}", e)))
-                } else {
-                    // Tek boyutlu diziyi ele alalım (vektör)
-                    let mut data = Vec::new();
-                    
-                    for eleman in elemanlar {
-                        if let DegerTipi::Sayi(x) = eleman {
-                            data.push(*x as f32);
-                        } else {
-                            return Err(TurkError::TypeError(
-                                "Dizi elemanları sayı olmalıdır".to_string()
-                            ));
-                        }
-                    }
-                    
-                    // Tek örnek olarak şekillendir (1, n) formatında
-                    let shape = (1, data.len());
-                    Array2::from_shape_vec(shape, data)
-                        .map_err(|e| TurkError::ShapeMismatch(format!("Dizi şekli uyumsuzluğu: {}", e)))
+                    write!(f, "{}", arg)?;
                 }
+                write!(f, ")")
             }
-            DegerTipi::VeriKumesi { x, .. } => Ok(x.clone()),
-            _ => Err(TurkError::TypeError("Bu değer Array2'ye dönüştürülemez".to_string())),
+            Ifade::Dizi(elemanlar) => {
+                write!(f, "[")?;
+                for (i, eleman) in elemanlar.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", eleman)?;
+                }
+                write!(f, "]")
+            }
+            Ifade::Sozluk(elemanlar) => {
+                write!(f, "{{")?;
+                for (i, (key, value)) in elemanlar.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", key, value)?;
+                }
+                write!(f, "}}")
+            }
+            Ifade::Kosul { kosul, dogru: _, yanlis: _ } => write!(f, "if ({}) {{ ... }} else {{ ... }}", kosul),
+            Ifade::Dongu { baslangic, kosul, adim, gövde: _ } => write!(f, "for ({}; {}; {}) {{ ... }}", baslangic, kosul, adim),
+            Ifade::IcinDongu { degisken, dizi, gövde } => write!(f, "for ({}; {}; {}) {{ ... }}", degisken, dizi, gövde),
+            Ifade::Dondur(ifade) => write!(f, "return {}", ifade),
+            Ifade::Kes => write!(f, "break"),
+            Ifade::Devam => write!(f, "continue"),
+            Ifade::Bos => write!(f, "()"),
+        }
+    }
+}
+
+impl fmt::Display for KatmanTipi {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            KatmanTipi::Dense => write!(f, "Dense"),
+            KatmanTipi::Conv2D => write!(f, "Conv2D"),
+            KatmanTipi::MaxPool2D => write!(f, "MaxPool2D"),
+            KatmanTipi::Flatten => write!(f, "Flatten"),
+        }
+    }
+}
+
+impl fmt::Display for KatmanOzellikleri {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {{", self.tip)?;
+        if let Some(birimler) = self.birimler {
+            write!(f, " birimler: {}", birimler)?;
+        }
+        if let Some(aktivasyon) = &self.aktivasyon {
+            write!(f, ", aktivasyon: {}", aktivasyon)?;
+        }
+        if let Some(kernel) = self.kernel_boyutu {
+            write!(f, ", kernel_boyutu: {}", kernel)?;
+        }
+        if let Some(strides) = self.strides {
+            write!(f, ", strides: {}", strides)?;
+        }
+        if let Some(padding) = &self.padding {
+            write!(f, ", padding: {}", padding)?;
+        }
+        if let Some(dropout) = self.dropout {
+            write!(f, ", dropout: {}", dropout)?;
+        }
+        write!(f, " }}")
+    }
+}
+
+impl fmt::Display for OptimizerTipi {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            OptimizerTipi::SGD { lr, momentum, nesterov } => 
+                write!(f, "SGD(lr={}, momentum={:?}, nesterov={:?})", lr, momentum, nesterov),
+            OptimizerTipi::Adam { lr, beta1, beta2, epsilon } => 
+                write!(f, "Adam(lr={}, beta1={:?}, beta2={:?}, epsilon={:?})", lr, beta1, beta2, epsilon),
+            OptimizerTipi::AdamW { lr, weight_decay, beta1, beta2, epsilon } => 
+                write!(f, "AdamW(lr={}, weight_decay={:?}, beta1={:?}, beta2={:?}, epsilon={:?})", 
+                       lr, weight_decay, beta1, beta2, epsilon),
+            OptimizerTipi::RMSProp { lr, rho, epsilon } => 
+                write!(f, "RMSProp(lr={}, rho={:?}, epsilon={:?})", lr, rho, epsilon),
+        }
+    }
+}
+
+impl fmt::Display for KayipFonksiyonu {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            KayipFonksiyonu::MSE => write!(f, "mse"),
+            KayipFonksiyonu::MAE => write!(f, "mae"),
+            KayipFonksiyonu::CrossEntropy => write!(f, "cross_entropy"),
+            KayipFonksiyonu::BinaryCrossEntropy => write!(f, "binary_cross_entropy"),
+            KayipFonksiyonu::HuberLoss(delta) => write!(f, "huber_loss({})", delta),
+        }
+    }
+}
+
+/// Model
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Model {
+    pub ozellikler: ModelOzellikleri,
+}
+
+impl Model {
+    /// Yeni bir model
+    pub fn new(ozellikler: ModelOzellikleri) -> Self {
+        Self {
+            ozellikler,
         }
     }
     
-    pub fn tip_adi(&self) -> &'static str {
-        match self {
-            DegerTipi::Sayi(_) => "Sayi",
-            DegerTipi::Metin(_) => "Metin",
-            DegerTipi::Mantiksal(_) => "Mantiksal",
-            DegerTipi::Dizi(_) => "Dizi",
-            DegerTipi::Model(_) => "Model",
-            DegerTipi::Birim => "Birim",
-            DegerTipi::VeriKumesi { .. } => "VeriKumesi",
+    /// Katman ekle
+    pub fn katman_ekle(&mut self, katman: Katman) {
+        self.ozellikler.katmanlar.push(katman);
+    }
+    
+    /// Modeli eğitir
+    pub fn egit(
+        &self,
+        _x: &ArrayView2<f64>,
+        _y: &ArrayView2<f64>,
+        _epochs: usize,
+        _batch_size: usize,
+        _opt: Option<&str>
+    ) -> Result<Vec<(f64, Option<f64>)>, TurkError> {
+        // Eğitim implementasyonu
+        Ok(Vec::new())
+    }
+    
+    /// Tahmin
+    pub fn tahmin(&self, _x: &ArrayView2<f64>) -> Result<Array2<f64>, TurkError> {
+        // Tahmin implementasyonu
+        Ok(Array2::zeros((1, 1)))
+    }
+    
+    /// Değerlendirme
+    pub fn degerlendir(
+        &self,
+        _x: &ArrayView2<f64>,
+        _y: &ArrayView2<f64>,
+    ) -> Result<f64, TurkError> {
+        // Değerlendirme implementasyonu
+        Ok(0.0)
+    }
+}
+
+/// Katman
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Katman {
+    /// Yoğun katman
+    Dense {
+        /// Birimler
+        birimler: usize,
+        /// Aktivasyon
+        aktivasyon: Aktivasyon,
+        /// Kernel initializer
+        kernel_initializer: Option<String>,
+        /// Bias initializer
+        bias_initializer: Option<String>,
+    },
+    /// Evrişimli katman
+    Conv2D {
+        /// Filtreler
+        filtreler: usize,
+        /// Kernel boyutu
+        kernel_boyutu: (usize, usize),
+        /// Adımlar
+        strides: (usize, usize),
+        /// Padding
+        padding: String,
+        /// Aktivasyon
+        aktivasyon: Aktivasyon,
+    },
+    /// Maksimum havuzlama katmanı
+    MaxPool2D {
+        /// Havuzlama boyutu
+        havuzlama_boyutu: (usize, usize),
+        /// Adımlar
+        strides: Option<(usize, usize)>,
+        /// Padding
+        padding: String,
+    },
+    /// Düzleştirme katmanı
+    Flatten,
+    /// Dropout katmanı
+    Dropout {
+        /// Oranı
+        orani: f64,
+    },
+    /// Batch normalizasyon katmanı
+    BatchNormalization {
+        /// Momentum
+        momentum: f64,
+        /// Epsilon
+        epsilon: f64,
+    },
+}
+
+/// Metrik
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Metrik {
+    /// Doğruluk
+    Accuracy,
+    /// Precision
+    Precision,
+    /// Recall
+    Recall,
+    /// F1 Score
+    F1Score,
+    /// AUC
+    AUC,
+}
+
+/// Model Sayı
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSayi {
+    /// Optimizer
+    pub optimizer: OptimizerTipi,
+    /// Kayıp fonksiyonu
+    pub kayip_fonksiyonu: KayipFonksiyonu,
+    /// Metrikler
+    #[serde(default)]
+    pub metrikler: Option<Vec<Metrik>>,
+}
+
+impl ModelSayi {
+    /// Yeni bir model sayısı
+    pub fn new() -> Self {
+        Self {
+            kayip_fonksiyonu: KayipFonksiyonu::MSE,
+            optimizer: OptimizerTipi::SGD {
+                lr: 0.01,
+                momentum: None,
+                nesterov: None,
+            },
+            metrikler: Some(vec![Metrik::Accuracy]),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Statement {
+    Model(ModelStatement),
+    Function(FunctionStatement),
+    If(IfStatement),
+    While(WhileStatement),
+    Return(ReturnStatement),
+    Train(TrainStatement),
+    Predict(PredictStatement),
+    Expression(ExpressionStatement),
+    Block(BlockStatement),
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelStatement {
+    pub name: String,
+    pub layers: Vec<LayerStatement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LayerStatement {
+    pub layer_type: String,
+    pub properties: HashMap<String, Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionStatement {
+    pub name: String,
+    pub parameters: Vec<Token>,
+    pub body: BlockStatement,
+}
+
+#[derive(Debug, Clone)]
+pub struct IfStatement {
+    pub condition: Expression,
+    pub then_branch: Box<Statement>,
+    pub else_branch: Option<Box<Statement>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WhileStatement {
+    pub condition: Expression,
+    pub body: Box<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReturnStatement {
+    pub keyword: Token,
+    pub value: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct TrainStatement {
+    pub model_name: String,
+    pub properties: HashMap<String, Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PredictStatement {
+    pub model_name: String,
+    pub input: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpressionStatement {
+    pub expression: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockStatement {
+    pub statements: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    Assign(AssignExpression),
+    Binary(BinaryExpression),
+    Unary(UnaryExpression),
+    Logical(LogicalExpression),
+    Grouping(GroupingExpression),
+    Literal(Literal),
+    Variable(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct AssignExpression {
+    pub name: String,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinaryExpression {
+    pub left: Box<Expression>,
+    pub operator: Token,
+    pub right: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnaryExpression {
+    pub operator: Token,
+    pub right: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogicalExpression {
+    pub left: Box<Expression>,
+    pub operator: Token,
+    pub right: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupingExpression {
+    pub expression: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Literal {
+    Number(f64),
+    String(String),
+    Boolean(bool),
+    Nil,
+}
+
+impl Expression {
+    pub fn accept<T>(&self, visitor: &mut dyn ExpressionVisitor<T>) -> T {
+        match self {
+            Expression::Assign(expr) => visitor.visit_assign(expr),
+            Expression::Binary(expr) => visitor.visit_binary(expr),
+            Expression::Unary(expr) => visitor.visit_unary(expr),
+            Expression::Logical(expr) => visitor.visit_logical(expr),
+            Expression::Grouping(expr) => visitor.visit_grouping(expr),
+            Expression::Literal(lit) => visitor.visit_literal(lit),
+            Expression::Variable(name) => visitor.visit_variable(name),
+        }
+    }
+}
+
+pub trait ExpressionVisitor<T> {
+    fn visit_assign(&mut self, expr: &AssignExpression) -> T;
+    fn visit_binary(&mut self, expr: &BinaryExpression) -> T;
+    fn visit_unary(&mut self, expr: &UnaryExpression) -> T;
+    fn visit_logical(&mut self, expr: &LogicalExpression) -> T;
+    fn visit_grouping(&mut self, expr: &GroupingExpression) -> T;
+    fn visit_literal(&mut self, lit: &Literal) -> T;
+    fn visit_variable(&mut self, name: &String) -> T;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_expression_visitor() {
+        struct TestVisitor;
+        
+        impl ExpressionVisitor<String> for TestVisitor {
+            fn visit_assign(&mut self, expr: &AssignExpression) -> String {
+                format!("{} = {}", expr.name, expr.value.accept(self))
+            }
+            
+            fn visit_binary(&mut self, expr: &BinaryExpression) -> String {
+                format!(
+                    "({} {} {})",
+                    expr.left.accept(self),
+                    expr.operator,
+                    expr.right.accept(self)
+                )
+            }
+            
+            fn visit_unary(&mut self, expr: &UnaryExpression) -> String {
+                format!("({}{})", expr.operator, expr.right.accept(self))
+            }
+            
+            fn visit_logical(&mut self, expr: &LogicalExpression) -> String {
+                format!(
+                    "({} {} {})",
+                    expr.left.accept(self),
+                    expr.operator,
+                    expr.right.accept(self)
+                )
+            }
+            
+            fn visit_grouping(&mut self, expr: &GroupingExpression) -> String {
+                format!("({})", expr.expression.accept(self))
+            }
+            
+            fn visit_literal(&mut self, lit: &Literal) -> String {
+                match lit {
+                    Literal::Number(n) => n.to_string(),
+                    Literal::String(s) => s.clone(),
+                    Literal::Boolean(b) => b.to_string(),
+                    Literal::Nil => "nil".to_string(),
+                }
+            }
+            
+            fn visit_variable(&mut self, name: &String) -> String {
+                name.clone()
+            }
+        }
+        
+        let expr = Expression::Binary(BinaryExpression {
+            left: Box::new(Expression::Literal(Literal::Number(1.0))),
+            operator: Token::Add,
+            right: Box::new(Expression::Literal(Literal::Number(2.0))),
+        });
+        
+        let mut visitor = TestVisitor;
+        assert_eq!(expr.accept(&mut visitor), "(1 + 2)");
     }
 } 

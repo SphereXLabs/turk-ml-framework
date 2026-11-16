@@ -1,0 +1,120 @@
+// Transformer Tabanlı Metin Sınıflandırıcı
+//
+// Bu model, Türkçe metinleri kategorilere ayırmak için basit bir Transformer 
+// mimarisi kullanır. Bu örnek, haber metinlerini kategorilere (spor, ekonomi, 
+// siyaset, teknoloji, kültür) sınıflandırır.
+//
+// Kullanım:
+//   cargo run --bin turk-cli examples/model_zoo/transformer_siniflandirici.turk
+
+// Veri setini tanımla
+VeriSeti haber_veri {
+    Kaynak = "https://storage.googleapis.com/turk-ml-data/text/haberler.csv"
+    EgitimOrani = 0.8
+    ValidasyonOrani = 0.1
+    TestOrani = 0.1
+    MaxKelime = 10000  // En sık kullanılan 10000 kelime
+    MaxUzunluk = 256   // Her metin için maksimum 256 token
+}
+
+// Veri ön işleme
+Tokenizasyon = Tokenize(haber_veri.metinler, 
+    MaxKelime = 10000, 
+    MaxUzunluk = 256, 
+    PadUzunluk = 256, 
+    OovToken = "<OOV>"
+)
+
+// Model tanımı
+Model TransformerSiniflandirici {
+    // Gömme katmanı
+    Gomme(10000, 128)  // 10000 kelime, 128 boyutlu gömme
+    
+    // Positional encoding
+    PositionalEncoding()
+    
+    // Transformer blokları
+    TransformerEncoder(
+        BaskSayisi = 8,         // Multi-head attention başlık sayısı
+        GizliBoyut = 512,       // Feed-forward ağ gizli boyutu
+        Dropout = 0.1,
+        Aktivasyon = "gelu"
+    )
+    
+    TransformerEncoder(
+        BaskSayisi = 8,
+        GizliBoyut = 512,
+        Dropout = 0.1,
+        Aktivasyon = "gelu"
+    )
+    
+    // Global pool katmanı
+    GlobalAveragePooling()
+    
+    // Sınıflandırma katmanları
+    Katman(128, Aktivasyon=Relu)
+    Dropout(0.2)
+    Katman(5, Aktivasyon=Softmax)  // 5 kategori
+    
+    // Eğitim parametreleri
+    Optimizer = Adam(ogrenme_orani=0.001, beta1=0.9, beta2=0.999)
+    Kayip = "categorical_crossentropy"
+    Metrikler = ["dogruluk", "precision", "recall", "f1"]
+    Batch = 32
+    Epoch = 10
+    
+    // Erken durdurma ve learning rate scheduler
+    ErkenDurdurma = 3  // 3 epoch boyunca gelişme olmazsa durdur
+    OgrenmeOraniAzaltma = {
+        Faktör = 0.5,
+        Sabir = 2,
+        MinOran = 0.0001
+    }
+}
+
+// Eğitim yap
+Egit(TransformerSiniflandirici, 
+    Tokenizasyon.x_train, 
+    haber_veri.egitim_y,
+    ValidasyonVerisi = (Tokenizasyon.x_val, haber_veri.val_y)
+)
+
+// Modeli değerlendir
+Sonuclar = Degerlendir(TransformerSiniflandirici, 
+    Tokenizasyon.x_test, 
+    haber_veri.test_y
+)
+
+Yazdir("Test sonuçları:", Sonuclar)
+
+// Confusion matrix oluştur
+MatrisGorsellestir(
+    Baslik = "Haber Kategorileri Confusion Matrix",
+    Matris = ConfusionMatrix(
+        TransformerSiniflandirici, 
+        Tokenizastion.x_test, 
+        haber_veri.test_y
+    ),
+    Etiketler = ["spor", "ekonomi", "siyaset", "teknoloji", "kültür"]
+)
+
+// Örnek bir metni sınıflandır
+OrnekMetin = "Merkez Bankası, enflasyon tahminlerini aşağı yönlü revize etti. Bu yıl için enflasyon beklentisi yüzde 36'dan yüzde 33'e düşürüldü. Gelecek yıl için enflasyon hedefi yüzde 14 olarak korundu."
+
+OrnekMetinTokenleri = Tokenize(OrnekMetin, 
+    KelimeSozlugu = Tokenizasyon.kelime_sozlugu, 
+    MaxUzunluk = 256, 
+    Padding = "post"
+)
+
+TahminSonucu = Tahmin(TransformerSiniflandirici, OrnekMetinTokenleri)
+
+Yazdir("Örnek metin:", OrnekMetin)
+Yazdir("Tahmin:", TahminSonucu)
+Yazdir("Kategori:", ["spor", "ekonomi", "siyaset", "teknoloji", "kültür"][ArgMax(TahminSonucu)])
+
+// Modeli kaydet
+Kaydet(TransformerSiniflandirici, "transformer_siniflandirici.turk")
+
+// ONNX formatında dışa aktar
+Kaydet(TransformerSiniflandirici, "transformer_siniflandirici.onnx", format="onnx") 

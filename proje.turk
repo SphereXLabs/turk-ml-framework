@@ -1,0 +1,28 @@
+# ══════════════════════════════════════════════════════
+#  TÜRK — XOR Sınıflandırıcı (Gerçek CSV Verisiyle)
+#  Çalıştır: cargo run -- run proje.turk
+# ══════════════════════════════════════════════════════
+
+# 1. CSV verisini yükle (xor_data.csv — x1,x2,label)
+veri_yukle("xor_data.csv", bolme=0.25)
+
+# 2. Modeli oluştur
+model_olustur()
+
+# 3. Katmanları ekle
+katman_ekle(yogun(2, 8, "relu"))
+katman_ekle(batch_norm(8))
+katman_ekle(yogun(8, 4, "relu"))
+katman_ekle(yogun(4, 1, "sigmoid"))
+
+# 4. Derle (Adam optimizer + MSE kayıp)
+derle(adam, loss=mse, ogrenme_orani=0.05)
+
+# 5. Model yapısını göster
+model_bilgisi()
+
+# 6. Gerçek XOR verisiyle eğit (200 epoch, batch 4, erken durdurma)
+egit(200, 4, sabir=15, min_delta=0.0001)
+
+# 7. Kaydet
+kaydet("xor_model.json")

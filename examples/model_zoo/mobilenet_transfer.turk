@@ -1,0 +1,88 @@
+// MobileNet Transfer Learning Örneği
+//
+// Bu model, önceden eğitilmiş MobileNet modelini kullanarak transfer learning yapar.
+// Önceden eğitilmiş modelin ilk 15 katmanı dondurulur ve üzerine yeni katmanlar eklenir.
+// Bu yaklaşım, az veri ile bile yüksek performans elde etmeyi sağlar.
+//
+// Kullanım:
+//   cargo run --bin turk-cli examples/model_zoo/mobilenet_transfer.turk
+
+// Veri setini tanımla
+VeriSeti mobilenet_veri {
+    Kaynak = "https://storage.googleapis.com/turk-ml-data/images/flowers.zip"
+    EgitimOrani = 0.8
+    ValidasyonOrani = 0.1
+    TestOrani = 0.1
+    GorselBoyutu = (224, 224)
+    Normalizasyon = "mobilenet_v2"
+}
+
+// Transfer learning modeli
+Model MobileNetTransfer {
+    // Pre-trained model kaynağı
+    KaynakModel = "mobilenet_v2"
+    // İlk 15 katmanı dondur
+    DondurKatman = 15
+    
+    // Yeni katmanlar ekle
+    Katman(1024, Aktivasyon=Relu)
+    Katman(512, Aktivasyon=Relu)
+    Katman(5, Aktivasyon=Softmax)  // 5 çiçek sınıfı
+    
+    // Optimizer ve eğitim parametreleri
+    Optimizer = AdamW(ogrenme_orani=0.0001, weight_decay=0.01)
+    Kayip = "categorical_crossentropy"
+    Metrikler = ["dogruluk", "precision", "recall"]
+    Batch = 16
+    Epoch = 20
+    
+    // Erken durdurma ve learning rate scheduler
+    ErkenDurdurma = 5  // 5 epoch boyunca gelişme olmazsa durdur
+    OgrenmeOraniAzaltma = {
+        Faktör = 0.1,
+        Sabir = 3,
+        MinOran = 0.00001
+    }
+    
+    // Veri artırma
+    VeriArtirma = {
+        YatayDondurme = Dogru,
+        DikeyDondurme = Yanlis,
+        DondurmeAraligi = (-15, 15),
+        YakinlastirmaAraligi = (0.8, 1.2),
+        ParlaklikAraligi = (0.8, 1.2)
+    }
+}
+
+// Eğitim yap
+Egit(MobileNetTransfer, mobilenet_veri.egitim_x, mobilenet_veri.egitim_y)
+
+// Modeli değerlendir
+Degerlendir(MobileNetTransfer, mobilenet_veri.test_x, mobilenet_veri.test_y)
+
+// Confusion matrix oluştur
+MatrisGorsellestir(
+    Baslik = "MobileNet Transfer Learning Confusion Matrix",
+    Matris = ConfusionMatrix(MobileNetTransfer, mobilenet_veri.test_x, mobilenet_veri.test_y),
+    Etiketler = ["papatya", "karahindiba", "gül", "lale", "ayçiçeği"]
+)
+
+// Bazı test görüntüleri üzerinde tahmin yap
+Ornek = [
+    mobilenet_veri.test_x[0],
+    mobilenet_veri.test_x[10],
+    mobilenet_veri.test_x[20],
+    mobilenet_veri.test_x[30],
+    mobilenet_veri.test_x[40]
+]
+
+TahminSonuclari = Tahmin(MobileNetTransfer, Ornek)
+
+// Sonuçları yazdır ve görselleştir
+Yazdir("Tahmin Sonuçları:", TahminSonuclari)
+
+// Modeli ONNX formatında dışa aktar
+Kaydet(MobileNetTransfer, "mobilenet_transfer.onnx", format="onnx")
+
+// Modeli TensorFlow SavedModel formatında dışa aktar
+Kaydet(MobileNetTransfer, "mobilenet_transfer_tf", format="tensorflow") 

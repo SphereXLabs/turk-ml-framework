@@ -1,0 +1,13 @@
+# TÜRK Model Zoo — XOR Sınıflandırıcı
+# model_indir("xor") sonrası: turk run models/xor/model.turk
+
+veri_yukle("xor_data.csv", bolme=0.25)
+model_olustur()
+katman_ekle(yogun(2, 8, "relu"))
+katman_ekle(batch_norm(8))
+katman_ekle(yogun(8, 4, "relu"))
+katman_ekle(yogun(4, 1, "sigmoid"))
+derle(adam, loss=mse, ogrenme_orani=0.05)
+model_bilgisi()
+egit(200, 4, sabir=15, min_delta=0.0001)
+kaydet("xor_model.json")

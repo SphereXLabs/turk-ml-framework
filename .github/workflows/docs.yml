@@ -1,0 +1,45 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Rust Sürümünü Kur
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    
+    - name: Dokümantasyonu Derle
+      uses: actions-rs/cargo@v1
+      with:
+        command: doc
+        args: --no-deps --all-features
+    
+    - name: İndeks Sayfası Ekle
+      run: |
+        echo '<meta http-equiv="refresh" content="0; url=turk/index.html">' > target/doc/index.html
+    
+    - name: Özel CNAME Oluştur (opsiyonel)
+      run: |
+        echo "docs.turk.dil" > target/doc/CNAME
+    
+    - name: GitHub Pages'e Yükle
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/doc
+        force_orphan: true
+        enable_jekyll: false
+        cname: docs.turk.dil 

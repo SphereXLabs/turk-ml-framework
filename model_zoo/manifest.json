@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "models": [
+    {
+      "id": "xor",
+      "ad": "XOR Sınıflandırıcı",
+      "aciklama": "2 girişli XOR problemi — BatchNorm + erken durdurma",
+      "turk_dosya": "xor/model.turk",
+      "agirlik": null,
+      "veri": "xor/xor_data.csv",
+      "etiketler": ["ornek", "egitim", "kucuk"]
+    },
+    {
+      "id": "mnist_mlp",
+      "ad": "MNIST MLP",
+      "aciklama": "784→128→10 tam bağlantılı MNIST sınıflandırıcı",
+      "turk_dosya": "mnist_mlp/model.turk",
+      "agirlik": null,
+      "veri": null,
+      "etiketler": ["mnist", "mlp", "goruntu"]
+    },
+    {
+      "id": "mnist_cnn",
+      "ad": "MNIST CNN",
+      "aciklama": "Conv2D + MaxPool CNN mimarisi (784 piksel girdi)",
+      "turk_dosya": "mnist_cnn/model.turk",
+      "agirlik": null,
+      "veri": null,
+      "etiketler": ["mnist", "cnn", "goruntu"]
+    }
+  ]
+}

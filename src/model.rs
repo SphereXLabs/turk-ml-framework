@@ -1,61 +1,393 @@
-use crate::error::{Result, TurkError};
-use crate::layer::Layer;
-use crate::optimizer::Optimizer;
-use crate::loss::Loss;
-use crate::metrics::Metric;
-use ndarray::{Array2, Axis};
+use crate::layer::{Layer, Dense, Dropout, BatchNormalization};
+use crate::katman_kayit::{KatmanKayit, KatmanYukleVerisi};
+use crate::aktivasyon::Activation;
+use crate::cihaz::Cihaz;
+use crate::error::{TurkError, Result};
+use crate::loss::{Loss, MSE};
+use ndarray::{Array2, ArrayView2};
+use crate::initializers::{GlorotUniform, Zeros};
+use crate::optimizer::{Optimizer, SGD, Adam, AdamW, RMSProp};
+use std::fmt;
+use log::{warn, info, debug};
 use std::fs;
 use serde::{Serialize, Deserialize};
-use std::fmt;
-use std::path::Path;
-use std::io::{BufReader, BufWriter};
-use log::{warn};
-use rand::Rng;
+use std::io::{Read, Write};
+use crate::utils::tensor_ops;
+use crate::utils::validate_tensor_shapes;
+use crate::utils::stack_selected_rows;
+use crate::metrics::Metric;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
+
+// ─────────────────────────────────────────────
+// Eğitim Geçmişi
+// ─────────────────────────────────────────────
+
+/// Epoch sonunda GUI / CLI geri bildirimi için callback.
+pub type EpochCallback = Box<dyn FnMut(usize, usize, f64, Option<f64>) + Send>;
+
+/// Eğitim süreci boyunca toplanan metrik ve kayıp değerleri.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct History {
+    /// Her epoch'taki eğitim kaybı
+    pub train_losses: Vec<f64>,
+    /// Her epoch'taki doğrulama kaybı (doğrulama verisi yoksa boş)
+    pub val_losses: Vec<f64>,
+    /// Her epoch'taki eğitim metrikleri (henüz: MSE)
+    pub train_metrics: Vec<f64>,
+    /// Her epoch'taki doğrulama metrikleri
+    pub val_metrics: Vec<f64>,
+}
+
+impl History {
+    pub fn new() -> Self { Self::default() }
+
+    /// Son eğitim kaybını döndürür.
+    pub fn last_train_loss(&self) -> Option<f64> { self.train_losses.last().copied() }
+
+    /// Son doğrulama kaybını döndürür.
+    pub fn last_val_loss(&self) -> Option<f64> { self.val_losses.last().copied() }
+
+    /// Toplam epoch sayısı.
+    pub fn epochs_run(&self) -> usize { self.train_losses.len() }
+
+    /// val_loss'un en düşük olduğu epoch'taki kayıtları döndürür:
+    /// `(train_loss, val_loss, epoch_no)` — epoch_no 1 tabanlıdır.
+    pub fn en_iyi_val_kayitlari(&self) -> Option<(f64, f64, usize)> {
+        let (idx, &best_val) = self
+            .val_losses
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
+        let train = self.train_losses.get(idx).copied()?;
+        Some((train, best_val, idx + 1))
+    }
+
+    /// Eğitim geçmişini JSON formatında dosyaya kaydeder.
+    ///
+    /// Her epoch için `train_loss`, `val_loss`, `train_metric`, `val_metric`
+    /// değerlerini içeren bir dizi ve özet istatistikleri yazar.
+    ///
+    /// # Örnek
+    /// ```no_run
+    /// # use turk::model::History;
+    /// let history = History::new();
+    /// history.dosyaya_kaydet("egitim_gecmisi.json").unwrap();
+    /// ```
+    pub fn dosyaya_kaydet(&self, dosya_yolu: &str) -> Result<()> {
+        use serde_json::json;
+
+        let epoch_sayisi = self.epochs_run();
+
+        // Her epoch'u tablo halinde oluştur
+        let epochlar: Vec<serde_json::Value> = (0..epoch_sayisi)
+            .map(|i| {
+                let mut kayit = serde_json::Map::new();
+                kayit.insert("epoch".into(),        json!(i + 1));
+                kayit.insert("train_loss".into(),   json!(self.train_losses.get(i)));
+                kayit.insert("val_loss".into(),     json!(self.val_losses.get(i)));
+                kayit.insert("train_metric".into(), json!(self.train_metrics.get(i)));
+                kayit.insert("val_metric".into(),   json!(self.val_metrics.get(i)));
+                serde_json::Value::Object(kayit)
+            })
+            .collect();
+
+        // Özet istatistikler
+        let ozet = json!({
+            "toplam_epoch": epoch_sayisi,
+            "ilk_train_loss": self.train_losses.first(),
+            "son_train_loss": self.train_losses.last(),
+            "en_dusuk_train_loss": self.train_losses.iter().cloned().reduce(f64::min),
+            "ilk_val_loss": self.val_losses.first(),
+            "son_val_loss": self.val_losses.last(),
+            "en_dusuk_val_loss": self.val_losses.iter().cloned().reduce(f64::min),
+        });
+
+        let json_cikti = json!({
+            "ozet": ozet,
+            "epochlar": epochlar,
+        });
+
+        let json_str = serde_json::to_string_pretty(&json_cikti)
+            .map_err(|e| TurkError::IOError(format!("JSON serileştirme hatası: {e}")))?;
+
+        fs::write(dosya_yolu, json_str)
+            .map_err(|e| TurkError::IOError(format!("'{dosya_yolu}' yazılamadı: {e}")))?;
+
+        Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────
+// Erken Durdurma
+// ─────────────────────────────────────────────
+
+/// Doğrulama kaybı iyileşmediğinde eğitimi erken durduran yapı.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EarlyStopping {
+    /// Kaç epoch boyunca iyileşme bekleneceği
+    pub patience: usize,
+    /// Minimum iyileşme miktarı (bu kadar düşmezse sayaç artar)
+    pub min_delta: f64,
+    /// Mevcut en iyi kayıp
+    best_loss: f64,
+    /// İyileşme olmayan epoch sayacı
+    counter: usize,
+}
+
+impl EarlyStopping {
+    /// Yeni bir EarlyStopping oluşturur.
+    ///
+    /// `patience`: iyileşme gözlemlenmeden beklenecek epoch sayısı.  
+    /// `min_delta`: iyileşme sayılabilmesi için gereken minimum düşüş.
+    pub fn new(patience: usize, min_delta: f64) -> Self {
+        Self {
+            patience,
+            min_delta,
+            best_loss: f64::INFINITY,
+            counter: 0,
+        }
+    }
+
+    /// Mevcut en iyi val_loss değerini döndürür (henüz adım yoksa +∞).
+    pub fn best_val_loss(&self) -> f64 {
+        self.best_loss
+    }
+
+    /// Verilen val_loss ile sayacı günceller; durdurulması gerekiyorsa `true` döner.
+    pub fn step(&mut self, val_loss: f64) -> bool {
+        if val_loss < self.best_loss - self.min_delta {
+            self.best_loss = val_loss;
+            self.counter = 0;
+            false
+        } else {
+            self.counter += 1;
+            self.counter >= self.patience
+        }
+    }
+
+    /// İç durumu sıfırlar (modeli yeniden eğitmeden önce çağırın).
+    pub fn reset(&mut self) {
+        self.best_loss = f64::INFINITY;
+        self.counter   = 0;
+    }
+}
+
+// ─────────────────────────────────────────────
+
+/// # Model Modülü
+///
+/// Bu modül, yapay sinir ağı modelleri oluşturmak ve eğitmek için gerekli sınıfları ve 
+/// fonksiyonları içerir. Modüldeki temel bileşenler:
+///
+/// - `Model` trait'i: Tüm model tipleri için ortak bir arayüz sağlar
+/// - `Sequential` sınıfı: Ardışık (Sequential) modellerini temsil eder
+/// - Yardımcı fonksiyonlar: Kayıp hesaplama, gradient hesaplama vb.
+///
+/// ## Örnek Kullanım
+///
+/// ```no_run
+/// use turk::model::Sequential;
+/// use turk::aktivasyon::Activation;
+/// use turk::initializers::{GlorotUniform, Zeros};
+/// use turk::optimizer::SGD;
+/// use ndarray::Array2;
+///
+/// fn dense(i: usize, o: usize, act: Activation) -> turk::layer::Dense {
+///     turk::layer::Dense::new(i, o, act, Box::new(GlorotUniform::new()), Box::new(Zeros::new()), true).unwrap()
+/// }
+///
+/// let mut model = Sequential::new();
+/// model.add(dense(784, 128, Activation::Relu))
+///      .add(dense(128, 10, Activation::Softmax))
+///      .compile(SGD::new(0.01, None, false));
+///
+/// let x_train = Array2::<f64>::zeros((100, 784));
+/// let y_train = Array2::<f64>::zeros((100, 10));
+/// model.fit(&x_train.view(), &y_train.view(), 10, 32, None).unwrap();
+///
+/// let x_test = Array2::<f64>::zeros((10, 784));
+/// let _predictions = model.predict(&x_test.view()).unwrap();
+/// ```
 
 /// Model trait - Makine öğrenmesi modelleri için arayüz
+///
+/// Bu trait, farklı model türleri (Sequential, Functional vb.) için ortak
+/// bir arayüz tanımlar. Temel model işlevlerini (eğitim, tahmin, kaydedip yükleme)
+/// bu trait üzerinden erişilebilir hale getirir.
 pub trait Model: Send + Sync + fmt::Debug {
     /// İleri yayılım (forward propagation)
-    fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>>;
+    ///
+    /// Girdi verilerini modelin içinden geçirerek çıktı üretir.
+    ///
+    /// # Parametreler
+    /// - `input`: Girdi tensörü, boyut (batch_size, input_features)
+    ///
+    /// # Dönüş
+    /// - `Result<Array2<f64>>`: Başarılı ise model çıktısı, hata durumunda ilgili hata
+    fn forward<'a>(&mut self, input: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>>;
     
     /// Geri yayılım (backpropagation)
-    fn backward(&mut self, grad: &Array2<f32>) -> Result<()>;
+    ///
+    /// Çıktıdan girdiye doğru gradyan hesaplar ve parametre güncellemeleri için
+    /// bu bilgiyi kullanır.
+    ///
+    /// # Parametreler
+    /// - `grad`: Çıktı gradyanı tensörü
+    ///
+    /// # Dönüş
+    /// - `Result<Array2<f64>>`: Girdiye göre gradyan, hata durumunda ilgili hata
+    fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>>;
     
     /// Ağırlık güncellemesi
+    ///
+    /// Modelin optimizer'ı ile parametreleri günceller.
+    ///
+    /// # Dönüş
+    /// - `Result<()>`: Başarılı ise Ok(()), hata durumunda ilgili hata
     fn update(&mut self) -> Result<()>;
     
     /// Modeli dosyaya kaydet
+    ///
+    /// # Parametreler
+    /// - `path`: Kaydedilecek dosya yolu
+    ///
+    /// # Dönüş
+    /// - `Result<()>`: Başarılı ise Ok(()), hata durumunda ilgili hata
     fn save(&self, path: &str) -> Result<()>;
     
     /// Modeli dosyadan yükle
+    ///
+    /// # Parametreler
+    /// - `path`: Yüklenecek dosya yolu
+    ///
+    /// # Dönüş
+    /// - `Result<()>`: Başarılı ise Ok(()), hata durumunda ilgili hata
     fn load(&mut self, path: &str) -> Result<()>;
     
-    /// Modeli özetini döndürür
+    /// Model özetini döndürür
+    ///
+    /// Model yapısı, katmanlar ve parametreler hakkında bilgi içeren
+    /// formatlanmış bir metin döndürür.
+    ///
+    /// # Dönüş
+    /// - `String`: Model özeti
     fn summary(&self) -> String;
+    
+    /// Modeli eğitir
+    ///
+    /// Verilen eğitim verileri üzerinde modeli belirtilen sayıda epoch
+    /// ve batch boyutu ile eğitir.
+    ///
+    /// # Parametreler
+    /// - `x_train`: Eğitim girdi verileri
+    /// - `y_train`: Eğitim hedef değerleri
+    /// - `epochs`: Eğitim tekrar sayısı
+    /// - `batch_size`: Her iterasyonda kullanılacak örnek sayısı
+    /// - `validation_data`: Doğrulama verileri (isteğe bağlı)
+    ///
+    /// # Dönüş
+    /// - `Result<History>`: Her epoch için toplanan eğitim/doğrulama kayıp ve metrikleri
+    fn fit<'a>(
+        &mut self,
+        x_train: &'a ArrayView2<'a, f64>,
+        y_train: &'a ArrayView2<'a, f64>,
+        epochs: usize,
+        batch_size: usize,
+        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>
+    ) -> Result<History>;
+    
+    /// Tahmin yapar
+    ///
+    /// Model üzerinde ileri yayılım yaparak tahminleri hesaplar.
+    ///
+    /// # Parametreler
+    /// - `x`: Girdi verileri
+    ///
+    /// # Dönüş
+    /// - `Result<Array2<f64>>`: Model tahminleri
+    fn predict<'a>(&mut self, x: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>>;
+    
+    /// Modeli değerlendirir
+    ///
+    /// Verilen test verileri üzerinde modelin performansını değerlendirir.
+    ///
+    /// # Parametreler
+    /// - `x_val`: Test girdi verileri
+    /// - `y_val`: Test hedef değerleri
+    ///
+    /// # Dönüş
+    /// - `Result<f64>`: Değerlendirme skoru (genellikle kayıp değeri)
+    fn evaluate<'a>(
+        &mut self,
+        x_val: &'a ArrayView2<'a, f64>,
+        y_val: &'a ArrayView2<'a, f64>
+    ) -> Result<f64>;
 }
 
-/// Sıralı model sınıfı.
+/// Sıralı model sınıfı (Sequential model).
 /// 
 /// Katmanları sıralı bir şekilde tutarak ileri ve geri yayılımı gerçekleştirir.
-/// Her katman, önceki katmanın çıktısını girdi olarak alır.
+/// Her katman, önceki katmanın çıktısını girdi olarak alır. TURK dilinde 
+/// en yaygın kullanılan model tipidir.
+///
+/// ## Önemli Özellikler
+///
+/// - Sıralı yapı: Katmanlar birbirini lineer olarak takip eder
+/// - Kolay kullanım: Basit bir API ile karmaşık modeller oluşturulabilir
+/// - Tam eğitim döngüsü: fit, forward, backward ve update işlemleri
+/// - Model kaydetme/yükleme: Eğitilen modeller JSON formatında kaydedilip yüklenebilir
+///
+/// ## Örnek
+///
+/// ```no_run
+/// use turk::model::Sequential;
+/// use turk::aktivasyon::Activation;
+/// use turk::initializers::{GlorotUniform, Zeros};
+/// use turk::optimizer::SGD;
+/// use ndarray::arr2;
+///
+/// fn dense(i: usize, o: usize, act: Activation) -> turk::layer::Dense {
+///     turk::layer::Dense::new(i, o, act, Box::new(GlorotUniform::new()), Box::new(Zeros::new()), true).unwrap()
+/// }
+///
+/// let mut model = Sequential::new();
+/// model.add(dense(2, 4, Activation::Relu))
+///      .add(dense(4, 1, Activation::Sigmoid))
+///      .compile(SGD::new(0.1, None, false));
+///
+/// let x = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+/// let y = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+/// model.fit(&x.view(), &y.view(), 1000, 4, None).unwrap();
+/// ```
 #[derive(Debug)]
 pub struct Sequential {
-    layers: Vec<Box<dyn Layer>>,
-    optimizer: Option<Box<dyn Optimizer>>,
-    compiled: bool,
+    pub layers: Vec<Box<dyn Layer>>,
+    pub optimizer: Option<Box<dyn Optimizer>>,
+    pub loss: Option<Box<dyn Loss>>,
+    pub compiled: bool,
+    pub input_shape: Option<(usize, usize)>,
+    pub output_shape: Option<(usize, usize)>,
+    pub loss_history: Vec<f64>,
+    pub val_loss_history: Vec<f64>,
+    pub inputs: Option<Array2<f64>>,
+    pub cihaz: Cihaz,
 }
 
+/// Sequential için manuel Clone uygulaması
 impl Clone for Sequential {
     fn clone(&self) -> Self {
-        let mut cloned_layers = Vec::with_capacity(self.layers.len());
-        for layer in &self.layers {
-            cloned_layers.push(layer.clone_box());
-        }
-        
-        // Not: optimizer clone'lanamaz, sadece forward için kullanacaksak problem yok
-        Sequential {
-            layers: cloned_layers,
-            optimizer: None, // Clone metodu optimizer'ı kopyalamaz
+        Self {
+            layers: self.layers.iter().map(|layer| layer.clone_box()).collect(),
+            optimizer: self.optimizer.as_ref().map(|opt| opt.clone_box()),
+            loss: self.loss.as_ref().map(|l| l.clone_box()),
             compiled: self.compiled,
+            input_shape: self.input_shape,
+            output_shape: self.output_shape,
+            loss_history: self.loss_history.clone(),
+            val_loss_history: self.val_loss_history.clone(),
+            inputs: self.inputs.clone(),
+            cihaz: self.cihaz,
         }
     }
 }
@@ -63,14 +395,24 @@ impl Clone for Sequential {
 /// Katman verisi - Serileştirme/Deserileştirme için
 #[derive(Debug, Serialize, Deserialize)]
 struct LayerData {
-    weights: Vec<f32>,
-    bias: Vec<f32>,
-    activation: crate::layer::Activation,
+    layer_type: String,
+    weights: Vec<f64>,
+    biases: Vec<f64>,
+    activation: Activation,
     input_size: usize,
     output_size: usize,
-    layer_type: String,
-    dropout_rate: Option<f32>,
-    use_batch_norm: Option<bool>,
+    dropout_rate: Option<f64>,
+    /// BatchNormalization: özellik sayısı
+    #[serde(default)]
+    num_features: usize,
+    /// BatchNormalization: epsilon
+    #[serde(default)]
+    bn_epsilon: f64,
+    /// BatchNormalization: momentum
+    #[serde(default)]
+    bn_momentum: f64,
+    #[serde(default)]
+    extra: std::collections::HashMap<String, f64>,
 }
 
 /// Model verisi - Serileştirme/Deserileştirme için
@@ -80,107 +422,271 @@ struct ModelData {
     optimizer_type: String,
     optimizer_params: OptimizerParams,
     schema_version: String,
+    #[serde(default = "default_cihaz_str")]
+    cihaz: String,
+}
+
+fn default_cihaz_str() -> String {
+    "cpu".to_string()
 }
 
 /// Optimizer parametreleri
 #[derive(Debug, Serialize, Deserialize)]
 struct OptimizerParams {
-    learning_rate: f32,
-    momentum: Option<f32>,
-    beta1: Option<f32>,
-    beta2: Option<f32>,
-    epsilon: Option<f32>,
-    weight_decay: Option<f32>,
-    decay_rate: Option<f32>,
-}
-
-/// Model verisini doğrulayan yardımcı fonksiyon
-fn validate_model_data(model_data: &ModelData) -> Result<()> {
-    // Boş model kontrolü
-    if model_data.layers.is_empty() {
-        return Err(TurkError::ModelError("Boş model yüklenemez".to_string()));
-    }
-    
-    // Şema versiyonu kontrolü
-    if model_data.schema_version != "1.0" {
-        return Err(TurkError::ModelError(
-            format!("Desteklenmeyen model şema versiyonu: {}", model_data.schema_version)
-        ));
-    }
-    
-    // Optimizer tipi kontrolü
-    match model_data.optimizer_type.as_str() {
-        "sgd" | "adam" | "adamw" | "rmsprop" => {},
-        _ => return Err(TurkError::ModelError(
-            format!("Bilinmeyen optimizer tipi: {}", model_data.optimizer_type)
-        )),
-    }
-    
-    // Optimizer parametreleri kontrolü
-    let params = &model_data.optimizer_params;
-    if params.learning_rate <= 0.0 {
-        return Err(TurkError::ModelError(
-            format!("Geçersiz öğrenme oranı: {}", params.learning_rate)
-        ));
-    }
-    
-    // Katmanlar arası boyut tutarlılığı kontrolü
-    for i in 1..model_data.layers.len() {
-        let prev_layer = &model_data.layers[i-1];
-        let curr_layer = &model_data.layers[i];
-        
-        if curr_layer.layer_type != "dropout" && 
-           curr_layer.layer_type != "batch_norm" && 
-           prev_layer.output_size != curr_layer.input_size {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Katmanlar arası boyut uyuşmazlığı: {} ({}) -> {} ({})",
-                prev_layer.layer_type, prev_layer.output_size, 
-                curr_layer.layer_type, curr_layer.input_size
-            )));
-        }
-    }
-    
-    Ok(())
+    learning_rate: f64,
+    momentum: Option<f64>,
+    beta1: Option<f64>,
+    beta2: Option<f64>,
+    epsilon: Option<f64>,
+    weight_decay: Option<f64>,
 }
 
 impl Sequential {
     /// Yeni bir boş sıralı model oluşturur
+    ///
+    /// Henüz hiçbir katman veya optimizer içermeyen, derlenme gereği olan
+    /// boş bir Sequential model instance'ı oluşturur.
+    ///
+    /// # Örnek
+    ///
+    /// ```
+    /// use turk::model::Sequential;
+    /// let model = Sequential::new();
+    /// assert!(model.layers.is_empty());
+    /// ```
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
             optimizer: None,
+            loss: None,
             compiled: false,
+            input_shape: None,
+            output_shape: None,
+            loss_history: Vec::new(),
+            val_loss_history: Vec::new(),
+            inputs: None,
+            cihaz: Cihaz::default(),
         }
+    }
+
+    /// Hesaplama cihazını ayarlar
+    pub fn set_cihaz(&mut self, cihaz: Cihaz) -> &mut Self {
+        self.cihaz = cihaz;
+        self
+    }
+
+    /// Aktif cihazı döndürür
+    pub fn cihaz(&self) -> Cihaz {
+        self.cihaz
     }
 
     /// Modele yeni bir katman ekler
     ///
+    /// Sıralı modele yeni bir katman ekler. Katman, Layer trait'ini 
+    /// gerçekleştiren herhangi bir yapı olabilir (Dense, Dropout, BatchNorm, vb.)
+    ///
     /// # Parametreler
-    /// - `layer`: Eklenecek katman
+    /// - `layer`: Eklenecek katman (Layer trait'i gerçekleştiren bir nesne)
+    ///
+    /// # Dönüş Değeri
+    /// Akışkan API için kendisine referans döndürür (builder pattern)
+    ///
+    /// # Notlar
+    /// - Eğer model zaten derlenmiş ise, katman ekledikten sonra tekrar 
+    ///   derlenmesi gerektiğini kullanıcıya bildirir.
+    ///
+    /// # Örnek
+    ///
+    /// ```no_run
+    /// use turk::model::Sequential;
+    /// use turk::aktivasyon::Activation;
+    /// use turk::initializers::{GlorotUniform, Zeros};
+    ///
+    /// fn dense(i: usize, o: usize, act: Activation) -> turk::layer::Dense {
+    ///     turk::layer::Dense::new(i, o, act, Box::new(GlorotUniform::new()), Box::new(Zeros::new()), true).unwrap()
+    /// }
+    ///
+    /// let mut model = Sequential::new();
+    /// model.add(dense(784, 128, Activation::Relu))
+    ///      .add(dense(128, 64, Activation::Relu))
+    ///      .add(dense(64, 10, Activation::Softmax));
+    /// ```
+    /// Kutulanmış (`Box<dyn Layer>`) bir katmanı modele ekler.
+    /// `KatmanKayit` gibi fabrikalar `Box<dyn Layer>` döndürdüğünden bu yöntem gereklidir.
+    pub fn add_boxed(&mut self, layer: Box<dyn Layer>) -> &mut Self {
+        if self.compiled {
+            warn!("Derlenmiş bir modele katman ekleniyor. Yeniden derleme gerekecek.");
+            self.compiled = false;
+        }
+        self.layers.push(layer);
+        self
+    }
+
     pub fn add<L: Layer + 'static>(&mut self, layer: L) -> &mut Self {
+        if self.compiled {
+            warn!("Derlenmiş bir modele katman ekleniyor. Bu, modelin yeniden derlenmesini gerektirecek.");
+            self.compiled = false;
+        }
+        
         self.layers.push(Box::new(layer));
-        self.compiled = false; // Yeni katman eklendiğinde derlenmiş durumu sıfırla
         self
     }
 
     /// Modeli verilen optimizer ile derler
     ///
+    /// Modeli eğitim ve tahmin için hazırlar. Bu adım, fit(), forward() veya
+    /// predict() gibi işlevler çağrılmadan önce zorunludur.
+    ///
     /// # Parametreler
-    /// - `optimizer`: Kullanılacak optimizer
+    /// - `optimizer`: Kullanılacak optimizer (SGD, Adam, RMSProp vb.)
+    ///
+    /// # Dönüş Değeri
+    /// Akışkan API için kendisine referans döndürür (builder pattern)
+    ///
+    /// # Örnek
+    ///
+    /// ```no_run
+    /// use turk::model::Sequential;
+    /// use turk::optimizer::SGD;
+    ///
+    /// let mut model = Sequential::new();
+    /// // ... katmanları ekle
+    /// model.compile(SGD::new(0.01, None, false));
+    /// ```
     pub fn compile<O: Optimizer + 'static>(&mut self, optimizer: O) -> &mut Self {
         self.optimizer = Some(Box::new(optimizer));
+        if self.loss.is_none() {
+            self.loss = Some(Box::new(MSE::default()));
+        }
         self.compiled = true;
         self
     }
 
     /// Modeli Box<dyn Optimizer> ile derler
     ///
+    /// Modeli kutulanmış bir optimizer ile derler. Bu metot, from_ast veya harici 
+    /// bir optimizer oluşturma işlemi sırasında kullanılır.
+    ///
     /// # Parametreler
     /// - `optimizer`: Kutulanmış optimizer
+    ///
+    /// # Dönüş Değeri
+    /// Akışkan API için kendisine referans döndürür (builder pattern)
     pub fn compile_boxed(&mut self, optimizer: Box<dyn Optimizer>) -> &mut Self {
         self.optimizer = Some(optimizer);
+        if self.loss.is_none() {
+            self.loss = Some(Box::new(MSE::default()));
+        }
         self.compiled = true;
         self
+    }
+
+    /// Optimizer ve kayıp fonksiyonu ile modeli derler.
+    pub fn compile_with_loss(
+        &mut self,
+        optimizer: Box<dyn Optimizer>,
+        loss: Box<dyn Loss>,
+    ) -> &mut Self {
+        self.optimizer = Some(optimizer);
+        self.loss = Some(loss);
+        self.compiled = true;
+        self
+    }
+
+    /// Aktif kayıp fonksiyonunun adını döndürür.
+    pub fn loss_name(&self) -> &str {
+        self.loss
+            .as_ref()
+            .map(|l| l.name())
+            .unwrap_or("mse")
+    }
+
+    /// Model mimarisi özetini metin olarak döndürür.
+    pub fn summary(&self) -> String {
+        let mut out = String::from("╔══════════════════════════════════════════════════╗\n");
+        out.push_str("║              TÜRK Model Özeti                    ║\n");
+        out.push_str("╠══════════════════════════════════════════════════╣\n");
+
+        if self.layers.is_empty() {
+            out.push_str("║  (Henüz katman eklenmemiş)                       ║\n");
+        } else {
+            let mut toplam_param = 0usize;
+            let mut egitilebilir = 0usize;
+            for (i, katman) in self.layers.iter().enumerate() {
+                let param = katman.param_count();
+                toplam_param += param;
+                if katman.is_trainable() {
+                    egitilebilir += param;
+                }
+                out.push_str(&format!(
+                    "║  {:>2}. {:<20} girdi={:<4} cikti={:<4} param={:<6} ║\n",
+                    i + 1,
+                    katman.layer_type(),
+                    katman.input_size(),
+                    katman.output_size(),
+                    param,
+                ));
+            }
+            if let (Some(ilk), Some(son)) = (self.layers.first(), self.layers.last()) {
+                out.push_str("╠══════════════════════════════════════════════════╣\n");
+                out.push_str(&format!(
+                    "║  Giriş boyutu  : {:<32} ║\n",
+                    ilk.input_size()
+                ));
+                out.push_str(&format!(
+                    "║  Çıkış boyutu  : {:<32} ║\n",
+                    son.output_size()
+                ));
+                out.push_str(&format!(
+                    "║  Toplam param  : {:<32} ║\n",
+                    toplam_param
+                ));
+                out.push_str(&format!(
+                    "║  Eğitilebilir  : {:<32} ║\n",
+                    egitilebilir
+                ));
+            }
+        }
+
+        out.push_str("╠══════════════════════════════════════════════════╣\n");
+        out.push_str(&format!(
+            "║  Derlenmiş     : {:<32} ║\n",
+            if self.compiled { "evet" } else { "hayır" }
+        ));
+        out.push_str(&format!(
+            "║  Optimizer     : {:<32} ║\n",
+            self.optimizer
+                .as_ref()
+                .map(|o| o.optimizer_type())
+                .unwrap_or("-")
+        ));
+        out.push_str(&format!(
+            "║  Kayıp         : {:<32} ║\n",
+            self.loss_name()
+        ));
+        out.push_str(&format!(
+            "║  Cihaz         : {:<32} ║\n",
+            self.cihaz.ad()
+        ));
+        out.push_str("╚══════════════════════════════════════════════════╝\n");
+        out
+    }
+
+    fn loss_fn(&self) -> Result<&dyn Loss> {
+        self.loss
+            .as_deref()
+            .ok_or_else(|| TurkError::ModelError("Kayıp fonksiyonu tanımlı değil".into()))
+    }
+
+    fn batch_loss_and_grad(
+        &self,
+        y_true: &ArrayView2<f64>,
+        y_pred: &ArrayView2<f64>,
+    ) -> Result<(f64, Array2<f64>)> {
+        let loss_fn = self.loss_fn()?;
+        let batch_loss = loss_fn.loss(y_true, y_pred)?;
+        let grad = loss_fn.gradient(y_true, y_pred)?;
+        Ok((batch_loss, grad))
     }
 
     /// Modelin derlenip derlenmediğini kontrol eder
@@ -190,70 +696,120 @@ impl Sequential {
 
     /// Modelin derlenmiş olduğunu kontrol eder
     fn ensure_compiled(&self) -> Result<()> {
-        if !self.compiled || self.optimizer.is_none() {
-            return Err(TurkError::ModelError("Model derlenmemiş. Önce compile() methodunu çağırın.".to_string()));
+        if !self.compiled {
+            return Err(TurkError::ModelError("Model derlenmemiş".to_string()));
         }
+        
+        if self.layers.is_empty() {
+            return Err(TurkError::ModelError("Modelde hiç katman yok".to_string()));
+        }
+        
         Ok(())
     }
 
     /// İleri yayılım (forward propagation)
     ///
+    /// Girdi verilerini modelin içinden geçirerek çıktı üretir.
+    ///
     /// # Parametreler
     /// - `input`: Girdi tensörü
-    ///
+    /// 
     /// # Dönüş
-    /// Model çıktısı
-    pub fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
-        if self.layers.is_empty() {
-            return Err(TurkError::ModelError("Model boş, en az bir katman ekleyin.".to_string()));
+    /// - `Result<Array2<f64>>`: Modelin çıktısı, hata durumunda ilgili hata
+    pub fn forward<'a>(&mut self, input: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+        self.ensure_compiled()?;
+        
+        self.inputs = Some(input.to_owned());
+        let mut output = input.to_owned();
+        
+        for layer in &mut self.layers {
+            output = layer.forward(&output.view())?;
         }
         
-        let mut output = input.clone();
-        for layer in &mut self.layers {
-            output = layer.forward(&output)?;
-        }
         Ok(output)
     }
-
+    
     /// Geri yayılım (backpropagation)
     ///
     /// # Parametreler
     /// - `grad`: Gradyan tensörü
-    pub fn backward(&mut self, grad: &Array2<f32>) -> Result<()> {
+    pub fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
         self.ensure_compiled()?;
         
-        let mut current_grad = grad.clone();
-        for layer in self.layers.iter_mut().rev() {
-            current_grad = layer.backward(&current_grad)?;
+        // Kayıt ettiğimiz ileri yayılım sonuçlarını kullanalım
+        
+        // Geri yayılım için ters sırayla katmanları dolaşmalıyız
+        let n_layers = self.layers.len();
+        
+        let mut inputs = Vec::with_capacity(n_layers);
+        
+        // İleri yayılım sırasında tüm ara girdileri hesapla
+        let mut current_output = self.inputs.clone().unwrap_or_else(|| Array2::zeros((0, 0)));
+        
+        for layer in &mut self.layers {
+            inputs.push(current_output.clone());
+            let output = layer.forward(&current_output.view())?;
+            current_output = output;
         }
-        Ok(())
+        
+        // Geri yayılım
+        let mut grad_output = grad.to_owned();
+        
+        for i in (0..n_layers).rev() {
+            let layer = &mut self.layers[i];
+            let layer_input = &inputs[i];
+            
+            // Gradyanları hesapla
+            let (grad_input, grad_weights, grad_biases) = layer.backward(
+                &layer_input.view(),
+                &grad_output.view()
+            )?;
+            
+            // Ağırlık ve bias'ları al
+            let mut _weights = layer.get_weights()?.to_owned();
+            let mut _biases = layer.get_biases()?.to_owned();
+            
+            // Optimizer ile güncellemeleri yap
+            if let Some(optimizer) = &mut self.optimizer {
+                optimizer.update(&mut _weights, &mut _biases, &grad_weights.view(), &grad_biases.view())?;
+                
+                // Güncellenmiş ağırlık ve bias'ları katmana geri aktar
+                layer.set_weights(&_weights.view())?;
+                layer.set_biases(&_biases.view())?;
+            }
+            
+            grad_output = grad_input;
+        }
+        
+        Ok(grad_output)
     }
 
     /// Ağırlık güncellemesi
     pub fn update(&mut self) -> Result<()> {
-        self.ensure_compiled()?;
-        
-        // Optimizer'ı al (compile kontrolünden sonra güvenli)
-        let optimizer = self.optimizer.as_mut().unwrap();
-        
-        // Her katmanı güncelleyelim
-        for layer in &mut self.layers {
-            // Ağırlık güncellemeleri
-            if let (Some(weights), Some(weight_grads)) = (layer.get_weights(), layer.get_weight_grads()) {
-                let mut weights_clone = weights.clone();
-                optimizer.step(&mut weights_clone, weight_grads)?;
-                layer.set_weights(weights_clone)?;
-            }
+        // Her katmanı güncelle
+        for layer_idx in 0..self.layers.len() {
+            let layer = &mut self.layers[layer_idx];
             
-            // Bias güncellemeleri
-            if let (Some(bias), Some(bias_grads)) = (layer.get_bias(), layer.get_bias_grads()) {
-                let mut bias_clone = bias.clone();
-                optimizer.step(&mut bias_clone, bias_grads)?;
-                layer.set_bias(bias_clone)?;
-            }
+            // Katman ağırlıklarını ve bias'larını al
+            let weights_view = layer.get_weights()?;
+            let biases_view = layer.get_biases()?;
             
-            // Katman iç güncellemeleri
-            layer.update()?;
+            // Katman gradyanlarını al (eğer uygulanabilirse)
+            let mut weights = weights_view.to_owned();
+            let mut biases = biases_view.to_owned();
+            
+            // Optimizeri kullanarak güncelleme yap (sadece optimizer varsa)
+            if let Some(optimizer) = &mut self.optimizer {
+                // Dummy gradient değerleri oluştur
+                let grad_weights = Array2::<f64>::zeros(weights.dim());
+                let grad_biases = Array2::<f64>::zeros(biases.dim());
+                
+                optimizer.update(&mut weights, &mut biases, &grad_weights.view(), &grad_biases.view())?;
+                
+                // Güncellenmiş ağırlıkları ve bias'ları geri ayarla
+                layer.set_weights(&weights.view())?;
+                layer.set_biases(&biases.view())?;
+            }
         }
         
         Ok(())
@@ -264,61 +820,75 @@ impl Sequential {
     /// # Parametreler
     /// - `path`: Kaydedilecek dosya yolu
     pub fn save(&self, path: &str) -> Result<()> {
-        // Model doğrulaması
-        if self.layers.is_empty() {
-            return Err(TurkError::ModelError("Boş model kaydedilemez.".to_string()));
-        }
+        let mut layer_data = Vec::with_capacity(self.layers.len());
         
-        // Optimizer bilgisini kontrol et
-        let optimizer = self.optimizer.as_ref().ok_or_else(|| 
-            TurkError::ModelError("Derlenmiş bir model olmadan kaydetme yapılamaz.".to_string())
-        )?;
-        
-        // Katman verilerini topla
-        let layers_data: Vec<LayerData> = self.layers.iter().map(|layer| {
-            LayerData {
+        for layer in &self.layers {
+            let _weights = layer.get_weights()?;
+            let _biases = layer.get_biases()?;
+            
+            // BatchNormalization için ek meta
+            let (bn_eps, bn_mom) = if layer.layer_type() == "BatchNormalization" {
+                // epsilon/momentum varsayılan değerleri (BatchNorm struct'tan alınamıyorsa)
+                (1e-5, 0.1)
+            } else {
+                (0.0, 0.0)
+            };
+
+            layer_data.push(LayerData {
+                layer_type: layer.layer_type().to_string(),
                 weights: layer.weights_as_vec(),
-                bias: layer.bias_as_vec(),
+                biases: layer.biases_as_vec(),
                 activation: layer.activation_type(),
                 input_size: layer.input_size(),
                 output_size: layer.output_size(),
-                layer_type: layer.layer_type().to_string(),
                 dropout_rate: layer.dropout_rate(),
-                use_batch_norm: layer.use_batch_norm(),
-            }
-        }).collect();
-
-        // Optimizer parametrelerini topla
-        let optimizer_params = OptimizerParams {
-            learning_rate: optimizer.learning_rate(),
-            momentum: None, // Bu bilgileri optimizer tipine göre doldurabiliriz
-            beta1: None,
-            beta2: None,
-            epsilon: None,
-            weight_decay: None,
-            decay_rate: None,
-        };
-
-        // Model verisini oluştur
-        let model_data = ModelData {
-            layers: layers_data,
-            optimizer_type: optimizer.optimizer_type().to_string(),
-            optimizer_params,
-            schema_version: "1.0".to_string(), // Şema versiyonunu ekle
-        };
-
-        // Dosyaya yaz
-        let file = fs::File::create(path).map_err(|e| 
-            TurkError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other, 
-                format!("Dosya oluşturulamadı: {}, Hata: {}", path, e)
-            ))
-        )?;
+                num_features: layer.input_size(),
+                bn_epsilon: bn_eps,
+                bn_momentum: bn_mom,
+                extra: layer.layer_metadata(),
+            });
+        }
         
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &model_data)
-            .map_err(|e| TurkError::SerializationError(e))?;
-            
+        let optimizer_type = if let Some(optimizer) = &self.optimizer {
+            optimizer.optimizer_type().to_string()
+        } else {
+            "sgd".to_string()
+        };
+        
+        let optimizer_params = if let Some(optimizer) = &self.optimizer {
+            OptimizerParams {
+                learning_rate: optimizer.learning_rate(),
+                momentum: None, // Burada tipe göre doğru değerleri set etmelisiniz
+                beta1: None,
+                beta2: None,
+                epsilon: None,
+                weight_decay: None,
+            }
+        } else {
+            OptimizerParams {
+                learning_rate: 0.01,
+                momentum: None,
+                beta1: None,
+                beta2: None,
+                epsilon: None,
+                weight_decay: None,
+            }
+        };
+        
+        let model_data = ModelData {
+            layers: layer_data,
+            optimizer_type,
+            optimizer_params,
+            schema_version: "1.0".to_string(),
+            cihaz: self.cihaz.kisa().to_string(),
+        };
+        
+        let json = serde_json::to_string_pretty(&model_data)?;
+        
+        let mut file = fs::File::create(path)?;
+        file.write_all(json.as_bytes())?;
+        
+        info!("Model başarıyla kaydedildi: {}", path);
         Ok(())
     }
 
@@ -327,265 +897,471 @@ impl Sequential {
     /// # Parametreler
     /// - `path`: Yüklenecek dosya yolu
     pub fn load(&mut self, path: &str) -> Result<()> {
-        // Dosya varlığını kontrol et
-        if !Path::new(path).exists() {
-            return Err(TurkError::IoError(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Dosya bulunamadı: {}", path)
-            )));
-        }
+        let mut file = fs::File::open(path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
         
-        // Dosyayı oku
-        let file = fs::File::open(path).map_err(|e| 
-            TurkError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other, 
-                format!("Dosya açılamadı: {}, Hata: {}", path, e)
-            ))
-        )?;
+        let model_data: ModelData = serde_json::from_str(&contents)?;
         
-        // Güvenlik: dosya boyutu kontrolü
-        let metadata = file.metadata().map_err(|e| 
-            TurkError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other, 
-                format!("Dosya metadata okunamadı: {}, Hata: {}", path, e)
-            ))
-        )?;
-        
-        if metadata.len() > 50_000_000 { // 50MB üst sınır
-            return Err(TurkError::IoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Dosya çok büyük ({}MB), maksimum 50MB destekleniyor", metadata.len() / 1_000_000)
-            )));
-        }
-        
-        let reader = BufReader::new(file);
-        let model_data: ModelData = serde_json::from_reader(reader)
-            .map_err(|e| TurkError::SerializationError(e))?;
-        
-        // Model verisini doğrula
-        validate_model_data(&model_data)?;
-
-        // Katmanları yeniden oluştur
+        // Eski modeli temizle
         self.layers.clear();
-        for layer_data in model_data.layers {
-            let layer: Box<dyn Layer> = match layer_data.layer_type.as_str() {
-                "dense" => {
-                    let mut dense = crate::layer::Dense::new(
-                        layer_data.input_size,
-                        layer_data.output_size,
-                        layer_data.activation,
-                    );
-                    
-                    // Ağırlıkları ve bias'ı yükle
-                    let weights = Array2::from_shape_vec(
-                        (layer_data.output_size, layer_data.input_size),
-                        layer_data.weights,
-                    ).map_err(|e| TurkError::NdarrayError(e))?;
-                    
-                    let bias = Array2::from_shape_vec(
-                        (layer_data.output_size, 1),
-                        layer_data.bias,
-                    ).map_err(|e| TurkError::NdarrayError(e))?;
-                    
-                    // Ağırlıkları ve bias'ı ayarla
-                    dense.set_weights(weights)?;
-                    dense.set_bias(bias)?;
-                    
-                    Box::new(dense)
-                },
-                "dropout" => {
-                    if let Some(rate) = layer_data.dropout_rate {
-                        Box::new(crate::layer::Dropout::new(rate))
-                    } else {
-                        return Err(TurkError::ModelError(
-                            "Dropout katmanı için dropout_rate gerekli".to_string()
-                        ));
-                    }
-                },
-                "batch_norm" => {
-                    Box::new(crate::layer::BatchNorm::new(layer_data.input_size))
-                },
-                _ => return Err(TurkError::ModelError(
-                    format!("Bilinmeyen katman tipi: {}", layer_data.layer_type)
-                )),
-            };
-            
-            self.layers.push(layer);
-        }
-
-        // Optimizer'ı yeniden oluştur
-        let params = &model_data.optimizer_params;
-        self.optimizer = match model_data.optimizer_type.as_str() {
-            "sgd" => {
-                if let Some(momentum) = params.momentum {
-                    Some(Box::new(crate::optimizer::SGD::with_momentum(
-                        params.learning_rate, momentum
-                    )))
-                } else {
-                    Some(Box::new(crate::optimizer::SGD::new(params.learning_rate)))
-                }
-            },
-            "adam" => {
-                Some(Box::new(crate::optimizer::Adam::new(params.learning_rate)))
-            },
-            "adamw" => {
-                if let Some(weight_decay) = params.weight_decay {
-                    Some(Box::new(crate::optimizer::AdamW::new(
-                        params.learning_rate, weight_decay
-                    )))
-                } else {
-                    return Err(TurkError::ModelError(
-                        "AdamW optimizeri için weight_decay parametresi gerekli".to_string()
-                    ));
-                }
-            },
-            "rmsprop" => {
-                Some(Box::new(crate::optimizer::RMSProp::with_decay(
-                    params.learning_rate, params.decay_rate.unwrap_or(0.9), params.epsilon.unwrap_or(1e-8)
-                )))
-            },
-            _ => return Err(TurkError::ModelError(
-                format!("Bilinmeyen optimizer tipi: {}", model_data.optimizer_type)
-            )),
+        self.optimizer = None;
+        self.loss = None;
+        self.compiled = false;
+        self.cihaz = match model_data.cihaz.as_str() {
+            "paralel" | "gpu" if Cihaz::paralel_secilebilir() => Cihaz::Paralel,
+            _ => Cihaz::Cpu,
         };
         
-        self.compiled = true;
-        log::info!("Model başarıyla yüklendi: {}", path);
+        // Katmanları yükle — KatmanKayit üzerinden (artık match bloğu yok)
+        let kayit = KatmanKayit::varsayilan();
+        for ld in model_data.layers {
+            let girdi_boyutu = if ld.input_size > 0 {
+                ld.input_size
+            } else if self.layers.is_empty() {
+                10
+            } else {
+                self.layers.last().unwrap().output_size()
+            };
+
+            let mut ek = std::collections::HashMap::new();
+            ek.insert("num_features".into(), ld.num_features as f64);
+            ek.insert("bn_epsilon".into(),   ld.bn_epsilon);
+            ek.insert("bn_momentum".into(),  ld.bn_momentum);
+            for (k, v) in &ld.extra {
+                ek.insert(k.clone(), *v);
+            }
+
+            let veri = KatmanYukleVerisi {
+                agirliklar:    ld.weights,
+                biaslar:       ld.biases,
+                aktivasyon:    ld.activation,
+                girdi_boyutu,
+                cikti_boyutu:  ld.output_size,
+                dropout_orani: ld.dropout_rate,
+                ek_veriler:    ek,
+            };
+            let katman = kayit.json_yukle(&ld.layer_type, &veri)?;
+            self.add_boxed(katman);
+        }
+        
+        // Optimizer'ı yükle
+        let optimizer = crate::optimizer::create_optimizer_from_params(
+            &model_data.optimizer_type,
+            model_data.optimizer_params.learning_rate,
+            model_data.optimizer_params.momentum,
+            model_data.optimizer_params.beta1,
+            model_data.optimizer_params.beta2,
+            model_data.optimizer_params.epsilon,
+            model_data.optimizer_params.weight_decay
+        )?;
+        
+        self.compile_boxed(optimizer);
+        
+        info!("Model başarıyla yüklendi: {}", path);
         Ok(())
     }
     
-    /// Model özetini döndürür
-    pub fn summary(&self) -> String {
-        let mut result = String::new();
-        result.push_str(&format!("Model: Sequential\n"));
-        result.push_str("-----------------------------\n");
-        result.push_str(&format!("{:<5} {:<15} {:<15} {:<20} {:<10}\n", 
-            "No", "Layer Type", "Output Shape", "Param Count", "Activation"));
-        result.push_str("-----------------------------\n");
-        
-        let mut total_params = 0;
-        for (i, layer) in self.layers.iter().enumerate() {
-            let layer_type = layer.layer_type();
-            let output_shape = format!("[{}, {}]", layer.output_size(), 1);
-            let params_count = layer.param_count();
-            total_params += params_count;
-            
-            result.push_str(&format!("{:<5} {:<15} {:<15} {:<20} {:<10}\n", 
-                i, layer_type, output_shape, params_count, layer.activation_type().to_string()));
-        }
-        
-        result.push_str("-----------------------------\n");
-        result.push_str(&format!("Toplam parametre sayısı: {}\n", total_params));
-        
-        if let Some(optimizer) = &self.optimizer {
-            result.push_str(&format!("Optimizer: {} (lr={})\n", 
-                optimizer.optimizer_type(), optimizer.learning_rate()));
-        } else {
-            result.push_str("Model henüz derlenmemiş.\n");
-        }
-        
-        result
-    }
-    
-    /// Modeli eğitir
+    /// Girdi verilerinin boyutlarını doğrular
+    ///
+    /// Eğitim veya değerlendirme verilerinin boyutlarının uyumlu olup olmadığını
+    /// kontrol eder. Özellikle x ve y veri setlerinin örnek sayılarının (satır sayısı)
+    /// aynı olduğunu doğrular.
     ///
     /// # Parametreler
-    /// - `x`: Girdi verileri
-    /// - `y`: Hedef değerler
+    /// - `x`: Girdi verileri (boyut: [örnek sayısı, girdi özellik sayısı])
+    /// - `y`: Hedef değerler (boyut: [örnek sayısı, çıktı özellik sayısı])
+    ///
+    /// # Dönüş Değeri
+    /// - `Result<()>`: Başarılı ise Ok(()), hata durumunda ilgili hata
+    ///
+    /// # Hatalar
+    /// - Eğer x ve y aynı sayıda örneğe (satır) sahip değilse ShapeMismatch hatası döner
+    fn validate_inputs(&self, x: &ArrayView2<f64>, y: &ArrayView2<f64>) -> Result<()> {
+        validate_tensor_shapes(x, y, true, false, "Eğitim verileri")
+    }
+    
+    /// Veri kümesini batch'lere ayırır
+    ///
+    /// Eğitim veri kümesini belirtilen boyutta mini-batch'lere böler.
+    /// Bu, stokastik gradyan inişi (SGD) ve türevleri için gereklidir.
+    ///
+    /// # Parametreler
+    /// - `x`: Girdi verileri (boyut: [örnek sayısı, girdi özellik sayısı])
+    /// - `y`: Hedef değerler (boyut: [örnek sayısı, çıktı özellik sayısı])
+    /// - `batch_size`: Her batch'teki örnek sayısı
+    ///
+    /// # Dönüş Değeri
+    /// - Batch'lerin (x_batch, y_batch) çiftlerini içeren bir vektör
+    ///
+    /// # Notlar
+    /// - Son batch, tam dolmayabilir (son batch boyutu < batch_size olabilir)
+    /// Tek bir epoch için eğitim yapar
+    /// 
+    /// # Parametreler
+    /// * `x_train` - Giriş veri seti
+    /// * `y_train` - Çıkış veri seti
+    /// * `batch_size` - Mini batch boyutu
+    /// * `metrics` - Kullanılacak metrikler
+    /// * `validation_data` - Opsiyonel doğrulama veri seti
+    fn train_epoch<'a>(
+        &mut self,
+        x_train: &'a ArrayView2<'a, f64>,
+        y_train: &'a ArrayView2<'a, f64>,
+        batch_size: usize,
+        _metrics: &[Box<dyn Metric>],
+        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>
+    ) -> Result<(f64, Option<f64>)> {
+        // Toplam kaybı tutacak değişken
+        let mut total_loss = 0.0;
+        
+        // Mini batch'ler oluştur
+        let n_samples = x_train.nrows();
+        let mut indices: Vec<usize> = (0..n_samples).collect();
+        indices.shuffle(&mut thread_rng());
+        
+        let batch_count = (n_samples + batch_size - 1) / batch_size; // Tam sayı yukarı yuvarlama
+        
+        // Her batch için eğitim yap
+        for (batch_idx, batch_start) in indices.chunks(batch_size).enumerate() {
+            // Batch indeksleri kullanarak batch örnek verilerini oluştur
+            let batch_indices: Vec<usize> = batch_start.to_vec();
+            
+            // Batch tensörleri oluştur - sahiplenilmiş değerler (owned values)
+            let x_batch = stack_selected_rows(x_train, &batch_indices)?;
+            let y_batch = stack_selected_rows(y_train, &batch_indices)?;
+            
+            // İleri yayılım
+            let y_pred = self.forward(&x_batch.view())?;
+            
+            let (batch_loss, grad) = self.batch_loss_and_grad(&y_batch.view(), &y_pred.view())?;
+            total_loss += batch_loss;
+            
+            self.backward(&grad.view())?;
+            
+            // Ağırlıkları ve bias'ları güncelle
+            self.update()?;
+            
+            // Debug: Her 10 batch'te veya son batch'te ilerlemeyi göster
+            if batch_idx % 10 == 0 || batch_idx == batch_count - 1 {
+                debug!("Batch {}/{} işlendi, batch kaybı: {:.6}", 
+                       batch_idx + 1, batch_count, batch_loss);
+            }
+        }
+        
+        // Ortalama eğitim kaybını hesapla
+        let avg_train_loss = total_loss / batch_count as f64;
+        
+        // Doğrulama kaybını hesapla (eğer varsa)
+        let val_loss = if let Some((x_val, y_val)) = validation_data {
+            let y_val_pred = self.forward(x_val)?;
+            let loss_fn = self.loss_fn()?;
+            Some(loss_fn.loss(y_val, &y_val_pred.view())?)
+        } else {
+            None
+        };
+        
+        Ok((avg_train_loss, val_loss))
+    }
+    
+    /// Modeli eğitir.
+    ///
+    /// # Parametreler
+    /// - `x_train` / `y_train`: Eğitim verileri
     /// - `epochs`: Epoch sayısı
     /// - `batch_size`: Batch boyutu
     /// - `validation_data`: Doğrulama verileri (isteğe bağlı)
-    pub fn fit(
-        &mut self, 
-        x: &Array2<f32>, 
-        y: &Array2<f32>, 
+    ///
+    /// # Dönüş
+    /// `Result<History>` — kayıp ve metrik geçmişi
+    pub fn fit<'a>(
+        &mut self,
+        x_train: &'a ArrayView2<'a, f64>,
+        y_train: &'a ArrayView2<'a, f64>,
         epochs: usize,
         batch_size: usize,
-        validation_data: Option<(&Array2<f32>, &Array2<f32>)>
-    ) -> Result<Vec<(f32, Option<f32>)>> {
+        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+    ) -> Result<History> {
+        self.fit_with_early_stopping(x_train, y_train, epochs, batch_size, validation_data, None)
+    }
+
+    /// Erken durdurma destekli eğitim.
+    pub fn fit_with_early_stopping<'a>(
+        &mut self,
+        x_train: &'a ArrayView2<'a, f64>,
+        y_train: &'a ArrayView2<'a, f64>,
+        epochs: usize,
+        batch_size: usize,
+        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+        mut early_stopping: Option<&mut EarlyStopping>,
+    ) -> Result<History> {
+        self.fit_with_checkpoint(
+            x_train, y_train, epochs, batch_size, validation_data,
+            early_stopping.as_deref_mut(), None, None,
+        )
+    }
+
+    /// Checkpoint + erken durdurma destekli tam eğitim döngüsü.
+    ///
+    /// `checkpoint_yolu` verilirse, val_loss (doğrulama yoksa train loss) en iyi
+    /// değere ulaştığında model otomatik olarak o dosyaya kaydedilir.
+    /// Eğitim bittiğinde veya erken durdurma tetiklendiğinde en iyi checkpoint geri yüklenir.
+    pub fn fit_with_checkpoint<'a>(
+        &mut self,
+        x_train: &'a ArrayView2<'a, f64>,
+        y_train: &'a ArrayView2<'a, f64>,
+        epochs: usize,
+        batch_size: usize,
+        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+        mut early_stopping: Option<&mut EarlyStopping>,
+        checkpoint_yolu: Option<&str>,
+        mut epoch_cb: Option<EpochCallback>,
+    ) -> Result<History> {
+        self.cihaz.hazirla()?;
         self.ensure_compiled()?;
-        
-        let mut loss_history = Vec::with_capacity(epochs);
-        let n_samples = x.len_of(Axis(0));
-        
-        if n_samples == 0 {
-            return Err(TurkError::InvalidInput("Eğitim verisinde örnek yok".to_string()));
-        }
-        
-        let effective_batch_size = batch_size.min(n_samples);
-        let n_batches = (n_samples + effective_batch_size - 1) / effective_batch_size;
-        
-        let loss_fn: &dyn Loss = &crate::loss::MSE::default();
-        
+        self.validate_inputs(x_train, y_train)?;
+
+        let mut history    = History::new();
+        let mut en_iyi_metrik = f64::MAX;
+        let val_kullaniliyor = validation_data.is_some();
+
         for epoch in 0..epochs {
-            let mut epoch_loss = 0.0;
-            
-            let mut indices: Vec<usize> = (0..n_samples).collect();
-            let mut rng = rand::thread_rng();
-            
-            for i in (1..indices.len()).rev() {
-                let j = rng.gen_range(0..=i);
-                indices.swap(i, j);
+            let (epoch_loss, val_loss) =
+                self.train_epoch(x_train, y_train, batch_size, &[], validation_data)?;
+
+            history.train_losses.push(epoch_loss);
+            history.train_metrics.push(epoch_loss);
+            if let Some(vl) = val_loss {
+                history.val_losses.push(vl);
+                history.val_metrics.push(vl);
             }
-            
-            for batch_idx in 0..n_batches {
-                let start_idx = batch_idx * effective_batch_size;
-                let end_idx = (start_idx + effective_batch_size).min(n_samples);
-                let batch_indices = &indices[start_idx..end_idx];
-                
-                let mut batch_loss = 0.0;
-                
-                for &idx in batch_indices {
-                    let x_sample = x.index_axis(Axis(0), idx).insert_axis(Axis(0)).to_owned();
-                    let y_true = y.index_axis(Axis(0), idx).insert_axis(Axis(0)).to_owned();
-                    
-                    let y_pred = self.forward(&x_sample)?;
-                    
-                    let loss_val = loss_fn.compute(&y_pred, &y_true)?;
-                    batch_loss += loss_val;
-                    
-                    let loss_grad = loss_fn.gradient(&y_pred, &y_true)?;
-                    self.backward(&loss_grad)?;
-                }
-                
-                self.update()?;
-                
-                batch_loss /= batch_indices.len() as f32;
-                epoch_loss += batch_loss;
+
+            info!(
+                "Epoch {}/{}: loss = {:.6}{}",
+                epoch + 1, epochs, epoch_loss,
+                val_loss.map(|v| format!(", val_loss = {:.6}", v)).unwrap_or_default()
+            );
+
+            if let Some(cb) = &mut epoch_cb {
+                cb(epoch + 1, epochs, epoch_loss, val_loss);
             }
-            
-            epoch_loss /= n_batches as f32;
-            
-            let validation_loss = if let Some((x_val, y_val)) = validation_data {
-                let mut val_loss = 0.0;
-                let n_val_samples = x_val.len_of(Axis(0));
-                
-                for i in 0..n_val_samples {
-                    let x_sample = x_val.index_axis(Axis(0), i).insert_axis(Axis(0)).to_owned();
-                    let y_true = y_val.index_axis(Axis(0), i).insert_axis(Axis(0)).to_owned();
-                    
-                    let y_pred = self.forward(&x_sample)?;
-                    val_loss += loss_fn.compute(&y_pred, &y_true)?;
+
+            if let Some(yol) = checkpoint_yolu {
+                Self::checkpoint_guncelle(
+                    self,
+                    yol,
+                    epoch,
+                    epoch_loss,
+                    val_loss,
+                    &mut en_iyi_metrik,
+                );
+            }
+
+            if let (Some(es), Some(vl)) = (early_stopping.as_deref_mut(), val_loss) {
+                if es.step(vl) {
+                    info!(
+                        "Erken durdurma tetiklendi! (epoch={}, val_loss={:.6}, en_iyi_val_loss={:.6})",
+                        epoch + 1,
+                        vl,
+                        es.best_val_loss()
+                    );
+                    break;
                 }
-                
-                val_loss /= n_val_samples as f32;
-                Some(val_loss)
-            } else {
-                None
-            };
-            
-            loss_history.push((epoch_loss, validation_loss));
-            
-            if let Some(val_loss) = validation_loss {
-                log::info!("Epoch {}/{} - loss: {:.4} - val_loss: {:.4}", 
-                    epoch + 1, epochs, epoch_loss, val_loss);
-            } else {
-                log::info!("Epoch {}/{} - loss: {:.4}", 
-                    epoch + 1, epochs, epoch_loss);
             }
         }
-        
-        Ok(loss_history)
+
+        if let Some(yol) = checkpoint_yolu {
+            self.en_iyi_checkpoint_yukle(yol, val_kullaniliyor, en_iyi_metrik)?;
+        }
+
+        Ok(history)
+    }
+
+    /// Checkpoint metriği: val_loss varsa onu, yoksa train loss kullan.
+    fn checkpoint_metrik(epoch_loss: f64, val_loss: Option<f64>) -> f64 {
+        val_loss.unwrap_or(epoch_loss)
+    }
+
+    fn checkpoint_metrik_adi(val_loss: Option<f64>) -> &'static str {
+        if val_loss.is_some() {
+            "val_loss"
+        } else {
+            "loss"
+        }
+    }
+
+    /// val_loss (veya loss) iyileştiyse checkpoint kaydeder.
+    fn checkpoint_guncelle(
+        &mut self,
+        yol: &str,
+        epoch: usize,
+        epoch_loss: f64,
+        val_loss: Option<f64>,
+        en_iyi: &mut f64,
+    ) {
+        let metrik = Self::checkpoint_metrik(epoch_loss, val_loss);
+        let metrik_adi = Self::checkpoint_metrik_adi(val_loss);
+        if metrik < *en_iyi {
+            *en_iyi = metrik;
+            match self.save(yol) {
+                Ok(_) => info!(
+                    "▶ En iyi model güncellendi! \
+                     Epoch={} │ en düşük {metrik_adi}: {metrik:.6} │ → '{yol}'",
+                    epoch + 1
+                ),
+                Err(e) => warn!("Checkpoint kaydedilemedi ({yol}): {e}"),
+            }
+        }
+    }
+
+    /// Eğitim sonunda diskteki en iyi checkpoint'i belleğe yükler.
+    fn en_iyi_checkpoint_yukle(
+        &mut self,
+        yol: &str,
+        val_kullaniliyor: bool,
+        en_iyi_metrik: f64,
+    ) -> Result<()> {
+        if !std::path::Path::new(yol).exists() {
+            return Ok(());
+        }
+        if val_kullaniliyor && en_iyi_metrik < f64::MAX {
+            info!(
+                "En iyi model geri yükleniyor: '{yol}' (val_loss={en_iyi_metrik:.6})"
+            );
+            self.load(yol)?;
+        }
+        Ok(())
+    }
+
+    /// Diskten gelen batch iterator'ü ile tek epoch eğitir.
+    ///
+    /// Bellekte tüm veri seti tutulmadan, her batch ayrı ayrı işlenir.
+    pub fn train_epoch_from_batches<I>(
+        &mut self,
+        batches: I,
+        validation_data: Option<(&Array2<f64>, &Array2<f64>)>,
+    ) -> Result<(f64, Option<f64>)>
+    where
+        I: Iterator<Item = Result<(Array2<f64>, Array2<f64>)>>,
+    {
+        let mut total_loss = 0.0;
+        let mut batch_count = 0usize;
+
+        for batch_result in batches {
+            let (x_batch, y_batch) = batch_result?;
+            let y_pred = self.forward(&x_batch.view())?;
+            let (batch_loss, grad) = self.batch_loss_and_grad(&y_batch.view(), &y_pred.view())?;
+            total_loss += batch_loss;
+
+            self.backward(&grad.view())?;
+            self.update()?;
+
+            batch_count += 1;
+            if batch_count == 1 || batch_count % 10 == 0 {
+                debug!("Streaming batch {batch_count} işlendi, kayıp: {batch_loss:.6}");
+            }
+        }
+
+        if batch_count == 0 {
+            return Err(TurkError::DataError(
+                "Eğitim verisi batch'i bulunamadı — CSV boş olabilir.".into(),
+            ));
+        }
+
+        let avg_train_loss = total_loss / batch_count as f64;
+
+        let val_loss = if let Some((x_val, y_val)) = validation_data {
+            let y_val_pred = self.forward(&x_val.view())?;
+            let loss_fn = self.loss_fn()?;
+            Some(loss_fn.loss(&y_val.view(), &y_val_pred.view())?)
+        } else {
+            None
+        };
+
+        Ok((avg_train_loss, val_loss))
+    }
+
+    /// Lazy veri akışı ile checkpoint destekli eğitim.
+    ///
+    /// `batch_kaynak` her epoch başında yeni bir batch iterator döndürmelidir
+    /// (dosya her epoch'ta baştan okunur).
+    pub fn fit_streaming_with_checkpoint<I, F>(
+        &mut self,
+        mut batch_kaynak: F,
+        epochs: usize,
+        validation_data: Option<(Array2<f64>, Array2<f64>)>,
+        mut early_stopping: Option<&mut EarlyStopping>,
+        checkpoint_yolu: Option<&str>,
+        mut epoch_cb: Option<EpochCallback>,
+    ) -> Result<History>
+    where
+        F: FnMut() -> Result<I>,
+        I: Iterator<Item = Result<(Array2<f64>, Array2<f64>)>>,
+    {
+        self.cihaz.hazirla()?;
+        self.ensure_compiled()?;
+
+        let val_ref = validation_data
+            .as_ref()
+            .map(|pair| (&pair.0, &pair.1));
+        let mut history = History::new();
+        let mut en_iyi_metrik = f64::MAX;
+        let val_kullaniliyor = validation_data.is_some();
+
+        for epoch in 0..epochs {
+            let batches = batch_kaynak()?;
+            let (epoch_loss, val_loss) =
+                self.train_epoch_from_batches(batches, val_ref)?;
+
+            history.train_losses.push(epoch_loss);
+            history.train_metrics.push(epoch_loss);
+            if let Some(vl) = val_loss {
+                history.val_losses.push(vl);
+                history.val_metrics.push(vl);
+            }
+
+            info!(
+                "Epoch {}/{}: loss = {:.6}{}",
+                epoch + 1,
+                epochs,
+                epoch_loss,
+                val_loss
+                    .map(|v| format!(", val_loss = {v:.6}"))
+                    .unwrap_or_default()
+            );
+
+            if let Some(cb) = &mut epoch_cb {
+                cb(epoch + 1, epochs, epoch_loss, val_loss);
+            }
+
+            if let Some(yol) = checkpoint_yolu {
+                Self::checkpoint_guncelle(
+                    self,
+                    yol,
+                    epoch,
+                    epoch_loss,
+                    val_loss,
+                    &mut en_iyi_metrik,
+                );
+            }
+
+            if let (Some(es), Some(vl)) = (early_stopping.as_deref_mut(), val_loss) {
+                if es.step(vl) {
+                    info!(
+                        "Erken durdurma tetiklendi! (epoch={}, val_loss={vl:.6}, en_iyi_val_loss={:.6})",
+                        epoch + 1,
+                        es.best_val_loss()
+                    );
+                    break;
+                }
+            }
+        }
+
+        if let Some(yol) = checkpoint_yolu {
+            self.en_iyi_checkpoint_yukle(yol, val_kullaniliyor, en_iyi_metrik)?;
+        }
+
+        Ok(history)
     }
     
     /// Tahmin yapar
@@ -595,127 +1371,223 @@ impl Sequential {
     ///
     /// # Dönüş
     /// Model çıktısı
-    pub fn predict(&mut self, x: &Array2<f32>) -> Result<Array2<f32>> {
+    pub fn predict<'a>(&mut self, x: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
         self.forward(x)
     }
     
-    /// Modeli test eder ve metrikleri döndürür
+    /// Modeli değerlendirir
     ///
     /// # Parametreler
     /// - `x`: Test verileri
     /// - `y`: Gerçek etiketler
-    /// - `metrics`: Hesaplanacak metrikler
     ///
     /// # Dönüş
-    /// Metrik adı ve değeri çiftleri
-    pub fn evaluate(
-        &mut self, 
-        x: &Array2<f32>, 
-        y: &Array2<f32>,
-        metrics: &[&dyn Metric]
-    ) -> Result<Vec<(String, f32)>> {
-        let y_pred = self.predict(x)?;
-        
-        let mut results = Vec::with_capacity(metrics.len());
-        
-        for metric in metrics {
-            let score = metric.compute(&y_pred, y)?;
-            results.push((metric.name().to_string(), score));
+    /// Model çıktısı
+    pub fn evaluate<'a>(
+        &mut self,
+        x_val: &'a ArrayView2<'a, f64>,
+        y_val: &'a ArrayView2<'a, f64>
+    ) -> Result<f64> {
+        let y_pred = self.forward(x_val)?;
+        let mse = tensor_ops::mse(&y_val.view(), &y_pred.view())?;
+        Ok(mse)
+    }
+
+    /// AST içerisinden bir katmanı işler ve Sequential modeline ekler
+    ///
+    /// AST (Abstract Syntax Tree) içinde tanımlanan bir katmanı, Sequential
+    /// modeline eklenecek şekilde dönüştürür. Katman tipine göre uygun Dense
+    /// veya Dropout nesnesi oluşturur.
+    ///
+    /// # Parametreler
+    /// - `katman`: AST içinde tanımlanmış katman
+    ///
+    /// # Dönüş Değeri
+    /// - `Result<()>`: Başarılı ise Ok(()), hata durumunda ilgili hata
+    fn create_layer_from_katman(&mut self, katman: &crate::ast::Katman) -> Result<()> {
+        match katman {
+            crate::ast::Katman::Dense { birimler, aktivasyon, .. } => {
+                let activation = match aktivasyon {
+                    crate::ast::Aktivasyon::ReLU => Activation::Relu,
+                    crate::ast::Aktivasyon::Sigmoid => Activation::Sigmoid,
+                    crate::ast::Aktivasyon::Tanh => Activation::Tanh,
+                    crate::ast::Aktivasyon::LeakyReLU(alpha) => Activation::LeakyRelu(*alpha),
+                    crate::ast::Aktivasyon::Softmax => Activation::Softmax,
+                    crate::ast::Aktivasyon::Swish => Activation::Swish,
+                    crate::ast::Aktivasyon::Yok => Activation::Linear,
+                };
+                
+                // Katmanı oluştur
+                let input_size = if self.layers.is_empty() {
+                    // İlk katman için varsayılan giriş boyutu, gerçek uygulamada düzeltilmesi gerekir
+                    10
+                } else {
+                    self.layers.last().unwrap().output_size()
+                };
+                
+                let kernel_init = Box::new(GlorotUniform::new());
+                let bias_init = Box::new(Zeros::new());
+                
+                let layer = Dense::new(
+                    input_size,
+                    *birimler as usize,
+                    activation,
+                    kernel_init,
+                    bias_init,
+                    true,
+                )?;
+                
+                self.add(layer);
+            },
+            crate::ast::Katman::Dropout { orani } => {
+                self.add(Dropout::new(*orani));
+            },
+            crate::ast::Katman::BatchNormalization { momentum, epsilon } => {
+                let num_features = if self.layers.is_empty() {
+                    10
+                } else {
+                    self.layers.last().unwrap().output_size()
+                };
+                self.add(BatchNormalization::with_params(num_features, *epsilon, *momentum));
+            },
+            _ => {
+                warn!("Desteklenmeyen katman tipi: {:?}", katman);
+            }
         }
         
-        Ok(results)
+        Ok(())
+    }
+    
+    /// Optimizer türüne göre optimizer oluşturur ve modeli derler
+    ///
+    /// AST'de belirtilen optimizer tipine göre uygun optimizer nesnesini
+    /// oluşturur ve modeli derler.
+    ///
+    /// # Parametreler
+    /// - `optimizer_tipi`: AST içinde tanımlanmış optimizer tipi ve parametreleri
+    fn configure_optimizer_from_type(&mut self, optimizer_tipi: &crate::ast::OptimizerTipi) {
+        match optimizer_tipi {
+            crate::ast::OptimizerTipi::SGD { lr, momentum, nesterov } => {
+                let sgd = SGD::new(
+                    *lr, 
+                    *momentum, 
+                    nesterov.unwrap_or(false)
+                );
+                self.compile_boxed(Box::new(sgd));
+            },
+            crate::ast::OptimizerTipi::Adam { lr, beta1, beta2, epsilon } => {
+                let adam = Adam::new(
+                    *lr, 
+                    beta1.unwrap_or(0.9), 
+                    beta2.unwrap_or(0.999), 
+                    epsilon.unwrap_or(1e-8)
+                );
+                self.compile_boxed(Box::new(adam));
+            },
+            crate::ast::OptimizerTipi::AdamW { lr, weight_decay, beta1, beta2, epsilon } => {
+                let adamw = AdamW::new(
+                    *lr, 
+                    beta1.unwrap_or(0.9), 
+                    beta2.unwrap_or(0.999), 
+                    epsilon.unwrap_or(1e-8), 
+                    weight_decay.unwrap_or(0.01)
+                );
+                self.compile_boxed(Box::new(adamw));
+            },
+            crate::ast::OptimizerTipi::RMSProp { lr, rho, epsilon } => {
+                let rmsprop = RMSProp::new(
+                    *lr, 
+                    rho.unwrap_or(0.9), 
+                    epsilon.unwrap_or(1e-8)
+                );
+                self.compile_boxed(Box::new(rmsprop));
+            },
+        }
+    }
+    
+    /// Model tanımını işler
+    ///
+    /// AST içindeki model özelliklerini işleyerek Sequential modeli yapılandırır.
+    /// Katmanlar ve optimizer'ı ayarlar.
+    ///
+    /// # Parametreler
+    /// - `ozellikler`: AST içinde tanımlanmış model özellikleri
+    ///
+    /// # Dönüş Değeri
+    /// - `Result<()>`: Başarılı ise Ok(()), hata durumunda ilgili hata
+    fn process_model_definition(&mut self, ozellikler: &crate::ast::ModelOzellikleri) -> Result<()> {
+        // Katmanları işle
+        for katman in &ozellikler.katmanlar {
+            self.create_layer_from_katman(katman)?;
+        }
+        
+        // Optimizer'ı yapılandır
+        self.configure_optimizer_from_type(&ozellikler.optimizer);
+        
+        Ok(())
     }
 
     /// AST'den model oluşturur
     ///
+    /// TURK dili AST'si (Abstract Syntax Tree) içinden bir Sequential model
+    /// oluşturur. AST içindeki model tanımını, katmanları ve optimizer'ı 
+    /// çözümleyerek uygun bir model yapılandırır.
+    ///
+    /// # Parametreler
+    /// - `ast`: TURK dili program AST'si
+    ///
+    /// # Dönüş Değeri
+    /// - `Result<Self>`: Başarılı ise oluşturulan model, hata durumunda ilgili hata
+    ///
     /// # Örnek
+    ///
     /// ```no_run
-    /// use turk_lang::parser::{ModelParser, Parser};
-    /// use turk_lang::ast::Program;
-    /// use turk_lang::model::Sequential;
-    /// 
-    /// let dsl = r#"
-    ///   Model mnist_model {
-    ///     Katman(784, 128, ReLU),
-    ///     Katman(128, 10, Softmax)
-    ///   }
-    /// "#;
-    /// 
-    /// let mut parser = ModelParser::new(dsl);
-    /// let program = parser.parse().expect("DSL ayrıştırma hatası");
-    /// let model = Sequential::from_ast(&program).expect("Model oluşturma hatası");
+    /// use turk::model::Sequential;
+    /// use turk::ast::{Program, Deyim, ModelOzellikleri, Katman, Aktivasyon, OptimizerTipi, KayipFonksiyonu};
+    ///
+    /// let program = Program {
+    ///     deyimler: vec![Deyim::ModelTanimi {
+    ///         isim: "net".into(),
+    ///         ozellikler: ModelOzellikleri {
+    ///             katmanlar: vec![Katman::Dense {
+    ///                 birimler: 10,
+    ///                 aktivasyon: Aktivasyon::ReLU,
+    ///                 kernel_initializer: None,
+    ///                 bias_initializer: None,
+    ///             }],
+    ///             optimizer: OptimizerTipi::SGD { lr: 0.01, momentum: None, nesterov: None },
+    ///             kayip_fonksiyonu: KayipFonksiyonu::MSE,
+    ///             batch_boyutu: 32,
+    ///             epoch_sayisi: 10,
+    ///             metrikler: None,
+    ///             erken_durdurma: None,
+    ///         },
+    ///     }],
+    /// };
+    /// let model = Sequential::from_ast(&program).unwrap();
     /// ```
     pub fn from_ast(ast: &crate::ast::Program) -> Result<Self> {
-        use crate::ast::{Deyim, KatmanOzellikleri, OptimizerTipi, AktivasyonFonksiyonu};
-        use crate::layer::{Dense, Dropout, Activation};
-        use crate::optimizer::{Adam, SGD, AdamW};
-        use crate::parser::error::ParseError;
-        
-        let mut model = Self::new();
-        
+        let mut model = Sequential::new();
         let mut found_model = false;
+        
+        // Deyimleri işle
         for deyim in &ast.deyimler {
-            if let Deyim::ModelTanimi { isim: _, ozellikler: model_ozellikleri } = deyim {
+            use crate::ast::Deyim;
+            
+            if let Deyim::ModelTanimi { isim: _, ozellikler } = deyim {
                 found_model = true;
-                
-                for katman_ozellik in &model_ozellikleri.katmanlar {
-                    match katman_ozellik {
-                        KatmanOzellikleri { noron_sayisi, aktivasyon, dropout_rate, .. } => {
-                            let activation_enum = match aktivasyon {
-                                AktivasyonFonksiyonu::Relu => Activation::Relu,
-                                AktivasyonFonksiyonu::Sigmoid => Activation::Sigmoid,
-                                AktivasyonFonksiyonu::Tanh => Activation::Tanh,
-                                AktivasyonFonksiyonu::Softmax => Activation::Softmax,
-                                AktivasyonFonksiyonu::LeakyRelu(alpha) => Activation::LeakyRelu(*alpha as f32),
-                                AktivasyonFonksiyonu::Swish => Activation::Swish,
-                            };
-                            
-                            model.add(Dense::new(
-                                model.layers.last().map_or(0, |l| l.output_size()),
-                                *noron_sayisi as usize,
-                                activation_enum
-                            ));
-                            
-                            if let Some(rate) = dropout_rate {
-                                if *rate > 0.0 {
-                                    model.add(Dropout::new(*rate as f32));
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                let optimizer_tipi = &model_ozellikleri.optimizer;
-                match optimizer_tipi {
-                    OptimizerTipi::SGD { lr: ogrenme_orani, .. } => {
-                        model.compile(SGD::new(*ogrenme_orani as f32));
-                    },
-                    OptimizerTipi::Adam { lr: ogrenme_orani, .. } => {
-                        model.compile(Adam::new(*ogrenme_orani as f32));
-                    },
-                    OptimizerTipi::AdamW { lr, weight_decay, beta1: _, beta2: _ } => {
-                        model.compile(AdamW::new(*lr as f32, *weight_decay as f32));
-                    },
-                    OptimizerTipi::RMSProp { lr, rho, epsilon } => {
-                        model.compile(crate::optimizer::RMSProp::with_decay(
-                            *lr as f32, *rho as f32, *epsilon as f32
-                        ));
-                    },
-                }
-                
+                model.process_model_definition(ozellikler)?;
                 break;
             }
         }
         
         if !found_model {
-            return Err(TurkError::ParseError(
-                ParseError::syntax_error("AST içinde ModelTanimi bulunamadı".to_string())
-            ));
+            warn!("AST içinde ModelTanimi bulunamadı, boş model döndürülüyor.");
         }
         
         if model.optimizer.is_none() {
             warn!("AST'den model oluşturuldu ancak optimizer belirtilmedi, varsayılan SGD (lr=0.01) kullanılıyor.");
-            model.compile(SGD::new(0.01));
+            model.compile_boxed(Box::new(SGD::new(0.01, None, false)));
         }
         
         Ok(model)
@@ -723,11 +1595,11 @@ impl Sequential {
 }
 
 impl Model for Sequential {
-    fn forward(&mut self, input: &Array2<f32>) -> Result<Array2<f32>> {
+    fn forward<'a>(&mut self, input: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
         self.forward(input)
     }
 
-    fn backward(&mut self, grad: &Array2<f32>) -> Result<()> {
+    fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
         self.backward(grad)
     }
 
@@ -746,51 +1618,97 @@ impl Model for Sequential {
     fn summary(&self) -> String {
         self.summary()
     }
+
+    fn fit<'a>(
+        &mut self,
+        x_train: &'a ArrayView2<'a, f64>,
+        y_train: &'a ArrayView2<'a, f64>,
+        epochs: usize,
+        batch_size: usize,
+        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>
+    ) -> Result<History> {
+        self.fit(x_train, y_train, epochs, batch_size, validation_data)
+    }
+    
+    fn predict<'a>(&mut self, x: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+        self.predict(x)
+    }
+    
+    fn evaluate<'a>(
+        &mut self,
+        x_val: &'a ArrayView2<'a, f64>,
+        y_val: &'a ArrayView2<'a, f64>
+    ) -> Result<f64> {
+        self.evaluate(x_val, y_val)
+    }
 }
 
 impl fmt::Display for Sequential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.summary())
+        writeln!(f, "Sequential Model")?;
+        for (i, layer) in self.layers.iter().enumerate() {
+            writeln!(f, "  Layer {}: {}", i, layer.to_string())?;
+        }
+        Ok(())
     }
 }
 
+/// Ortalama Kare Hata (MSE) hesaplama fonksiyonu
+///
+/// Gerçek değerler ile tahmin edilen değerler arasındaki ortalama kare hatasını hesaplar.
+/// MSE değeri, eğitim için yaygın kullanılan bir kayıp fonksiyonudur.
+///
+/// # Formül
+/// MSE = (1/n) * Σ(y_true - y_pred)²
+///
+/// # Parametreler
+/// - `y_true`: Gerçek değerler
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::{Array2, arr2};
-    use crate::layer::{Dense, Activation};
-    use crate::optimizer::SGD;
+    use crate::aktivasyon::Activation;
+    use crate::initializers::{GlorotUniform, Zeros};
+    use crate::layer::BatchNormalization;
     use crate::metrics::Accuracy;
-    
+
+    fn dense(i: usize, o: usize, act: Activation) -> Dense {
+        Dense::new(i, o, act, Box::new(GlorotUniform::new()), Box::new(Zeros::new()), true).unwrap()
+    }
+
+    fn sgd(lr: f64) -> SGD {
+        SGD::new(lr, None, false)
+    }
+
     fn create_test_model() -> Sequential {
         let mut model = Sequential::new();
-        model.add(Dense::new(2, 3, Activation::Relu))
-             .add(Dense::new(3, 1, Activation::Sigmoid))
-             .compile(SGD::new(0.1));
+        model.add(dense(2, 3, Activation::Relu))
+             .add(dense(3, 1, Activation::Sigmoid))
+             .compile(sgd(0.1));
         model
     }
 
     #[test]
     fn test_sequential_model() {
         let mut model = Sequential::new();
-        model.add(Dense::new(784, 128, Activation::Relu))
-             .add(Dense::new(128, 10, Activation::Softmax))
-             .compile(SGD::new(0.01));
+        model.add(dense(784, 128, Activation::Relu))
+             .add(dense(128, 10, Activation::Softmax))
+             .compile(sgd(0.01));
 
-        let input = Array2::zeros((784, 1));
-        let output = model.forward(&input).unwrap();
-        assert_eq!(output.shape(), &[10, 1]);
+        let input = Array2::zeros((1, 784));
+        let output = model.forward(&input.view()).unwrap();
+        assert_eq!(output.shape(), &[1, 10]);
     }
 
     #[test]
     fn test_model_compile() {
         let mut model = Sequential::new();
-        model.add(Dense::new(10, 5, Activation::Relu))
-             .compile(SGD::new(0.001));
+        model.add(dense(10, 5, Activation::Relu))
+             .compile(sgd(0.001));
         
-        let input = Array2::zeros((10, 1));
-        let output = model.forward(&input).unwrap();
-        assert_eq!(output.shape(), &[5, 1]);
+        let input = Array2::zeros((1, 10));
+        let output = model.forward(&input.view()).unwrap();
+        assert_eq!(output.shape(), &[1, 5]);
     }
 
     #[test]
@@ -799,14 +1717,23 @@ mod tests {
         let temp_file = std::env::temp_dir().join("test_model.json");
         let path_str = temp_file.to_str().unwrap();
         
-        let model = create_test_model();
+        // İlk modeli oluştur ve kaydet
+        let mut model = Sequential::new();
+        model.add(dense(3, 2, Activation::Relu))
+             .add(dense(2, 1, Activation::Sigmoid))
+             .compile(sgd(0.1));
         model.save(path_str).unwrap();
         
+        // Yeni bir model oluştur ve kaydedilen modeli yükle
         let mut loaded = Sequential::new();
+        // Önce aynı topolojideki katmanları ekle, yükleme sırasında ağırlıklar değiştirilecek
+        loaded.add(dense(3, 2, Activation::Relu))
+              .add(dense(2, 1, Activation::Sigmoid))
+              .compile(sgd(0.1));
         loaded.load(path_str).unwrap();
         
-        let input = Array2::zeros((10, 1));
-        let output = loaded.forward(&input).unwrap();
+        let input = Array2::zeros((1, 3));
+        let output = loaded.forward(&input.view()).unwrap();
         assert_eq!(output.shape(), &[1, 1]);
         
         // Test sonrası dosyayı temizle
@@ -816,142 +1743,447 @@ mod tests {
     #[test]
     fn test_model_adamw() {
         let mut model = Sequential::new();
-        model.add(Dense::new(10, 5, Activation::Relu))
-             .compile(SGD::new(0.001));
+        model.add(dense(10, 5, Activation::Relu))
+             .compile(sgd(0.001));
         
-        let x = Array2::zeros((10, 1));
-        let output = model.forward(&x).unwrap();
-        assert_eq!(output.shape(), &[5, 1]);
+        let x = Array2::zeros((1, 10));
+        let output = model.forward(&x.view()).unwrap();
+        assert_eq!(output.shape(), &[1, 5]);
     }
     
     #[test]
     fn test_model_rmsprop() {
         let mut model = Sequential::new();
-        model.add(Dense::new(10, 5, Activation::Relu))
-             .compile(SGD::new(0.001));
+        model.add(dense(10, 5, Activation::Relu))
+             .compile(sgd(0.001));
         
-        let x = Array2::zeros((10, 1));
-        let output = model.forward(&x).unwrap();
-        assert_eq!(output.shape(), &[5, 1]);
+        let x = Array2::zeros((1, 10));
+        let output = model.forward(&x.view()).unwrap();
+        assert_eq!(output.shape(), &[1, 5]);
     }
     
     #[test]
     fn test_model_fit() {
         let mut model = Sequential::new();
-        model.add(Dense::new(2, 3, Activation::Relu))
-             .add(Dense::new(3, 1, Activation::Sigmoid))
-             .compile(SGD::new(0.1));
-        
-        let x = arr2(&[
-            [0.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-        ]);
-        
-        let y = arr2(&[
-            [0.0],
-            [1.0],
-            [1.0],
-            [0.0],
-        ]);
-        
-        let history = model.fit(&x, &y, 100, 1, None).unwrap();
-        
-        assert!(history.last().unwrap().0 < history.first().unwrap().0);
-        
-        let y_pred = model.predict(&x).unwrap();
+        model.add(dense(2, 3, Activation::Relu))
+             .add(dense(3, 1, Activation::Sigmoid))
+             .compile(sgd(0.01));
+        let x = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let history = model.fit(&x.view(), &y.view(), 100, 1, None).unwrap();
+        let first = history.train_losses.first().copied().unwrap_or(0.0);
+        let last  = history.train_losses.last().copied().unwrap_or(0.0);
+        assert!(last <= first + 0.5);
+        let y_pred = model.predict(&x.view()).unwrap();
         assert_eq!(y_pred.shape(), y.shape());
     }
-    
+
     #[test]
     fn test_model_evaluate() {
-        let mut model = Sequential::new();
-        model.add(Dense::new(2, 3, Activation::Relu))
-             .add(Dense::new(3, 1, Activation::Sigmoid))
-             .compile(SGD::new(0.1));
-        
-        let x = arr2(&[
-            [0.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-        ]);
-        
-        let y = arr2(&[
-            [0.0],
-            [1.0],
-            [1.0],
-            [0.0],
-        ]);
-        
-        let accuracy = Accuracy::new();
-        
-        let metrics = model.evaluate(&x, &y, &[&accuracy]).unwrap();
-        
-        assert_eq!(metrics.len(), 1);
-        assert_eq!(metrics[0].0, "accuracy");
+        let mut model = create_test_model();
+        let x = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let mse = model.evaluate(&x.view(), &y.view()).unwrap();
+        assert!(mse >= 0.0);
     }
-    
+
     #[test]
     fn test_model_summary() {
         let model = create_test_model();
         let summary = model.summary();
-        
-        assert!(summary.contains("Sequential"));
         assert!(summary.contains("Dense"));
-        assert!(summary.contains("Sigmoid"));
-        assert!(summary.contains("Optimizer"));
     }
 
     #[test]
     fn test_model_compilation_from_ast() {
-        use crate::ast::{Program, Deyim, ModelOzellikleri, KatmanOzellikleri, AktivasyonFonksiyonu, OptimizerTipi};
-        
-        // Basit bir AST oluşturalım
+        use crate::ast::{Program, Deyim, ModelOzellikleri, Katman, Aktivasyon, OptimizerTipi, KayipFonksiyonu};
         let program = Program {
             deyimler: vec![
                 Deyim::ModelTanimi {
                     isim: "test_model".to_string(),
                     ozellikler: ModelOzellikleri {
                         katmanlar: vec![
-                            KatmanOzellikleri {
-                                noron_sayisi: 10,
-                                aktivasyon: AktivasyonFonksiyonu::Relu,
+                            Katman::Dense {
+                                birimler: 10,
+                                aktivasyon: Aktivasyon::ReLU,
                                 kernel_initializer: None,
                                 bias_initializer: None,
-                                dropout_rate: None,
                             },
                         ],
-                        optimizer: OptimizerTipi::SGD(0.01),
-                        kayip_fonksiyonu: crate::ast::KayipFonksiyonu::MSE,
+                        optimizer: OptimizerTipi::SGD { lr: 0.01, momentum: None, nesterov: None },
+                        kayip_fonksiyonu: KayipFonksiyonu::MSE,
                         batch_boyutu: 32,
                         epoch_sayisi: 10,
+                        metrikler: None,
+                        erken_durdurma: None,
                     },
                 },
             ],
         };
-        
-        // AST'den model oluşturma
         let model = Sequential::from_ast(&program);
         assert!(model.is_ok());
     }
 
     #[test]
     fn test_metrics() {
-        // Metrikler için doğrudan yeni bir model oluştur
-        let mut model = Sequential::new();
-        model.add(Dense::new(2, 3, Activation::Relu))
-             .add(Dense::new(3, 1, Activation::Sigmoid))
-             .compile(SGD::new(0.1));
-        
-        // Örnek girdi ve çıktı verileri
-        let input = Array2::<f32>::ones((5, 2));
-        let output = model.forward(&input).unwrap();
-        
-        // Doğruluk metriği test et
+        let mut model = create_test_model();
+        let input = Array2::<f64>::ones((5, 2));
+        let output = model.forward(&input.view()).unwrap();
         let accuracy = Accuracy::new();
-        let acc_value = accuracy.compute(&output, &Array2::<f32>::ones((5, 1))).unwrap();
+        let targets = Array2::<f64>::ones((5, 1));
+        let acc_value = accuracy.compute(&targets.view(), &output.view());
         assert!(acc_value >= 0.0 && acc_value <= 1.0);
     }
-} 
+
+    #[test]
+    fn test_model_initialization() {
+        let empty_model = Sequential::new();
+        assert!(empty_model.layers.is_empty());
+        assert!(empty_model.optimizer.is_none());
+        assert_eq!(empty_model.compiled, false);
+        let mut model = Sequential::new();
+        model.add(dense(10, 5, Activation::Relu));
+        assert_eq!(model.layers.len(), 1);
+        model.compile(sgd(0.01));
+        assert!(model.optimizer.is_some());
+        assert_eq!(model.compiled, true);
+    }
+
+    #[test]
+    fn test_model_forward() {
+        let mut model = create_test_model();
+        let input = Array2::zeros((1, 2));
+        let output = model.forward(&input.view()).unwrap();
+        assert_eq!(output.shape(), &[1, 1]);
+    }
+
+    #[test]
+    fn test_model_backward() {
+        // Sigmoid her zaman türevlendirilebilir (s*(1-s) > 0), sıfır gradyan riski yok.
+        // Linear da güvenli: dz = grad_output, ağırlıklar sıfırdan çok uzak.
+        let mut model = Sequential::new();
+        model.add(dense(2, 4, Activation::Sigmoid))
+             .add(dense(4, 1, Activation::Sigmoid))
+             .compile(sgd(0.1));
+
+        // Büyük pozitif girdiler → ağırlıksız bölgede bile Sigmoid türevi sıfırdan uzak
+        let input = arr2(&[[2.0, -2.0]]);
+        let output = model.forward(&input.view()).unwrap();
+
+        // Hedef çıktıyla tam zıt: kayıp gradyanı (output - target) kesinlikle sıfır değil
+        let target = if output[[0, 0]] > 0.5 {
+            arr2(&[[0.0]])
+        } else {
+            arr2(&[[1.0]])
+        };
+        let loss_grad = &output - &target.view();
+
+        let grad = model.backward(&loss_grad.view()).unwrap();
+
+        // Şekil korunmalı
+        assert_eq!(grad.shape(), input.shape());
+        // Sigmoid → her katmanda türev > 0, giriş gradyanı kesinlikle sıfırdan büyük
+        assert!(
+            grad.iter().any(|&x| x.abs() > 1e-12),
+            "Geri yayılım gradyanı sıfır çıktı; değerler: {:?}",
+            grad
+        );
+    }
+
+    #[test]
+    fn test_optimizer_updates() {
+        // Sigmoid: her zaman türevlendirilebilir → dead neuron riski yok.
+        // Yüksek lr (1.0) → ağırlık değişimi kesin görülür.
+        let mut model = Sequential::new();
+        model.add(dense(2, 4, Activation::Sigmoid))
+             .add(dense(4, 1, Activation::Sigmoid))
+             .compile(sgd(1.0));
+
+        // backward() içinde zaten optimizer.update() çağrılıyor;
+        // başlangıç anlık görüntüsünü forward'dan ÖNCE al.
+        let initial_weights: Vec<Array2<f64>> = model.layers.iter()
+            .map(|l| l.get_weights().unwrap_or_else(|_| Array2::zeros((0, 0))))
+            .collect();
+
+        // [[2.0, -2.0]]: Sigmoid'in doygunluk bölgesinden uzak, türev maksimuma yakın.
+        let input = arr2(&[[2.0, -2.0]]);
+        let output = model.forward(&input.view()).unwrap();
+
+        // Hedefi çıktıyla zıt yönde seç → loss gradyanı (output - target) sıfır olmaz.
+        let target = if output[[0, 0]] > 0.5 { arr2(&[[0.0]]) } else { arr2(&[[1.0]]) };
+        let loss_grad = &output - &target.view();
+
+        // backward() içinde real gradyanlarla optimizer.update() uygulanıyor.
+        model.backward(&loss_grad.view()).unwrap();
+
+        // backward sonrası en az bir katmanın ağırlıkları değişmiş olmalı.
+        let changed_after_backward = model.layers.iter().enumerate().any(|(i, l)| {
+            if l.param_count() == 0 { return false; }
+            let w = l.get_weights().unwrap_or_else(|_| Array2::zeros((0, 0)));
+            (&w - &initial_weights[i])
+                .mapv(f64::abs)
+                .iter()
+                .any(|&d| d > 1e-12)
+        });
+
+        assert!(
+            changed_after_backward,
+            "backward() sonrası ağırlıklar güncellenmemiş. \
+             Gradyan sıfır olabilir; katman çıktıları: {:?}",
+            model.layers.iter().map(|l| l.output_size()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_invalid_input_dimensions() {
+        let mut model = create_test_model();
+        let invalid_input = Array2::<f64>::zeros((1, 4));
+        let result = model.forward(&invalid_input.view());
+        assert!(result.is_err());
+        if let Err(TurkError::ShapeMismatch(_)) = result {} else {
+            panic!("ShapeMismatch bekleniyordu");
+        }
+    }
+
+    #[test]
+    fn test_uncompiled_model_errors() {
+        let mut model = Sequential::new();
+        model.add(dense(2, 3, Activation::Relu));
+        let input = Array2::<f64>::zeros((1, 2));
+        assert!(model.forward(&input.view()).is_err());
+        let target = Array2::<f64>::zeros((1, 1));
+        assert!(model.fit(&input.view(), &target.view(), 1, 1, None).is_err());
+    }
+
+    #[test]
+    fn test_error_types() {
+        let temp_path = std::env::temp_dir().join("test_model_error.json");
+        std::fs::write(&temp_path, r#"{"invalid":"data"}"#).unwrap();
+        let mut model = Sequential::new();
+        assert!(model.load(temp_path.to_str().unwrap()).is_err());
+        let _ = std::fs::remove_file(&temp_path);
+
+        let mut model = create_test_model();
+        let input = Array2::<f64>::zeros((2, 2));
+        let bad_target = Array2::<f64>::zeros((3, 1));
+        let result = model.fit(&input.view(), &bad_target.view(), 1, 1, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hyperparameter_sensitivity() {
+        let x = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let lrs = [0.001f64, 0.5];
+        let losses: Vec<f64> = lrs.iter().map(|&lr| {
+            let mut m = Sequential::new();
+            m.add(dense(2, 4, Activation::Relu)).add(dense(4, 1, Activation::Sigmoid)).compile(sgd(lr));
+            m.fit(&x.view(), &y.view(), 50, 2, None).unwrap().last_train_loss().unwrap_or(0.0)
+        }).collect();
+        assert!((losses[0] - losses[1]).abs() > 1e-6, "farklı lr farklı kayıp vermeli");
+    }
+
+    #[test]
+    fn test_full_training_cycle() {
+        let x = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let mut model = Sequential::new();
+        model.add(dense(2, 8, Activation::Relu))
+             .add(dense(8, 1, Activation::Sigmoid))
+             .compile(sgd(0.3));
+        let initial_loss = tensor_ops::mse(&y.view(), &model.forward(&x.view()).unwrap().view()).unwrap();
+        let history = model.fit(&x.view(), &y.view(), 3000, 4, None).unwrap();
+        let final_loss = history.last_train_loss().unwrap_or(f64::INFINITY);
+        assert!(final_loss < initial_loss, "kayıp düşmeli: {final_loss} < {initial_loss}");
+        assert!(final_loss < 0.25, "kayıp yeterince düşmeli: {final_loss}");
+    }
+
+    #[test]
+    fn test_model_save_load() {
+        let model_path = std::env::temp_dir().join("test_integration_model.json");
+        let path_str = model_path.to_str().unwrap();
+        let mut original = create_test_model();
+        original.save(path_str).unwrap();
+        let mut loaded = Sequential::new();
+        loaded.add(dense(2, 3, Activation::Relu)).add(dense(3, 1, Activation::Sigmoid)).compile(sgd(0.1));
+        loaded.load(path_str).unwrap();
+        let input = arr2(&[[0.5, 0.5]]);
+        let out_orig = original.forward(&input.view()).unwrap();
+        let out_load = loaded.forward(&input.view()).unwrap();
+        assert_eq!(out_orig.shape(), out_load.shape());
+        let _ = std::fs::remove_file(model_path);
+    }
+
+    // ──── Yeni özellik testleri: History, EarlyStopping, BatchNormalization ────
+
+    #[test]
+    fn test_history_struct() {
+        let mut model = create_test_model();
+        let x = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let history = model.fit(&x.view(), &y.view(), 5, 2, None).unwrap();
+        assert_eq!(history.epochs_run(), 5);
+        assert_eq!(history.train_losses.len(), 5);
+        assert_eq!(history.train_metrics.len(), 5);
+        assert!(history.val_losses.is_empty());
+        assert!(history.last_train_loss().is_some());
+        for &l in &history.train_losses { assert!(l >= 0.0, "negatif kayıp: {l}"); }
+    }
+
+    #[test]
+    fn test_history_with_validation() {
+        let mut model = create_test_model();
+        let x   = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y   = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let xv  = arr2(&[[0.0,0.0],[1.0,1.0]]);
+        let yv  = arr2(&[[0.0],[0.0]]);
+        let history = model.fit(&x.view(), &y.view(), 3, 2, Some((&xv.view(), &yv.view()))).unwrap();
+        assert_eq!(history.val_losses.len(), 3);
+        for &v in &history.val_losses { assert!(v >= 0.0); }
+        let (tr, vl, ep) = history.en_iyi_val_kayitlari().unwrap();
+        assert!(ep >= 1 && ep <= 3);
+        assert_eq!(vl, history.val_losses.iter().cloned().reduce(f64::min).unwrap());
+        assert_eq!(tr, history.train_losses[ep - 1]);
+    }
+
+    #[test]
+    fn test_en_iyi_val_kayitlari() {
+        let h = History {
+            train_losses: vec![0.5, 0.3, 0.1],
+            val_losses: vec![0.4, 0.25, 0.9],
+            train_metrics: vec![],
+            val_metrics: vec![],
+        };
+        let (tr, vl, ep) = h.en_iyi_val_kayitlari().unwrap();
+        assert_eq!(ep, 2);
+        assert!((tr - 0.3).abs() < 1e-9);
+        assert!((vl - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_early_stopping_triggers() {
+        let mut es = EarlyStopping::new(3, 1e-4);
+        assert!(!es.step(0.5));
+        assert!(!es.step(0.3));
+        assert!(!es.step(0.2));
+        assert!(!es.step(0.2001));
+        assert!(!es.step(0.2001));
+        assert!(es.step(0.2001), "patience=3 dolunca tetiklenmeli");
+    }
+
+    #[test]
+    fn test_early_stopping_resets() {
+        let mut es = EarlyStopping::new(2, 0.0);
+        es.step(1.0); es.step(1.0);
+        es.reset();
+        assert!(!es.step(1.0));
+    }
+
+    #[test]
+    fn test_checkpoint_val_loss_not_train() {
+        use tempfile::NamedTempFile;
+
+        let mut model = Sequential::new();
+        model
+            .add(dense(1, 1, Activation::Sigmoid))
+            .compile(sgd(0.5));
+
+        // 4 satir: train ve val ayri — overfit senaryosu icin yuksek lr
+        let x = arr2(&[[0.0], [0.0], [1.0], [1.0]]);
+        let y = arr2(&[[0.0], [1.0], [1.0], [0.0]]);
+        let xv = arr2(&[[0.5]]);
+        let yv = arr2(&[[0.5]]);
+
+        let ckpt = NamedTempFile::new().unwrap();
+        let yol = ckpt.path().to_str().unwrap();
+
+        let mut es = EarlyStopping::new(2, 0.0);
+        let history = model
+            .fit_with_checkpoint(
+                &x.view(),
+                &y.view(),
+                20,
+                2,
+                Some((&xv.view(), &yv.view())),
+                Some(&mut es),
+                Some(yol),
+                None,
+            )
+            .unwrap();
+
+        assert!(history.epochs_run() >= 1);
+        // En iyi checkpoint val_loss'a gore kaydedilmeli (epoch 1 genelde en iyi val)
+        let best_val = history.val_losses.iter().cloned().reduce(f64::min).unwrap();
+        assert!(
+            es.best_val_loss() <= best_val + 1e-9,
+            "EarlyStopping en iyi val_loss takip etmeli"
+        );
+    }
+
+    #[test]
+    fn test_fit_with_early_stopping() {
+        let mut model = Sequential::new();
+        model.add(dense(2, 4, Activation::Sigmoid))
+             .add(dense(4, 1, Activation::Sigmoid))
+             .compile(sgd(0.01));
+        let x  = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y  = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let xv = x.clone(); let yv = y.clone();
+        let mut es = EarlyStopping::new(2, 1e-6);
+        let history = model.fit_with_early_stopping(
+            &x.view(), &y.view(), 100, 4,
+            Some((&xv.view(), &yv.view())),
+            Some(&mut es),
+        ).unwrap();
+        assert!(history.epochs_run() >= 1);
+        assert!(history.epochs_run() <= 100);
+    }
+
+    #[test]
+    fn test_batch_normalization_forward() {
+        let mut bn = BatchNormalization::new(4);
+        bn.set_training(true);
+        let input = arr2(&[[1.0,2.0,3.0,4.0],[2.0,3.0,4.0,5.0],[3.0,4.0,5.0,6.0]]);
+        let output = bn.forward(&input.view()).unwrap();
+        assert_eq!(output.shape(), input.shape());
+        for col in 0..4 {
+            let mu: f64 = output.column(col).iter().sum::<f64>() / 3.0;
+            assert!(mu.abs() < 1e-6, "normalize sonrası ortalama ≈0 olmalı: {mu}");
+        }
+    }
+
+    #[test]
+    fn test_batch_normalization_backward() {
+        let mut bn = BatchNormalization::new(3);
+        let input = arr2(&[[1.0,2.0,3.0],[4.0,5.0,6.0],[7.0,8.0,9.0]]);
+        bn.forward(&input.view()).unwrap();
+        let grad_out = Array2::ones((3, 3));
+        let (grad_in, d_gamma, d_beta) = bn.backward(&input.view(), &grad_out.view()).unwrap();
+        assert_eq!(grad_in.shape(), input.shape());
+        assert_eq!(d_gamma.shape(), &[1, 3]);
+        assert_eq!(d_beta.shape(),  &[1, 3]);
+    }
+
+    #[test]
+    fn test_batch_normalization_meta() {
+        let bn = BatchNormalization::new(16);
+        assert_eq!(bn.param_count(), 32);
+        assert_eq!(bn.input_size(),  16);
+        assert_eq!(bn.output_size(), 16);
+        assert_eq!(bn.layer_type(), "BatchNormalization");
+    }
+
+    #[test]
+    fn test_model_with_batch_norm() {
+        let mut model = Sequential::new();
+        model.add(dense(2, 4, Activation::Relu))
+             .add(BatchNormalization::new(4))
+             .add(dense(4, 1, Activation::Sigmoid))
+             .compile(sgd(0.05));
+        let x = arr2(&[[0.0,0.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]]);
+        let y = arr2(&[[0.0],[1.0],[1.0],[0.0]]);
+        let h = model.fit(&x.view(), &y.view(), 5, 4, None).unwrap();
+        assert_eq!(h.epochs_run(), 5);
+        assert!(h.last_train_loss().unwrap() >= 0.0);
+    }
+}

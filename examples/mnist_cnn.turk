@@ -1,0 +1,28 @@
+# ══════════════════════════════════════════════════════
+#  TÜRK — MNIST CNN (Evrişimli Ağ)
+#  Çalıştır: cargo run -- check examples/mnist_cnn.turk
+#            cargo run -- run examples/mnist_cnn.turk
+#  Not: Girdi 28x28=784 piksel (düzleştirilmiş MNIST satırı)
+# ══════════════════════════════════════════════════════
+
+model_olustur()
+
+# Conv bloğu 1: 28x28x1 -> 26x26x8 -> 13x13x8
+katman_ekle(conv2d(28, 28, 1, 8, 3, relu))
+katman_ekle(maxpool(26, 26, 8, 2))
+
+# Conv bloğu 2: 13x13x8 -> 11x11x16 -> 5x5x16
+katman_ekle(conv2d(13, 13, 8, 16, 3, relu))
+katman_ekle(maxpool(11, 11, 16, 2))
+
+# Sınıflandırıcı başı
+katman_ekle(yogun(400, 64, relu))
+katman_ekle(yogun(64, 10, sigmoid))
+
+derle(adam, loss=mse, ogrenme_orani=0.001)
+model_bilgisi()
+
+# XOR benzeri küçük test için proje.turk kullanın;
+# MNIST CSV (784 sütun + label) ile:
+# veri_yukle("mnist_train.csv", bolme=0.1)
+# egit(5, 32, sabir=3)

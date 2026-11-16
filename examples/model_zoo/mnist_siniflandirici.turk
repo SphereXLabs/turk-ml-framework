@@ -62,7 +62,6 @@ kaydet MnistSiniflandirici {
     dosya = "mnist_model.turk"
     format = TURK
 }
-
 # Alternatif ONNX formatında kaydetme
 kaydet MnistSiniflandirici {
     dosya = "mnist_model.onnx"

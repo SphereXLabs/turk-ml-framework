@@ -1,0 +1,16 @@
+# TÜRK Model Zoo — MNIST CNN
+# Girdi: mnist_train.csv (784 piksel duzlestirilmis + label)
+
+model_olustur()
+katman_ekle(conv2d(28, 28, 1, 8, 3, relu))
+katman_ekle(maxpool(26, 26, 8, 2))
+katman_ekle(conv2d(13, 13, 8, 16, 3, relu))
+katman_ekle(maxpool(11, 11, 16, 2))
+katman_ekle(yogun(400, 64, relu))
+katman_ekle(yogun(64, 10, sigmoid))
+derle(adam, loss=mse, ogrenme_orani=0.001)
+model_bilgisi()
+
+# veri_yukle GUI tarafindan enjekte edilir
+egit(5, 64, sabir=3)
+kaydet("mnist_cnn_model.json")

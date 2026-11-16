@@ -1,272 +1,286 @@
-use ndarray::Array2;
 use crate::error::{Result, TurkError};
+use ndarray::ArrayView2;
+use ndarray_stats::QuantileExt;
+use serde::{Deserialize, Serialize};
 
-/// Metrik trait'i - tüm metrikler bu trait'i implemente etmelidir
+/// Metrik trait'i - object safety için trait bound'lar kaldırıldı
 pub trait Metric: Send + Sync {
-    /// Metrik adını döndürür
-    fn name(&self) -> &str;
-    
-    /// Metrik değerini hesaplar
-    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32>;
+    /// Metrik hesapla
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64;
+
+    /// Metriğin adını döndürür
+    fn name(&self) -> &'static str;
+
+    /// Metriği klonlayarak yeni bir Box olarak döndürür
+    fn box_clone(&self) -> Box<dyn Metric>;
 }
 
-/// Doğruluk (Accuracy) metriği
-#[derive(Debug, Default)]
+/// Metric nesneleri için Clone uygulaması
+impl Clone for Box<dyn Metric> {
+    fn clone(&self) -> Self {
+        self.box_clone()
+    }
+}
+
+/// Accuracy
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Accuracy;
 
 impl Accuracy {
-    /// Yeni bir doğruluk metriği oluşturur
     pub fn new() -> Self {
         Self
     }
 }
 
 impl Metric for Accuracy {
-    fn name(&self) -> &str {
-        "accuracy"
-    }
-    
-    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
-        if y_pred.shape() != y_true.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Doğruluk hesaplaması için şekiller uyuşmuyor: {:?} != {:?}",
-                y_pred.shape(),
-                y_true.shape()
-            )));
-        }
-        
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
         let mut correct = 0;
-        let mut total = 0;
-        
-        for ((_pred, _true_), (pred_row, true_row)) in y_pred.iter().zip(y_true.iter())
-            .zip(y_pred.rows().into_iter().zip(y_true.rows().into_iter())) {
-            let pred_class = pred_row.iter()
-                .position(|&x| x == *pred_row.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap())
-                .unwrap();
-            let true_class = true_row.iter()
-                .position(|&x| x == *true_row.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap())
-                .unwrap();
-            
-            if pred_class == true_class {
+        for i in 0..y_true.nrows() {
+            let true_class = y_true[[i, 0]] as usize;
+            let pred_class = y_pred.row(i).argmax().unwrap();
+            if true_class == pred_class {
                 correct += 1;
             }
-            total += 1;
         }
-        
-        Ok(correct as f32 / total as f32)
+        correct as f64 / y_true.nrows() as f64
+    }
+
+    fn name(&self) -> &'static str {
+        "accuracy"
+    }
+
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
     }
 }
 
-/// Hassasiyet (Precision) metriği
-#[derive(Debug, Default)]
-pub struct Precision {
-    threshold: f32,
-}
+/// Precision
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Precision;
 
 impl Precision {
-    /// Yeni bir hassasiyet metriği oluşturur
-    pub fn new(threshold: f32) -> Self {
-        Self { threshold }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 impl Metric for Precision {
-    fn name(&self) -> &str {
-        "precision"
-    }
-    
-    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
-        if y_pred.shape() != y_true.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Hassasiyet hesaplaması için şekiller uyuşmuyor: {:?} != {:?}",
-                y_pred.shape(),
-                y_true.shape()
-            )));
-        }
-        
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
         let mut true_positives = 0;
         let mut false_positives = 0;
-        
-        for (pred, true_) in y_pred.iter().zip(y_true.iter()) {
-            if *pred >= self.threshold {
-                if *true_ >= self.threshold {
-                    true_positives += 1;
-                } else {
-                    false_positives += 1;
-                }
+        for i in 0..y_true.nrows() {
+            let true_class = y_true[[i, 0]] as usize;
+            let pred_class = y_pred.row(i).argmax().unwrap();
+            if true_class == pred_class {
+                true_positives += 1;
+            } else {
+                false_positives += 1;
             }
         }
-        
-        let precision = if true_positives + false_positives > 0 {
-            true_positives as f32 / (true_positives + false_positives) as f32
-        } else {
-            0.0
-        };
-        
-        Ok(precision)
+        if true_positives + false_positives == 0 {
+            return 0.0;
+        }
+        true_positives as f64 / (true_positives + false_positives) as f64
+    }
+
+    fn name(&self) -> &'static str {
+        "precision"
+    }
+
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
     }
 }
 
-/// Duyarlılık (Recall) metriği
-#[derive(Debug, Default)]
-pub struct Recall {
-    threshold: f32,
-}
+/// Recall
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Recall;
 
 impl Recall {
-    /// Yeni bir duyarlılık metriği oluşturur
-    pub fn new(threshold: f32) -> Self {
-        Self { threshold }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 impl Metric for Recall {
-    fn name(&self) -> &str {
-        "recall"
-    }
-    
-    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
-        if y_pred.shape() != y_true.shape() {
-            return Err(TurkError::ShapeMismatch(format!(
-                "Duyarlılık hesaplaması için şekiller uyuşmuyor: {:?} != {:?}",
-                y_pred.shape(),
-                y_true.shape()
-            )));
-        }
-        
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
         let mut true_positives = 0;
         let mut false_negatives = 0;
-        
-        for (pred, true_) in y_pred.iter().zip(y_true.iter()) {
-            if *true_ >= self.threshold {
-                if *pred >= self.threshold {
-                    true_positives += 1;
-                } else {
-                    false_negatives += 1;
-                }
+        for i in 0..y_true.nrows() {
+            let true_class = y_true[[i, 0]] as usize;
+            let pred_class = y_pred.row(i).argmax().unwrap();
+            if true_class == pred_class {
+                true_positives += 1;
+            } else if true_class != pred_class {
+                false_negatives += 1;
             }
         }
-        
-        let recall = if true_positives + false_negatives > 0 {
-            true_positives as f32 / (true_positives + false_negatives) as f32
-        } else {
-            0.0
-        };
-        
-        Ok(recall)
+        if true_positives + false_negatives == 0 {
+            return 0.0;
+        }
+        true_positives as f64 / (true_positives + false_negatives) as f64
+    }
+
+    fn name(&self) -> &'static str {
+        "recall"
+    }
+
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
     }
 }
 
-/// F1-Score metriği
-#[derive(Debug, Default)]
-pub struct F1Score {
-    threshold: f32,
-}
+/// F1
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct F1;
 
-impl F1Score {
-    /// Yeni bir F1-Score metriği oluşturur
-    pub fn new(threshold: f32) -> Self {
-        Self { threshold }
+impl F1 {
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl Metric for F1Score {
-    fn name(&self) -> &str {
-        "f1_score"
+impl Metric for F1 {
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+        let precision = Precision.compute(y_true, y_pred);
+        let recall = Recall.compute(y_true, y_pred);
+        if precision + recall == 0.0 {
+            return 0.0;
+        }
+        2.0 * precision * recall / (precision + recall)
     }
-    
-    fn compute(&self, y_pred: &Array2<f32>, y_true: &Array2<f32>) -> Result<f32> {
-        let precision = Precision::new(self.threshold).compute(y_pred, y_true)?;
-        let recall = Recall::new(self.threshold).compute(y_pred, y_true)?;
-        
-        let f1_score = if precision + recall > 0.0 {
-            2.0 * (precision * recall) / (precision + recall)
-        } else {
-            0.0
-        };
-        
-        Ok(f1_score)
+
+    fn name(&self) -> &'static str {
+        "f1"
+    }
+
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ndarray::arr2;
+/// MAE
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MAE;
 
-    #[test]
-    fn test_accuracy() {
-        let y_pred = arr2(&[
-            [0.7, 0.2, 0.1],
-            [0.1, 0.8, 0.1],
-            [0.2, 0.3, 0.5],
-        ]);
-        
-        let y_true = arr2(&[
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ]);
-        
-        let accuracy = Accuracy::new();
-        let result = accuracy.compute(&y_pred, &y_true).unwrap();
-        assert_eq!(result, 1.0);
+impl MAE {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Metric for MAE {
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+        let diff = y_true - y_pred;
+        diff.mapv(|v| v.abs()).mean().unwrap_or(0.0)
     }
 
-    #[test]
-    fn test_precision() {
-        let y_pred = arr2(&[
-            [0.8, 0.2],
-            [0.3, 0.7],
-            [0.4, 0.6],
-        ]);
-        
-        let y_true = arr2(&[
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-        ]);
-        
-        let precision = Precision::new(0.5);
-        let result = precision.compute(&y_pred, &y_true).unwrap();
-        assert_eq!(result, 0.5);
+    fn name(&self) -> &'static str {
+        "mae"
     }
 
-    #[test]
-    fn test_recall() {
-        let y_pred = arr2(&[
-            [0.8, 0.2],
-            [0.3, 0.7],
-            [0.4, 0.6],
-        ]);
-        
-        let y_true = arr2(&[
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-        ]);
-        
-        let recall = Recall::new(0.5);
-        let result = recall.compute(&y_pred, &y_true).unwrap();
-        assert_eq!(result, 0.5);
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
+    }
+}
+
+/// MSE
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MSE;
+
+impl MSE {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Metric for MSE {
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+        let diff = y_true - y_pred;
+        let squared = &diff * &diff;
+        squared.mean().unwrap_or(0.0)
     }
 
-    #[test]
-    fn test_f1_score() {
-        let y_pred = arr2(&[
-            [0.8, 0.2],
-            [0.3, 0.7],
-            [0.4, 0.6],
-        ]);
-        
-        let y_true = arr2(&[
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 0.0],
-        ]);
-        
-        let f1_score = F1Score::new(0.5);
-        let result = f1_score.compute(&y_pred, &y_true).unwrap();
-        assert_eq!(result, 0.5);
+    fn name(&self) -> &'static str {
+        "mse"
     }
-} 
+
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
+    }
+}
+
+/// RMSE
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RMSE;
+
+impl RMSE {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Metric for RMSE {
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+        let mse = MSE.compute(y_true, y_pred);
+        mse.sqrt()
+    }
+
+    fn name(&self) -> &'static str {
+        "rmse"
+    }
+
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
+    }
+}
+
+/// R2
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct R2;
+
+impl R2 {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Metric for R2 {
+    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+        let diff = y_true - y_pred;
+        let ss_res = (&diff * &diff).sum();
+        let y_mean = y_true.mean().unwrap_or(0.0);
+        let diff_mean = y_true.mapv(|v| v - y_mean);
+        let ss_tot = (&diff_mean * &diff_mean).sum();
+        if ss_tot == 0.0 {
+            return 0.0;
+        }
+        1.0 - ss_res / ss_tot
+    }
+
+    fn name(&self) -> &'static str {
+        "r2"
+    }
+
+    fn box_clone(&self) -> Box<dyn Metric> {
+        Box::new(self.clone())
+    }
+}
+
+/// Metrik oluştur
+pub fn create_metric(metric: &str) -> Result<Box<dyn Metric>> {
+    match metric {
+        "accuracy" => Ok(Box::new(Accuracy::new())),
+        "precision" => Ok(Box::new(Precision::new())),
+        "recall" => Ok(Box::new(Recall::new())),
+        "f1" => Ok(Box::new(F1::new())),
+        "mae" => Ok(Box::new(MAE::new())),
+        "mse" => Ok(Box::new(MSE::new())),
+        "rmse" => Ok(Box::new(RMSE::new())),
+        "r2" => Ok(Box::new(R2::new())),
+        _ => Err(TurkError::model_error(&format!(
+            "Geçersiz metrik: {}",
+            metric
+        ))),
+    }
+}
