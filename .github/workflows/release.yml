@@ -11,213 +11,124 @@ env:
   GUI_BINARY_NAME: turk_gui
 
 jobs:
-  # Platformlara özgü derlemeler
   build:
     name: Build Release Binary (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
             asset_name: turk-linux-amd64
+            gui: false
           - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset_name: turk-windows-amd64.exe
+            asset_name: turk-windows-amd64
+            gui: true
           - os: macos-latest
-            target: x86_64-apple-darwin
             asset_name: turk-macos-amd64
+            gui: false
 
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Rust Sürümünü Kur
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        target: ${{ matrix.target }}
-        override: true
-    
-    - name: Önbelleği Kur
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-    
-    - name: CLI Uygulamasını Derle
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --release --locked --features="cli" --bin ${{ env.BINARY_NAME }}
-    
-    - name: GUI Uygulamasını Derle
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --release --locked --features="gui" --bin ${{ env.GUI_BINARY_NAME }}
+      - uses: actions/checkout@v4
 
-    - name: CLI Binary'yi Adlandır (Unix)
-      if: matrix.os != 'windows-latest'
-      run: |
-        cd target/release
-        mv ${{ env.BINARY_NAME }} ${{ matrix.asset_name }}
-        chmod +x ${{ matrix.asset_name }}
-    
-    - name: GUI Binary'yi Adlandır (Unix)
-      if: matrix.os != 'windows-latest'
-      run: |
-        cd target/release
-        mv ${{ env.GUI_BINARY_NAME }} ${{ matrix.asset_name }}_gui
-        chmod +x ${{ matrix.asset_name }}_gui
-    
-    - name: CLI Binary'yi Adlandır (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        cd target/release
-        move ${{ env.BINARY_NAME }}.exe ${{ matrix.asset_name }}
-    
-    - name: GUI Binary'yi Adlandır (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        cd target/release
-        move ${{ env.GUI_BINARY_NAME }}.exe ${{ matrix.asset_name }}_gui.exe
-    
-    - name: CLI Binary'yi Yükle
-      uses: actions/upload-artifact@v3
-      with:
-        name: ${{ matrix.asset_name }}
-        path: target/release/${{ matrix.asset_name }}
-    
-    - name: GUI Binary'yi Yükle
-      uses: actions/upload-artifact@v3
-      with:
-        name: ${{ matrix.asset_name }}_gui${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-        path: target/release/${{ matrix.asset_name }}_gui${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      - uses: dtolnay/rust-toolchain@stable
 
-  # Sürüm oluşturma
+      - uses: Swatinem/rust-cache@v2
+
+      - name: CLI Uygulamasını Derle
+        run: cargo build --release --locked --features cli --bin ${{ env.BINARY_NAME }}
+
+      - name: GUI Uygulamasını Derle (Windows)
+        if: matrix.gui
+        run: cargo build --release --locked --features gui --bin ${{ env.GUI_BINARY_NAME }}
+
+      - name: CLI Binary'yi Adlandır (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/release
+          mv ${{ env.BINARY_NAME }} ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
+
+      - name: CLI Binary'yi Adlandır (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Move-Item target/release/${{ env.BINARY_NAME }}.exe target/release/${{ matrix.asset_name }}.exe
+
+      - name: GUI Binary'yi Adlandır (Windows)
+        if: matrix.gui && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Move-Item target/release/${{ env.GUI_BINARY_NAME }}.exe target/release/${{ matrix.asset_name }}_gui.exe
+
+      - name: CLI Artifact Yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: target/release/${{ matrix.asset_name }}${{ runner.os == 'Windows' && '.exe' || '' }}
+
+      - name: GUI Artifact Yükle
+        if: matrix.gui
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}_gui.exe
+          path: target/release/${{ matrix.asset_name }}_gui.exe
+
   create-release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Versiyon Bilgisini Çıkar
-      id: get_version
-      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-      shell: bash
+      - name: Versiyon Bilgisini Çıkar
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
-    - name: Değişiklik Listesini Oluştur
-      id: changelog
-      uses: mikepenz/release-changelog-builder-action@v3
-      with:
-        configuration: "changelog-config.json"
-        commitMode: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Artifact'ları İndir
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
 
-    - name: Sürüm Oluştur
-      id: create_release
-      uses: softprops/action-gh-release@v1
-      with:
-        name: TÜRK v${{ steps.get_version.outputs.version }}
-        tag_name: ${{ github.ref }}
-        body: |
-          # TÜRK v${{ steps.get_version.outputs.version }}
-          
-          ${{ steps.changelog.outputs.changelog }}
-          
-          ## Binary Dosyaları
-          
-          - Linux (x64): `turk-linux-amd64`, `turk-linux-amd64_gui`
-          - Windows (x64): `turk-windows-amd64.exe`, `turk-windows-amd64_gui.exe`
-          - macOS (x64): `turk-macos-amd64`, `turk-macos-amd64_gui`
-          
-          ## Kurulum
-          
-          Kurulum talimatları için lütfen [INSTALL.md](https://github.com/kullaniciadi/turk/blob/main/INSTALL.md) dosyasına bakın.
-        draft: false
-        prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-alpha') || contains(github.ref, '-beta') }}
-        files: |
-          LICENSE
-          README.md
-          INSTALL.md
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sürüm Oluştur
+        uses: softprops/action-gh-release@v2
+        with:
+          name: TÜRK v${{ steps.get_version.outputs.version }}
+          body: |
+            # TÜRK v${{ steps.get_version.outputs.version }}
 
-    - name: Linux Binary'yi İndir
-      uses: actions/download-artifact@v3
-      with:
-        name: turk-linux-amd64
-        path: ./
-    
-    - name: Windows Binary'yi İndir
-      uses: actions/download-artifact@v3
-      with:
-        name: turk-windows-amd64.exe
-        path: ./
-    
-    - name: MacOS Binary'yi İndir
-      uses: actions/download-artifact@v3
-      with:
-        name: turk-macos-amd64
-        path: ./
-    
-    - name: Linux GUI Binary'yi İndir
-      uses: actions/download-artifact@v3
-      with:
-        name: turk-linux-amd64_gui
-        path: ./
-    
-    - name: Windows GUI Binary'yi İndir
-      uses: actions/download-artifact@v3
-      with:
-        name: turk-windows-amd64_gui.exe
-        path: ./
-    
-    - name: MacOS GUI Binary'yi İndir
-      uses: actions/download-artifact@v3
-      with:
-        name: turk-macos-amd64_gui
-        path: ./
-    
-    - name: Binary'leri Sürüme Yükle
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          ./turk-linux-amd64
-          ./turk-windows-amd64.exe
-          ./turk-macos-amd64
-          ./turk-linux-amd64_gui
-          ./turk-windows-amd64_gui.exe
-          ./turk-macos-amd64_gui
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ## Binary Dosyaları
 
-  # Cargo publish işlemi
+            - Linux (x64): `turk-linux-amd64`
+            - Windows (x64): `turk-windows-amd64.exe`, `turk-windows-amd64_gui.exe`
+            - macOS (x64): `turk-macos-amd64`
+
+            ## Kurulum
+
+            Kurulum talimatları için lütfen [INSTALL.md](https://github.com/SphereXLabs/turk-ml-framework/blob/main/INSTALL.md) dosyasına bakın.
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-alpha') || contains(github.ref, '-beta') }}
+          files: |
+            artifacts/**/*
+            LICENSE
+            README.md
+            INSTALL.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   publish-crate:
     name: Publish to crates.io
     needs: create-release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-rc') && !contains(github.ref, '-alpha') && !contains(github.ref, '-beta')
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Rust Sürümünü Kur
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
-    
-    - name: crates.io'ya Yayınla
-      uses: actions-rs/cargo@v1
-      with:
-        command: publish
-        args: --token ${{ secrets.CRATES_IO_TOKEN }} 
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: crates.io'ya Yayınla
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
