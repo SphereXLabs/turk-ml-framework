@@ -119,10 +119,19 @@ impl History {
         let json_str = serde_json::to_string_pretty(&json_cikti)
             .map_err(|e| TurkError::IOError(format!("JSON serileştirme hatası: {e}")))?;
 
-        fs::write(dosya_yolu, json_str)
-            .map_err(|e| TurkError::IOError(format!("'{dosya_yolu}' yazılamadı: {e}")))?;
-
-        Ok(())
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            fs::write(dosya_yolu, json_str)
+                .map_err(|e| TurkError::IOError(format!("'{dosya_yolu}' yazılamadı: {e}")))?;
+            Ok(())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (dosya_yolu, json_str);
+            Err(TurkError::IOError(
+                "Eğitim geçmişi kaydı WASM ortamında desteklenmiyor.".into(),
+            ))
+        }
     }
 }
 

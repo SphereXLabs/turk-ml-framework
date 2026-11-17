@@ -40,6 +40,8 @@ pub struct CsvVeriAkisi {
     /// Doğrulama kümesi (bir kez yüklenir, epoch boyunca bellekte kalır).
     val_onbellek: Option<(Array2<f64>, Array2<f64>)>,
     pub bolme_orani: Option<f64>,
+    /// Bellek içi eğitim verisi (WASM / sentetik). Set ise disk okunmaz.
+    egitim_onbellek: Option<(Array2<f64>, Array2<f64>)>,
 }
 
 impl CsvVeriAkisi {
@@ -95,7 +97,98 @@ impl CsvVeriAkisi {
             sema,
             val_onbellek,
             bolme_orani,
+            egitim_onbellek: None,
         })
+    }
+
+    /// Bellek içi (disk kullanmayan) veri akışı — WASM / sentetik XOR vb.
+    pub fn bellekten(
+        kaynak: &str,
+        x: Array2<f64>,
+        y: Array2<f64>,
+        bolme_orani: Option<f64>,
+    ) -> Result<Self> {
+        if x.nrows() == 0 {
+            return Err(TurkError::DataError("Bellek verisi boş olamaz".into()));
+        }
+        if x.nrows() != y.nrows() {
+            return Err(TurkError::DataError(format!(
+                "X/Y satır sayısı uyumsuz: {} vs {}",
+                x.nrows(),
+                y.nrows()
+            )));
+        }
+        if let Some(orani) = bolme_orani {
+            if !(0.0..1.0).contains(&orani) {
+                return Err(TurkError::ValueError(format!(
+                    "bolme oranı 0 ile 1 arasında olmalı, gelen: {orani}"
+                )));
+            }
+        }
+
+        let n = x.nrows();
+        let ozellik_sayisi = x.ncols();
+        let mut egitim_idx: Vec<usize> = (0..n).collect();
+        let val_idx = if let Some(oran) = bolme_orani {
+            let val_n = ((n as f64) * oran).round() as usize;
+            if val_n == 0 || val_n >= n {
+                Vec::new()
+            } else {
+                egitim_idx.shuffle(&mut thread_rng());
+                let val = egitim_idx.split_off(n - val_n);
+                val
+            }
+        } else {
+            Vec::new()
+        };
+
+        let mut x_train = Array2::<f64>::zeros((egitim_idx.len(), ozellik_sayisi));
+        let mut y_train = Array2::<f64>::zeros((egitim_idx.len(), y.ncols()));
+        for (i, &src) in egitim_idx.iter().enumerate() {
+            x_train.row_mut(i).assign(&x.row(src));
+            y_train.row_mut(i).assign(&y.row(src));
+        }
+
+        let val_onbellek = if val_idx.is_empty() {
+            None
+        } else {
+            let mut x_val = Array2::<f64>::zeros((val_idx.len(), ozellik_sayisi));
+            let mut y_val = Array2::<f64>::zeros((val_idx.len(), y.ncols()));
+            for (i, &src) in val_idx.iter().enumerate() {
+                x_val.row_mut(i).assign(&x.row(src));
+                y_val.row_mut(i).assign(&y.row(src));
+            }
+            Some((x_val, y_val))
+        };
+
+        let sema = CsvSemasi {
+            kaynak: kaynak.to_string(),
+            hedef_idx: ozellik_sayisi, // sentetik: hedef ayrı matriste
+            n_sutun: ozellik_sayisi + y.ncols(),
+            ozellik_sayisi,
+            baslik_var: false,
+            indeks: CsvSatirIndeksi {
+                satir_ofsetleri: vec![0; n],
+                toplam_satir: n,
+            },
+            egitim_satirlari: (0..egitim_idx.len()).collect(),
+        };
+
+        Ok(Self {
+            sema,
+            val_onbellek,
+            bolme_orani,
+            egitim_onbellek: Some((x_train, y_train)),
+        })
+    }
+
+    /// Klasik XOR veri seti (4 örnek, 2 özellik).
+    pub fn sentetik_xor(bolme_orani: Option<f64>) -> Result<Self> {
+        let x = Array2::from_shape_vec((4, 2), vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0])
+            .map_err(|e| TurkError::DataError(format!("XOR X oluşturulamadı: {e}")))?;
+        let y = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 1.0, 0.0])
+            .map_err(|e| TurkError::DataError(format!("XOR Y oluşturulamadı: {e}")))?;
+        Self::bellekten("sentetik:xor", x, y, bolme_orani)
     }
 
     pub fn kaynak(&self) -> &str {
@@ -136,18 +229,24 @@ impl CsvVeriAkisi {
                 self.sema.egitim_satirlari.len()
             );
         }
-        CsvEpochOkuyucu::ac(&self.sema, efektif, true)
+        if let Some((x, y)) = &self.egitim_onbellek {
+            CsvEpochOkuyucu::bellekten(x, y, efektif, true)
+        } else {
+            CsvEpochOkuyucu::ac(&self.sema, efektif, true)
+        }
     }
 }
 
-/// Tek epoch boyunca diskten batch üreten iterator.
+/// Tek epoch boyunca diskten veya bellekten batch üreten iterator.
 pub struct CsvEpochOkuyucu {
-    file: File,
+    file: Option<File>,
     sema: CsvSemasi,
     batch_boyutu: usize,
     okuma_sirasi: Vec<usize>,
     okuma_i: usize,
     bitti: bool,
+    /// Bellek içi eğitim matrisleri (WASM / sentetik)
+    bellek: Option<(Array2<f64>, Array2<f64>)>,
 }
 
 impl CsvEpochOkuyucu {
@@ -170,22 +269,67 @@ impl CsvEpochOkuyucu {
             .map_err(|e| TurkError::IOError(format!("'{}' açılamadı: {e}", sema.kaynak)))?;
 
         Ok(Self {
-            file,
+            file: Some(file),
             sema: sema.clone(),
             batch_boyutu,
             okuma_sirasi,
             okuma_i: 0,
             bitti: false,
+            bellek: None,
+        })
+    }
+
+    /// Bellek içi matrislerden batch üretir (disk yok).
+    pub fn bellekten(
+        x: &Array2<f64>,
+        y: &Array2<f64>,
+        batch_boyutu: usize,
+        karistir: bool,
+    ) -> Result<Self> {
+        if batch_boyutu == 0 {
+            return Err(TurkError::ValueError("Batch boyutu sıfır olamaz.".into()));
+        }
+        if x.nrows() == 0 {
+            return Err(TurkError::DataError("Eğitim satırı bulunamadı.".into()));
+        }
+
+        let mut okuma_sirasi: Vec<usize> = (0..x.nrows()).collect();
+        if karistir {
+            okuma_sirasi.shuffle(&mut thread_rng());
+        }
+
+        Ok(Self {
+            file: None,
+            sema: CsvSemasi {
+                kaynak: "bellek".into(),
+                hedef_idx: x.ncols(),
+                n_sutun: x.ncols() + y.ncols(),
+                ozellik_sayisi: x.ncols(),
+                baslik_var: false,
+                indeks: CsvSatirIndeksi {
+                    satir_ofsetleri: vec![],
+                    toplam_satir: x.nrows(),
+                },
+                egitim_satirlari: okuma_sirasi.clone(),
+            },
+            batch_boyutu,
+            okuma_sirasi,
+            okuma_i: 0,
+            bitti: false,
+            bellek: Some((x.clone(), y.clone())),
         })
     }
 
     fn satir_offsetten_oku(&mut self, satir_idx: usize) -> Result<String> {
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| TurkError::IOError("Disk dosyası yok (bellek modu)".into()))?;
         let offset = self.sema.indeks.satir_ofsetleri[satir_idx];
-        self.file
-            .seek(SeekFrom::Start(offset))
+        file.seek(SeekFrom::Start(offset))
             .map_err(|e| TurkError::IOError(format!("Seek hatası: {e}")))?;
         let mut satir = String::new();
-        dosyadan_satir_oku(&mut self.file, &mut satir)?;
+        dosyadan_satir_oku(file, &mut satir)?;
         Ok(satir)
     }
 
@@ -247,6 +391,19 @@ impl CsvEpochOkuyucu {
         let bitis = (self.okuma_i + self.batch_boyutu).min(self.okuma_sirasi.len());
         let chunk: Vec<usize> = self.okuma_sirasi[self.okuma_i..bitis].to_vec();
         self.okuma_i = bitis;
+
+        if let Some((x_all, y_all)) = &self.bellek {
+            let n = chunk.len();
+            let d = x_all.ncols();
+            let c = y_all.ncols();
+            let mut x = Array2::<f64>::zeros((n, d));
+            let mut y = Array2::<f64>::zeros((n, c));
+            for (i, &src) in chunk.iter().enumerate() {
+                x.row_mut(i).assign(&x_all.row(src));
+                y.row_mut(i).assign(&y_all.row(src));
+            }
+            return Ok(Some((x, y)));
+        }
 
         let mut x_satirlar = Vec::with_capacity(chunk.len());
         let mut y_degerler = Vec::with_capacity(chunk.len());

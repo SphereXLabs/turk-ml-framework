@@ -176,14 +176,14 @@ impl Layer for Dense {
         match self.activation {
             // Basit aktivasyonlar için doğrudan paralelleştirilmiş hesaplama
             Activation::Relu => {
-                Zip::from(&mut dz).and(&z).and(grad_output).par_for_each(
+                Zip::from(&mut dz).and(&z).and(grad_output).for_each(
                     |dz_val, &z_val, &grad_val| {
                         *dz_val = if z_val > 0.0 { grad_val } else { 0.0 };
                     },
                 );
             }
             Activation::Sigmoid => {
-                Zip::from(&mut dz).and(&z).and(grad_output).par_for_each(
+                Zip::from(&mut dz).and(&z).and(grad_output).for_each(
                     |dz_val, &z_val, &grad_val| {
                         let sigmoid = 1.0 / (1.0 + (-z_val).exp());
                         *dz_val = sigmoid * (1.0 - sigmoid) * grad_val;
@@ -191,7 +191,7 @@ impl Layer for Dense {
                 );
             }
             Activation::Tanh => {
-                Zip::from(&mut dz).and(&z).and(grad_output).par_for_each(
+                Zip::from(&mut dz).and(&z).and(grad_output).for_each(
                     |dz_val, &z_val, &grad_val| {
                         let tanh_val = z_val.tanh();
                         *dz_val = (1.0 - tanh_val * tanh_val) * grad_val;
@@ -207,7 +207,7 @@ impl Layer for Dense {
                 Zip::from(&mut dz)
                     .and(&activation_grad)
                     .and(grad_output)
-                    .par_for_each(|dz_val, &act_grad, &grad_val| {
+                    .for_each(|dz_val, &act_grad, &grad_val| {
                         *dz_val = act_grad * grad_val;
                     });
             }
@@ -422,18 +422,16 @@ impl Layer for Dropout {
         // Rastgele maske oluştur
         let mut mask = Array2::random(input.dim(), Uniform::new(0.0, 1.0));
 
-        // Maskeyi paralelleştir
-        mask.par_mapv_inplace(|v| if v > self.rate { 1.0 } else { 0.0 });
+        mask.mapv_inplace(|v| if v > self.rate { 1.0 } else { 0.0 });
 
         // Ölçeklendirme (eğitim ve çıkarım arasındaki değerleri dengelemek için)
         let scale = 1.0 / (1.0 - self.rate);
 
-        // Maskelenmiş çıkış - paralel hesaplama
         let mut output = Array2::zeros(input.dim());
         Zip::from(&mut output)
             .and(input)
             .and(&mask)
-            .par_for_each(|o, &i, &m| {
+            .for_each(|o, &i, &m| {
                 *o = i * m * scale;
             });
 
@@ -460,12 +458,11 @@ impl Layer for Dropout {
             // Aynı maskeyi kullan - paralelleştir
             let scale = 1.0 / (1.0 - self.rate);
 
-            // Paralel gradyan hesaplama
             let mut grad_input = Array2::zeros(grad_output.dim());
             Zip::from(&mut grad_input)
                 .and(grad_output)
                 .and(mask)
-                .par_for_each(|g_i, &g_o, &m| {
+                .for_each(|g_i, &g_o, &m| {
                     *g_i = g_o * m * scale;
                 });
 

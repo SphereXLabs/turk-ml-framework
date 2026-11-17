@@ -46,14 +46,20 @@ pub mod cnn;
 pub mod dsl_parser;
 pub mod source_position;
 
-// ONNX dışa aktarma
+// ONNX dışa aktarma (disk I/O — WASM'da yok)
+#[cfg(not(target_arch = "wasm32"))]
 pub mod onnx;
 
 // Hesaplama cihazı (CPU / GPU-paralel)
 pub mod cihaz;
 
-// Model Zoo
+// Model Zoo (disk — WASM'da yok)
+#[cfg(not(target_arch = "wasm32"))]
 pub mod model_zoo;
+
+// WASM Browser Playground köprüsü
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 // TÜRK Çekirdeği — yerel kişisel yapay zeka ekosistemi
 #[cfg(feature = "turk_sistem")]
@@ -77,15 +83,19 @@ pub use layer::{BatchNormalization, Dense, Dropout, Layer};
 pub use loss::{CrossEntropy, Loss, MAE, MSE};
 pub use metrics::{Accuracy, Metric, Precision, Recall, F1};
 pub use model::{EarlyStopping, EpochCallback, History, Sequential};
+#[cfg(not(target_arch = "wasm32"))]
 pub use model_zoo::{
     kullanici_zoo_dizini, manifest_yukle, model_bilgi_metin, model_bul, model_indir,
     model_script_yolu, zoo_kok, zoo_listesi_metin, ZooManifest, ZooModelMeta,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use onnx::{export_onnx, import_onnx};
 pub use optimizer::{Adam, AdamW, Optimizer, RMSProp, SGD};
 pub use preprocessing::{MinMaxScaler, StandardScaler};
 pub use source_position::SourcePosition;
 pub use veri::{CsvEpochOkuyucu, CsvVeriAkisi};
+#[cfg(feature = "wasm")]
+pub use wasm::TurkWasmRunner;
 
 #[cfg(feature = "turk_sistem")]
 pub use asistan::{
@@ -115,6 +125,7 @@ pub type TurkCekirdek = TurkSistem;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // Dosya açma yardımcı fonksiyonu
+#[cfg(not(target_arch = "wasm32"))]
 pub fn open_file<P: AsRef<Path>>(path: P) -> Result<File> {
     File::open(path.as_ref()).map_err(|e| {
         TurkError::IOError(format!(
@@ -126,6 +137,7 @@ pub fn open_file<P: AsRef<Path>>(path: P) -> Result<File> {
 }
 
 // Dosya okuma yardımcı fonksiyonu
+#[cfg(not(target_arch = "wasm32"))]
 pub fn read_file<P: AsRef<Path>>(path: P) -> Result<String> {
     let mut file = open_file(path.as_ref())?;
     let mut contents = String::new();
@@ -140,6 +152,7 @@ pub fn read_file<P: AsRef<Path>>(path: P) -> Result<String> {
 }
 
 // Dosya oluşturma yardımcı fonksiyonu
+#[cfg(not(target_arch = "wasm32"))]
 pub fn create_file<P: AsRef<Path>>(path: P) -> Result<File> {
     File::create(path.as_ref()).map_err(|e| {
         TurkError::IOError(format!(
@@ -151,6 +164,7 @@ pub fn create_file<P: AsRef<Path>>(path: P) -> Result<File> {
 }
 
 // Dosyaya yazma yardımcı fonksiyonu
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_file<P: AsRef<Path>>(path: P, contents: &str) -> Result<()> {
     let mut file = create_file(path.as_ref())?;
     file.write_all(contents.as_bytes()).map_err(|e| {
@@ -207,6 +221,7 @@ impl Turk {
     }
 
     /// Modeli dosyadan yükle
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn model_yukle(&mut self, path: &Path) -> Result<()> {
         let mut model = model::Sequential::new();
         model.load(path.to_str().unwrap())?;
@@ -215,6 +230,7 @@ impl Turk {
     }
 
     /// Modeli dosyaya kaydet
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn model_kaydet(&self, path: &Path) -> Result<()> {
         if let Some(model) = &self.model {
             model.save(path.to_str().unwrap())?;
@@ -231,6 +247,9 @@ impl Default for Turk {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;

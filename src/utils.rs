@@ -3,16 +3,17 @@ use crate::error::{Result, TurkError};
 use itertools::Itertools;
 use ndarray::{s, Array2, ArrayView2, Axis};
 use rand::seq::SliceRandom;
+#[cfg(feature = "csv")]
 use std::fs::File;
+#[cfg(feature = "csv")]
 use std::io::{BufReader, BufWriter};
+#[cfg(feature = "csv")]
 use std::path::Path;
 
 /// Tensor matematiksel işlemleri için yardımcı fonksiyonlar
 pub mod tensor_ops {
     use crate::error::{Result, TurkError};
     use ndarray::{Array2, ArrayView2, Axis, Zip};
-    #[allow(unused_imports)]
-    use rayon::prelude::*;
 
     /// İki tensor arasında nokta çarpımı yapar (matris çarpımı)
     /// Rayon ile paralel hesaplama kullanır
@@ -39,29 +40,55 @@ pub mod tensor_ops {
 
         let mut normalized = x.to_owned();
 
-        // Normalize işlemini paralelleştirme
+        // Normalize işlemini paralelleştirme (wasm32'de sıralı)
         match axis {
             0 => {
-                Zip::from(normalized.columns_mut())
-                    .and(sum_squared.view())
-                    .par_for_each(|mut col, &norm_val| {
-                        let norm = norm_val.sqrt();
-                        if norm > 1e-10 {
-                            // Sıfıra bölünme durumunu önle
-                            col.mapv_inplace(|v| v / norm);
-                        }
-                    });
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    Zip::from(normalized.columns_mut())
+                        .and(sum_squared.view())
+                        .par_for_each(|mut col, &norm_val| {
+                            let norm = norm_val.sqrt();
+                            if norm > 1e-10 {
+                                col.mapv_inplace(|v| v / norm);
+                            }
+                        });
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Zip::from(normalized.columns_mut())
+                        .and(sum_squared.view())
+                        .for_each(|mut col, &norm_val| {
+                            let norm = norm_val.sqrt();
+                            if norm > 1e-10 {
+                                col.mapv_inplace(|v| v / norm);
+                            }
+                        });
+                }
             }
             1 => {
-                Zip::from(normalized.rows_mut())
-                    .and(sum_squared.view())
-                    .par_for_each(|mut row, &norm_val| {
-                        let norm = norm_val.sqrt();
-                        if norm > 1e-10 {
-                            // Sıfıra bölünme durumunu önle
-                            row.mapv_inplace(|v| v / norm);
-                        }
-                    });
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    Zip::from(normalized.rows_mut())
+                        .and(sum_squared.view())
+                        .par_for_each(|mut row, &norm_val| {
+                            let norm = norm_val.sqrt();
+                            if norm > 1e-10 {
+                                row.mapv_inplace(|v| v / norm);
+                            }
+                        });
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Zip::from(normalized.rows_mut())
+                        .and(sum_squared.view())
+                        .for_each(|mut row, &norm_val| {
+                            let norm = norm_val.sqrt();
+                            if norm > 1e-10 {
+                                row.mapv_inplace(|v| v / norm);
+                            }
+                        });
+                }
             }
             _ => return Err(TurkError::InvalidValue(format!("Geçersiz eksen: {}", axis))),
         }
@@ -80,14 +107,22 @@ pub mod tensor_ops {
             )));
         }
 
-        // Elementwise çarpımı paralelleştirme
         let mut result = Array2::zeros(a.dim());
-        Zip::from(&mut result)
-            .and(a)
-            .and(b)
-            .par_for_each(|c, &a, &b| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Zip::from(&mut result)
+                .and(a)
+                .and(b)
+                .par_for_each(|c, &a, &b| {
+                    *c = a * b;
+                });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Zip::from(&mut result).and(a).and(b).for_each(|c, &a, &b| {
                 *c = a * b;
             });
+        }
 
         Ok(result)
     }
@@ -125,10 +160,19 @@ pub mod tensor_ops {
         let n_samples = y_true.nrows();
         let n_outputs = y_true.ncols();
 
-        // Paralelleştirilmiş MSE hesaplaması
+        #[cfg(not(target_arch = "wasm32"))]
         let squared_error_sum: f64 = Zip::from(y_true)
             .and(y_pred)
             .par_map_collect(|&y_t, &y_p| {
+                let diff = y_t - y_p;
+                diff * diff
+            })
+            .sum();
+        #[cfg(target_arch = "wasm32")]
+        let squared_error_sum: f64 = y_true
+            .iter()
+            .zip(y_pred.iter())
+            .map(|(&y_t, &y_p)| {
                 let diff = y_t - y_p;
                 diff * diff
             })
@@ -152,14 +196,25 @@ pub mod tensor_ops {
         let n_outputs = y_true.ncols();
         let scale = 2.0 / (n_samples * n_outputs) as f64;
 
-        // Gradyan hesaplamasını paralelleştirme
         let mut gradient = Array2::zeros(y_true.dim());
-        Zip::from(&mut gradient)
-            .and(y_pred)
-            .and(y_true)
-            .par_for_each(|g, &y_p, &y_t| {
-                *g = (y_p - y_t) * scale;
-            });
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Zip::from(&mut gradient)
+                .and(y_pred)
+                .and(y_true)
+                .par_for_each(|g, &y_p, &y_t| {
+                    *g = (y_p - y_t) * scale;
+                });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Zip::from(&mut gradient)
+                .and(y_pred)
+                .and(y_true)
+                .for_each(|g, &y_p, &y_t| {
+                    *g = (y_p - y_t) * scale;
+                });
+        }
 
         Ok(gradient)
     }
@@ -419,6 +474,7 @@ pub fn argmax(array: &ArrayView2<f64>, axis: usize) -> Vec<usize> {
 }
 
 /// CSV dosyasından veri yükle
+#[cfg(feature = "csv")]
 pub fn load_csv<P: AsRef<Path>>(path: P, has_header: bool, delimiter: char) -> Result<Array2<f64>> {
     let file = File::open(path.as_ref())
         .map_err(|e| TurkError::IOError(format!("CSV dosyası açılamadı: {}", e)))?;
@@ -475,6 +531,7 @@ pub fn load_csv<P: AsRef<Path>>(path: P, has_header: bool, delimiter: char) -> R
 }
 
 /// CSV dosyasına veri yaz
+#[cfg(feature = "csv")]
 pub fn save_csv<P: AsRef<Path>>(
     path: P,
     data: &Array2<f64>,

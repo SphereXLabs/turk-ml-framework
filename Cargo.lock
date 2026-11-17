@@ -4088,6 +4088,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.219"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4725,9 +4736,11 @@ dependencies = [
  "eframe",
  "egui_plot",
  "env_logger",
+ "getrandom 0.2.15",
  "hound",
  "indicatif",
  "itertools 0.14.0",
+ "js-sys",
  "lazy_static",
  "log",
  "logos",
@@ -4746,11 +4759,13 @@ dependencies = [
  "reqwest",
  "rfd",
  "serde",
+ "serde-wasm-bindgen",
  "serde_json",
  "sysinfo",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "wasm-bindgen",
  "windows-sys 0.52.0",
 ]
 

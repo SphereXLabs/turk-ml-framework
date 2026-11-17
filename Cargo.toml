@@ -15,12 +15,15 @@ keywords = ["turk", "turkish", "neural-network", "deep-learning", "ai"]
 [lib]
 name = "turk"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 # Binary hedeflerini geçici olarak devre dışı bırakalım
 # ileride düzeltilecek
 [[bin]]
 name = "turk"
 path = "src/main.rs"
+# WASM (--no-default-features) derlemesinde CLI binary atlanır
+required-features = ["csv"]
 
 [[bin]]
 name = "turk_gui"
@@ -44,11 +47,13 @@ turk_sistem = ["gui", "dep:sysinfo", "dep:tokio", "dep:reqwest", "dep:windows-sy
 turk_ses = ["dep:cpal", "dep:hound"]
 parallel = []
 gpu = []
+# WASM Browser Playground — tarayıcıda DSL çalıştırma köprüsü
+wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:js-sys"]
 # Gelecek: turk-llm = ["turk_sistem", "dep:llama-cpp-2"]
 
 [dependencies]
-# Temel hesaplama kütüphaneleri
-ndarray = { version = "0.15.4", features = ["serde", "rayon"] }
+# Temel hesaplama kütüphaneleri (rayon yalnızca native — aşağıdaki target bloğu)
+ndarray = { version = "0.15.4", features = ["serde"] }
 ndarray-rand = "0.14.0"
 ndarray-stats = "0.5.1"
 
@@ -66,8 +71,10 @@ log = "0.4.17"
 env_logger = "0.10.0"
 thiserror = "1.0.38"
 
-# Paralel işleme
-rayon = "1.7.0"
+# WASM köprüsü (feature = "wasm")
+wasm-bindgen = { version = "0.2", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+js-sys = { version = "0.3", optional = true }
 
 # Metin işleme
 regex = "1.7.1"
@@ -103,6 +110,15 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Windows-only (optional): Linux/macOS CI'de çekilmez; turk_sistem özelliği ile açılır
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"], optional = true }
+
+# Native: rayon + ndarray paralel matris çarpımı
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1.7.0"
+ndarray = { version = "0.15.4", features = ["rayon"] }
+
+# WASM: getrandom JS backend — rand / ndarray-rand için zorunlu
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 criterion = "0.5.1"
@@ -145,3 +161,10 @@ required-features = ["full", "cli"]
 
 [profile.bench]
 debug = true
+
+# rustc 1.82+ bulk-memory üretiyor; eski wasm-opt doğrulamayı kırıyor
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false

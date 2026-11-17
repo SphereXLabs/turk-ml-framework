@@ -6,6 +6,7 @@ use crate::katman_kayit::KatmanKayit;
 use crate::layer::Dense;
 use crate::loss::create_loss;
 use crate::model::{EarlyStopping, Sequential};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model_zoo::{model_bilgi_metin, model_indir, zoo_listesi_metin};
 use crate::optimizer::{Adam, AdamW, RMSProp, SGD};
 use crate::veri::CsvVeriAkisi;
@@ -153,6 +154,7 @@ impl TurkDil {
     }
 
     /// Model Zoo betiğini çalıştırır; MNIST için `csv_yolu` zorunlu olabilir
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn zoo_betik_calistir(&mut self, id: &str, csv_yolu: Option<&str>) -> Result<()> {
         use std::fs;
 
@@ -206,6 +208,15 @@ impl TurkDil {
         }
 
         sonuc
+    }
+
+    /// WASM: Model Zoo disk erişimi yok.
+    #[cfg(target_arch = "wasm32")]
+    pub fn zoo_betik_calistir(&mut self, _id: &str, _csv_yolu: Option<&str>) -> Result<()> {
+        Err(TurkError::RuntimeError(
+            "Model Zoo WASM ortamında desteklenmiyor; sentetik veri_yukle(\"xor\") kullanın."
+                .into(),
+        ))
     }
 
     /// Türkçe DSL komutunu çalıştırır
@@ -297,24 +308,52 @@ impl TurkDil {
                 Ok(Value::Text(metin))
             }
             crate::dsl_parser::DslKomut::ModelZoo => {
-                let metin = zoo_listesi_metin();
-                println!("{metin}");
-                Ok(Value::Text(metin))
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let metin = zoo_listesi_metin();
+                    println!("{metin}");
+                    Ok(Value::Text(metin))
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let metin = "Model Zoo WASM'da kapalı. Örnek: veri_yukle(\"xor\")".to_string();
+                    Ok(Value::Text(metin))
+                }
             }
             crate::dsl_parser::DslKomut::ModelIndir { id, hedef } => {
-                if kontrol_modu {
-                    model_bilgi_metin(id.as_str())?;
-                    Ok(Value::None)
-                } else {
-                    self.model_indir_komutu(id.as_str(), hedef.as_deref())
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if kontrol_modu {
+                        model_bilgi_metin(id.as_str())?;
+                        Ok(Value::None)
+                    } else {
+                        self.model_indir_komutu(id.as_str(), hedef.as_deref())
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = (id, hedef, kontrol_modu);
+                    Err(TurkError::RuntimeError(
+                        "model_indir WASM ortamında desteklenmiyor.".into(),
+                    ))
                 }
             }
             crate::dsl_parser::DslKomut::ModelCalistir { id } => {
-                if kontrol_modu {
-                    model_bilgi_metin(id.as_str())?;
-                    Ok(Value::None)
-                } else {
-                    self.model_calistir_komutu(id.as_str())
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if kontrol_modu {
+                        model_bilgi_metin(id.as_str())?;
+                        Ok(Value::None)
+                    } else {
+                        self.model_calistir_komutu(id.as_str())
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = (id, kontrol_modu);
+                    Err(TurkError::RuntimeError(
+                        "model_calistir WASM ortamında desteklenmiyor.".into(),
+                    ))
                 }
             }
         }
@@ -429,27 +468,33 @@ impl TurkDil {
             .clone();
 
         if p.devam_et {
-            let kayit_yolu = self.kaydet_yolu.clone().unwrap_or_else(|| {
-                warn!(
-                    "devam_et=true verildi ancak kaydet_yolu bilinmiyor; \
-                       'xor_model.json' varsayılanı kullanılıyor."
-                );
-                "xor_model.json".to_string()
-            });
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let kayit_yolu = self.kaydet_yolu.clone().unwrap_or_else(|| {
+                    warn!(
+                        "devam_et=true verildi ancak kaydet_yolu bilinmiyor; \
+                           'xor_model.json' varsayılanı kullanılıyor."
+                    );
+                    "xor_model.json".to_string()
+                });
 
-            if std::path::Path::new(&kayit_yolu).exists() {
-                info!("▶ Checkpoint yükleniyor: '{kayit_yolu}'");
-                let model = self
-                    .model
-                    .as_mut()
-                    .ok_or_else(|| TurkError::RuntimeError("Model henüz oluşturulmamış".into()))?;
-                model.load(&kayit_yolu)?;
-                info!("Checkpoint başarıyla yüklendi — eğitime kaldığı yerden devam ediliyor.");
-            } else {
-                warn!(
-                    "devam_et=true verildi ancak '{kayit_yolu}' bulunamadı; \
-                     sıfırdan eğitim başlatılıyor."
-                );
+                if std::path::Path::new(&kayit_yolu).exists() {
+                    info!("▶ Checkpoint yükleniyor: '{kayit_yolu}'");
+                    let model = self.model.as_mut().ok_or_else(|| {
+                        TurkError::RuntimeError("Model henüz oluşturulmamış".into())
+                    })?;
+                    model.load(&kayit_yolu)?;
+                    info!("Checkpoint başarıyla yüklendi — eğitime kaldığı yerden devam ediliyor.");
+                } else {
+                    warn!(
+                        "devam_et=true verildi ancak '{kayit_yolu}' bulunamadı; \
+                         sıfırdan eğitim başlatılıyor."
+                    );
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                warn!("devam_et WASM'da yok sayıldı (disk checkpoint yok).");
             }
         }
 
@@ -472,6 +517,7 @@ impl TurkDil {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         let checkpoint_yolu = {
             let temel = self
                 .kaydet_yolu
@@ -489,7 +535,7 @@ impl TurkDil {
 
         info!(
             "Model eğitiliyor (lazy stream): kaynak='{}', egitim={}, val={}, {} özellik, \
-             {} epoch, batch={} | loss={} | checkpoint='{checkpoint_yolu}' | devam_et={}",
+             {} epoch, batch={} | loss={} | devam_et={}",
             veri.kaynak(),
             veri.egitim_satir_sayisi(),
             veri.val_satir_sayisi(),
@@ -516,14 +562,28 @@ impl TurkDil {
 
         let history = {
             let batch_kaynak = || veri.epoch_batchleri(batch_boyutu);
-            model.fit_streaming_with_checkpoint(
-                batch_kaynak,
-                p.epochs,
-                validation_data,
-                early_stopping.as_mut(),
-                Some(&checkpoint_yolu),
-                epoch_cb,
-            )?
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                model.fit_streaming_with_checkpoint(
+                    batch_kaynak,
+                    p.epochs,
+                    validation_data,
+                    early_stopping.as_mut(),
+                    Some(&checkpoint_yolu),
+                    epoch_cb,
+                )?
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                model.fit_streaming_with_checkpoint(
+                    batch_kaynak,
+                    p.epochs,
+                    validation_data,
+                    early_stopping.as_mut(),
+                    None,
+                    epoch_cb,
+                )?
+            }
         };
 
         let son_kayip = if veri.val_satir_sayisi() > 0 {
@@ -569,10 +629,13 @@ impl TurkDil {
             });
         }
 
-        const GECMIS_DOSYA: &str = "egitim_gecmisi.json";
-        match history.dosyaya_kaydet(GECMIS_DOSYA) {
-            Ok(_) => info!("Eğitim geçmişi '{GECMIS_DOSYA}' dosyasına kaydedildi."),
-            Err(e) => warn!("Eğitim geçmişi kaydedilemedi: {e}"),
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            const GECMIS_DOSYA: &str = "egitim_gecmisi.json";
+            match history.dosyaya_kaydet(GECMIS_DOSYA) {
+                Ok(_) => info!("Eğitim geçmişi '{GECMIS_DOSYA}' dosyasına kaydedildi."),
+                Err(e) => warn!("Eğitim geçmişi kaydedilemedi: {e}"),
+            }
         }
 
         Ok(Value::Number(son_kayip))
@@ -653,17 +716,27 @@ impl TurkDil {
     }
 
     fn onnx_disa_aktar_komutu(&mut self, dosya: &str) -> Result<Value> {
-        let model = self
-            .model
-            .as_ref()
-            .ok_or_else(|| TurkError::RuntimeError("Dışa aktarılacak model bulunmuyor".into()))?;
-        info!("ONNX dışa aktarılıyor: {dosya}");
-        crate::onnx::export_onnx(model, dosya)?;
-        let mesaj = format!("ONNX dışa aktarıldı: {dosya}");
-        Ok(Value::Text(mesaj))
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = dosya;
+            return Err(TurkError::RuntimeError(
+                "ONNX dışa aktarma WASM ortamında desteklenmiyor.".into(),
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let model = self.model.as_ref().ok_or_else(|| {
+                TurkError::RuntimeError("Dışa aktarılacak model bulunmuyor".into())
+            })?;
+            info!("ONNX dışa aktarılıyor: {dosya}");
+            crate::onnx::export_onnx(model, dosya)?;
+            let mesaj = format!("ONNX dışa aktarıldı: {dosya}");
+            Ok(Value::Text(mesaj))
+        }
     }
 
     /// Model Zoo'dan model indirir
+    #[cfg(not(target_arch = "wasm32"))]
     fn model_indir_komutu(&mut self, id: &str, hedef: Option<&str>) -> Result<Value> {
         let hedef_yol = hedef.map(std::path::Path::new);
         let yol = model_indir(id, hedef_yol)?;
@@ -674,6 +747,7 @@ impl TurkDil {
     }
 
     /// İndirilmiş Model Zoo betiğini çalıştırır (model dizinine geçerek)
+    #[cfg(not(target_arch = "wasm32"))]
     fn model_calistir_komutu(&mut self, id: &str) -> Result<Value> {
         use std::fs;
 
@@ -759,7 +833,23 @@ impl TurkDil {
             )
         })?;
 
-        // ── Lazy CSV akışı aç (yalnızca metadata + batch okuma) ───────────
+        // WASM / tarayıcı: disk yok — xor veya sentetik anahtarlar bellekten yüklenir
+        #[cfg(target_arch = "wasm32")]
+        let veri = {
+            let _ = &hedef_kolon;
+            let anahtar = dosya_yolu.to_lowercase();
+            if anahtar.contains("xor") || anahtar == "sentetik" || anahtar.ends_with(".csv") {
+                info!("WASM sentetik veri yükleniyor: '{dosya_yolu}' → XOR");
+                CsvVeriAkisi::sentetik_xor(bolme)?
+            } else {
+                return Err(TurkError::DataError(format!(
+                    "WASM'da yalnızca sentetik veri desteklenir. Örnek: veri_yukle(\"xor\") \
+                     (istenen: '{dosya_yolu}')"
+                )));
+            }
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
         let veri = if let Some(tx) = self.egitim_tx.clone() {
             let mut on_satir = move |n: usize| {
                 let _ = tx.send(EgitimIlerleme::Indeksleme { satir: n });
@@ -806,25 +896,45 @@ impl TurkDil {
     }
 
     fn kaydet_icerik(&mut self, icerik: &str) -> Result<Value> {
-        let model = self
-            .model
-            .as_ref()
-            .ok_or_else(|| TurkError::RuntimeError("Kaydedilecek model bulunmuyor".into()))?;
-        let dosya_yolu = dosya_yolu_icerikten(icerik)?;
-        info!("Model kaydediliyor: {dosya_yolu}");
-        model.save(&dosya_yolu)?;
-        self.kaydet_yolu = Some(dosya_yolu);
-        Ok(Value::None)
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = icerik;
+            return Err(TurkError::RuntimeError(
+                "kaydet() WASM ortamında desteklenmiyor (disk yok).".into(),
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let model = self
+                .model
+                .as_ref()
+                .ok_or_else(|| TurkError::RuntimeError("Kaydedilecek model bulunmuyor".into()))?;
+            let dosya_yolu = dosya_yolu_icerikten(icerik)?;
+            info!("Model kaydediliyor: {dosya_yolu}");
+            model.save(&dosya_yolu)?;
+            self.kaydet_yolu = Some(dosya_yolu);
+            Ok(Value::None)
+        }
     }
 
     fn yukle_icerik(&mut self, icerik: &str) -> Result<Value> {
-        let dosya_yolu = dosya_yolu_icerikten(icerik)?;
-        info!("Model yükleniyor: {dosya_yolu}");
-        let mut model = Sequential::new();
-        model.load(&dosya_yolu)?;
-        self.model = Some(model);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = icerik;
+            return Err(TurkError::RuntimeError(
+                "yukle() WASM ortamında desteklenmiyor (disk yok).".into(),
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let dosya_yolu = dosya_yolu_icerikten(icerik)?;
+            info!("Model yükleniyor: {dosya_yolu}");
+            let mut model = Sequential::new();
+            model.load(&dosya_yolu)?;
+            self.model = Some(model);
 
-        Ok(Value::None)
+            Ok(Value::None)
+        }
     }
 
     /// Katman ekle - Dense

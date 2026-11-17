@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TÜRK — WASM Playground</title>
+  <meta name="description" content="TÜRK DSL ile tarayıcıda sinir ağı eğit — WASM Browser Playground" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg0: #0c0e12;
+      --bg1: #13171f;
+      --bg2: #1a2030;
+      --line: rgba(232, 196, 120, 0.14);
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --accent: #e8c478;
+      --accent-dim: #b8924a;
+      --ok: #5ecf9a;
+      --err: #f07178;
+      --cyan: #6ec6d4;
+      --radius: 10px;
+      --font: "Sora", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--font);
+      color: var(--text);
+      background:
+        radial-gradient(ellipse 90% 60% at 10% -10%, rgba(232, 196, 120, 0.09), transparent 55%),
+        radial-gradient(ellipse 70% 50% at 100% 0%, rgba(110, 198, 212, 0.07), transparent 50%),
+        linear-gradient(180deg, var(--bg0), #080a0e 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 1.25rem 1.25rem 2.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      min-height: 100vh;
+    }
+
+    header.hero {
+      display: grid;
+      gap: 0.65rem;
+      padding: 1.1rem 0 0.4rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand {
+      font-size: clamp(2rem, 5vw, 2.75rem);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      line-height: 1;
+      color: var(--accent);
+      margin: 0;
+    }
+    .brand span { color: var(--text); letter-spacing: 0.04em; }
+    .tagline {
+      margin: 0;
+      max-width: 42rem;
+      color: var(--muted);
+      font-size: 0.98rem;
+      line-height: 1.5;
+    }
+    .runes {
+      font-size: 1.15rem;
+      letter-spacing: 0.35em;
+      color: var(--cyan);
+      opacity: 0.85;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: end;
+    }
+    label.field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      flex: 1 1 220px;
+    }
+    select, button {
+      font-family: var(--font);
+      font-size: 0.95rem;
+    }
+    select {
+      appearance: none;
+      background: var(--bg2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238b95a8' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 0.85rem center;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.7rem 2.2rem 0.7rem 0.9rem;
+      outline: none;
+    }
+    select:focus { border-color: var(--accent-dim); }
+
+    button#run {
+      border: none;
+      border-radius: var(--radius);
+      padding: 0.75rem 1.35rem;
+      background: linear-gradient(135deg, var(--accent), #c9a04e);
+      color: #1a1408;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.2s ease;
+      box-shadow: 0 0 0 0 rgba(232, 196, 120, 0);
+      white-space: nowrap;
+    }
+    button#run:hover:not(:disabled) {
+      filter: brightness(1.05);
+      transform: translateY(-1px);
+      box-shadow: 0 8px 28px rgba(232, 196, 120, 0.18);
+    }
+    button#run:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+    .status {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+      align-self: center;
+      min-height: 1.2em;
+    }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--err); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 1rem;
+      flex: 1;
+      min-height: 0;
+    }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: color-mix(in srgb, var(--bg1) 92%, transparent);
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) + 2px);
+      display: flex;
+      flex-direction: column;
+      min-height: 420px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+    .panel-h {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.78rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .panel-h strong { color: var(--text); font-weight: 600; letter-spacing: 0.04em; text-transform: none; font-size: 0.92rem; }
+
+    #editor {
+      flex: 1;
+      width: 100%;
+      min-height: 360px;
+      border: none;
+      resize: vertical;
+      background: #0a0c10;
+      color: #d7deea;
+      font-family: var(--mono);
+      font-size: 0.86rem;
+      line-height: 1.55;
+      padding: 1rem 1.1rem;
+      outline: none;
+      tab-size: 2;
+    }
+
+    .right-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-height: 0;
+    }
+    .chart-wrap {
+      position: relative;
+      height: 260px;
+      padding: 0.75rem 1rem 1rem;
+    }
+    .summary {
+      margin: 0;
+      padding: 0.85rem 1rem 1.1rem;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      color: var(--cyan);
+      white-space: pre-wrap;
+      max-height: 180px;
+      overflow: auto;
+      border-top: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.22);
+    }
+    #console {
+      margin: 0;
+      padding: 0.85rem 1rem 1.1rem;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: #b8c0d0;
+      white-space: pre-wrap;
+      flex: 1;
+      min-height: 160px;
+      max-height: 280px;
+      overflow: auto;
+      background: #080a0e;
+    }
+    #console .err { color: var(--err); }
+    #console .ok { color: var(--ok); }
+    #console .cmd { color: var(--accent); }
+
+    footer {
+      margin-top: auto;
+      padding-top: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    @keyframes pulse-border {
+      0%, 100% { border-color: var(--line); }
+      50% { border-color: rgba(232, 196, 120, 0.45); }
+    }
+    .panel.running { animation: pulse-border 1.2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <p class="runes" aria-hidden="true">𐱅𐰇𐰼𐰰</p>
+      <h1 class="brand">TÜRK <span>Playground</span></h1>
+      <p class="tagline">
+        Tarayıcıda WASM ile Türkçe DSL yazın, sentetik XOR verisi üzerinde sinir ağını eğitin —
+        kayıp ve doğruluk eğrilerini anında izleyin.
+      </p>
+    </header>
+
+    <div class="toolbar">
+      <label class="field">
+        Hazır şablon
+        <select id="preset" aria-label="Hazır şablon seç">
+          <option value="xor">XOR Sinir Ağı</option>
+          <option value="mlp">Derin MLP Sınıflandırıcı</option>
+          <option value="ozel">Özel Mimari</option>
+        </select>
+      </label>
+      <button type="button" id="run">Modeli Eğit / Çalıştır</button>
+      <span class="status" id="status" role="status">WASM yükleniyor…</span>
+    </div>
+
+    <div class="grid">
+      <section class="panel" id="editor-panel" aria-label="DSL editörü">
+        <div class="panel-h">
+          <strong>Türkçe DSL</strong>
+          <span>.turk</span>
+        </div>
+        <textarea id="editor" spellcheck="false" aria-label="TÜRK DSL kod editörü"></textarea>
+      </section>
+
+      <div class="right-stack">
+        <section class="panel" aria-label="Eğitim grafiği">
+          <div class="panel-h">
+            <strong>Kayıp &amp; Doğruluk</strong>
+            <span>canlı</span>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="chart" aria-label="Loss ve accuracy grafiği"></canvas>
+          </div>
+          <pre class="summary" id="summary">(model özeti burada görünecek)</pre>
+        </section>
+
+        <section class="panel" aria-label="Çalıştırma konsolu" style="min-height: 220px;">
+          <div class="panel-h">
+            <strong>Konsol</strong>
+            <span>çıktı</span>
+          </div>
+          <pre id="console">WASM modülü bekleniyor…
+./pkg/turk.js</pre>
+        </section>
+      </div>
+    </div>
+
+    <footer>
+      <span>SphereX Labs · TÜRK v3</span>
+      <a href="../turk/index.html">API Dokümantasyonu</a>
+      <a href="https://github.com/SphereXLabs/turk-ml-framework">GitHub</a>
+    </footer>
+  </div>
+
+  <script type="module">
+    const PRESETS = {
+      xor: `# XOR Sinir Ağı — WASM Playground
+# Sentetik XOR verisi (disk yok)
+
+veri_yukle("xor")
+model_olustur()
+katman_ekle(yogun(2, 8, "relu"))
+katman_ekle(yogun(8, 1, "sigmoid"))
+derle(adam, loss=mse, ogrenme_orani=0.05)
+model_bilgisi()
+egit(120, 4)
+`,
+      mlp: `# Derin MLP Sınıflandırıcı (XOR)
+# Daha derin mimari + erken durdurma
+
+veri_yukle("xor", bolme=0.25)
+model_olustur()
+katman_ekle(yogun(2, 16, "relu"))
+katman_ekle(batch_norm(16))
+katman_ekle(yogun(16, 8, "relu"))
+katman_ekle(dropout(0.1))
+katman_ekle(yogun(8, 4, "relu"))
+katman_ekle(yogun(4, 1, "sigmoid"))
+derle(adam, loss=mse, ogrenme_orani=0.03)
+model_bilgisi()
+egit(200, 4, sabir=25, min_delta=0.0001)
+`,
+      ozel: `# Özel Mimari — düzenleyip çalıştırın
+# İpucu: WASM'da veri_yukle("xor") kullanın
+
+veri_yukle("xor")
+model_olustur()
+katman_ekle(yogun(2, 4, "tanh"))
+katman_ekle(yogun(4, 1, "sigmoid"))
+derle(sgd, loss=mse, ogrenme_orani=0.1)
+model_bilgisi()
+egit(80, 4)
+`,
+    };
+
+    const editor = document.getElementById("editor");
+    const preset = document.getElementById("preset");
+    const runBtn = document.getElementById("run");
+    const statusEl = document.getElementById("status");
+    const consoleEl = document.getElementById("console");
+    const summaryEl = document.getElementById("summary");
+    const editorPanel = document.getElementById("editor-panel");
+
+    let TurkWasmRunner = null;
+    let ready = false;
+
+    const chart = new Chart(document.getElementById("chart"), {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "Loss",
+            data: [],
+            borderColor: "#e8c478",
+            backgroundColor: "rgba(232, 196, 120, 0.12)",
+            tension: 0.25,
+            pointRadius: 2,
+            borderWidth: 2,
+            yAxisID: "y",
+          },
+          {
+            label: "Accuracy",
+            data: [],
+            borderColor: "#6ec6d4",
+            backgroundColor: "rgba(110, 198, 212, 0.1)",
+            tension: 0.25,
+            pointRadius: 2,
+            borderWidth: 2,
+            yAxisID: "y1",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            labels: { color: "#8b95a8", font: { family: "Sora", size: 11 } },
+          },
+        },
+        scales: {
+          x: {
+            title: { display: true, text: "Epoch", color: "#8b95a8" },
+            ticks: { color: "#8b95a8", maxTicksLimit: 10 },
+            grid: { color: "rgba(232, 196, 120, 0.06)" },
+          },
+          y: {
+            type: "linear",
+            position: "left",
+            title: { display: true, text: "Loss", color: "#e8c478" },
+            ticks: { color: "#e8c478" },
+            grid: { color: "rgba(232, 196, 120, 0.06)" },
+          },
+          y1: {
+            type: "linear",
+            position: "right",
+            min: 0,
+            max: 1,
+            title: { display: true, text: "Accuracy", color: "#6ec6d4" },
+            ticks: { color: "#6ec6d4" },
+            grid: { drawOnChartArea: false },
+          },
+        },
+      },
+    });
+
+    function setStatus(text, kind) {
+      statusEl.textContent = text;
+      statusEl.className = "status" + (kind ? ` ${kind}` : "");
+    }
+
+    function loadPreset(key) {
+      editor.value = PRESETS[key] || PRESETS.xor;
+    }
+
+    function resetChart() {
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
+      chart.data.datasets[1].data = [];
+      chart.update("none");
+    }
+
+    function updateChart(metrics) {
+      const labels = [];
+      const losses = [];
+      const accs = [];
+      for (const m of metrics || []) {
+        labels.push(m.epoch);
+        losses.push(m.loss);
+        accs.push(m.accuracy);
+      }
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = losses;
+      chart.data.datasets[1].data = accs;
+      chart.update();
+    }
+
+    function renderConsole(logs, isError) {
+      if (!logs || !logs.length) {
+        consoleEl.textContent = "(çıktı yok)";
+        return;
+      }
+      const html = logs
+        .map((line) => {
+          const esc = line
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+          if (line.startsWith("Hata") || line.startsWith("eğitim hatası")) {
+            return `<span class="err">${esc}</span>`;
+          }
+          if (line.startsWith("›")) {
+            return `<span class="cmd">${esc}</span>`;
+          }
+          if (line.startsWith("tamamlandı") || line.startsWith("→")) {
+            return `<span class="ok">${esc}</span>`;
+          }
+          return esc;
+        })
+        .join("\n");
+      consoleEl.innerHTML = html + (isError ? "" : "");
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    preset.addEventListener("change", () => loadPreset(preset.value));
+    loadPreset("xor");
+
+    async function initWasm() {
+      try {
+        const mod = await import("./pkg/turk.js");
+        await mod.default();
+        TurkWasmRunner = mod.TurkWasmRunner;
+        ready = true;
+        setStatus("Hazır — eğitmeye başlayabilirsiniz", "ok");
+        consoleEl.textContent = "WASM yüklendi. Bir şablon seçip «Modeli Eğit / Çalıştır»a basın.";
+      } catch (e) {
+        ready = false;
+        setStatus("WASM yüklenemedi", "err");
+        consoleEl.innerHTML =
+          `<span class="err">Modül bulunamadı: ./pkg/turk.js</span>\n\n` +
+          `Yerel deneme için:\n` +
+          `  wasm-pack build --target web --out-dir playground/pkg --no-default-features --features wasm\n` +
+          `  (ardından playground klasörünü bir HTTP sunucusu ile açın)\n\n` +
+          String(e);
+      }
+    }
+
+    runBtn.addEventListener("click", async () => {
+      if (!ready || !TurkWasmRunner) {
+        setStatus("WASM henüz hazır değil", "err");
+        return;
+      }
+      const kod = editor.value;
+      runBtn.disabled = true;
+      editorPanel.classList.add("running");
+      setStatus("Eğitim çalışıyor…");
+      resetChart();
+      summaryEl.textContent = "Eğitiliyor…";
+      consoleEl.textContent = "";
+
+      try {
+        // Her koşuda temiz runner (önceki model state'i kalmasın)
+        const runner = new TurkWasmRunner();
+        const sonuc = runner.calistir_kod(kod);
+        const logs = sonuc.logs || [];
+        const metrics = sonuc.metrics || [];
+        renderConsole(logs, false);
+        updateChart(metrics);
+        summaryEl.textContent = sonuc.model_summary || "(özet yok)";
+        const last = metrics[metrics.length - 1];
+        if (last) {
+          setStatus(
+            `Tamam · epoch ${last.epoch} · loss ${last.loss.toFixed(4)} · acc ${(last.accuracy * 100).toFixed(1)}%`,
+            "ok"
+          );
+        } else {
+          setStatus("Tamamlandı", "ok");
+        }
+      } catch (e) {
+        const msg = typeof e === "string" ? e : e?.message || String(e);
+        renderConsole([msg], true);
+        setStatus("Hata", "err");
+        summaryEl.textContent = "(hata — model özeti yok)";
+      } finally {
+        runBtn.disabled = false;
+        editorPanel.classList.remove("running");
+      }
+    });
+
+    // Tab tuşu ile girinti
+    editor.addEventListener("keydown", (ev) => {
+      if (ev.key === "Tab") {
+        ev.preventDefault();
+        const s = editor.selectionStart;
+        const e = editor.selectionEnd;
+        editor.value = editor.value.slice(0, s) + "  " + editor.value.slice(e);
+        editor.selectionStart = editor.selectionEnd = s + 2;
+      }
+    });
+
+    initWasm();
+  </script>
+</body>
+</html>

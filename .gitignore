@@ -1,6 +1,7 @@
 # Cargo
 /target/
 /target-alt/
+/target-wasm/
 debug/
 **/*.rs.bk
 *.pdb
@@ -22,6 +23,9 @@ debug/
 # Dokümantasyon derlemesi
 /doc/
 /docs/_build/
+
+# WASM playground derleme çıktısı (CI üretir)
+/playground/pkg/
 
 # Geçici
 /tmp/

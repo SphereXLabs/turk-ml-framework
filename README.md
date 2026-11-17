@@ -4,6 +4,8 @@
 [![Documentation](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/docs.yml/badge.svg)](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/docs.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+**[🌐 Tarayıcıda Canlı Dene (WASM Playground)](https://spherexlabs.github.io/turk-ml-framework/playground/)**
+
 TÜRK, Türkçe kullanarak yapay sinir ağları oluşturmanızı, eğitmenizi ve değerlendirmenizi sağlayan açık kaynaklı bir yapay zeka kütüphanesi ve DSL (Domain Specific Language) projesidir.
 
 > **v3.0.0 — Göktürk Kokpit:** Yerel semantik hafıza, otonom araç zinciri ve sistem paneli (`turk_sistem`) dahildir.
