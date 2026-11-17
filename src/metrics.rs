@@ -4,9 +4,10 @@ use ndarray_stats::QuantileExt;
 use serde::{Deserialize, Serialize};
 
 /// Metrik trait'i - object safety için trait bound'lar kaldırıldı
+use crate::dtype::Float;
 pub trait Metric: Send + Sync {
     /// Metrik hesapla
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64;
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float;
 
     /// Metriğin adını döndürür
     fn name(&self) -> &'static str;
@@ -33,16 +34,37 @@ impl Accuracy {
 }
 
 impl Metric for Accuracy {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
+        let n = y_true.nrows();
+        if n == 0 {
+            return 0.0;
+        }
+
         let mut correct = 0;
-        for i in 0..y_true.nrows() {
-            let true_class = y_true[[i, 0]] as usize;
-            let pred_class = y_pred.row(i).argmax().unwrap();
-            if true_class == pred_class {
-                correct += 1;
+        // Tek çıkışlı (XOR / binary MSE+sigmoid): argmax her zaman 0 döner —
+        // 0.5 eşiği ile sınıf karşılaştır.
+        if y_pred.ncols() == 1 {
+            for i in 0..n {
+                let t = y_true[[i, 0]] >= 0.5;
+                let p = y_pred[[i, 0]] >= 0.5;
+                if t == p {
+                    correct += 1;
+                }
+            }
+        } else {
+            for i in 0..n {
+                let true_class = if y_true.ncols() == 1 {
+                    y_true[[i, 0]] as usize
+                } else {
+                    y_true.row(i).argmax().unwrap_or(0)
+                };
+                let pred_class = y_pred.row(i).argmax().unwrap_or(0);
+                if true_class == pred_class {
+                    correct += 1;
+                }
             }
         }
-        correct as f64 / y_true.nrows() as f64
+        correct as Float / n as Float
     }
 
     fn name(&self) -> &'static str {
@@ -65,7 +87,7 @@ impl Precision {
 }
 
 impl Metric for Precision {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
         let mut true_positives = 0;
         let mut false_positives = 0;
         for i in 0..y_true.nrows() {
@@ -80,7 +102,7 @@ impl Metric for Precision {
         if true_positives + false_positives == 0 {
             return 0.0;
         }
-        true_positives as f64 / (true_positives + false_positives) as f64
+        true_positives as Float / (true_positives + false_positives) as Float
     }
 
     fn name(&self) -> &'static str {
@@ -103,7 +125,7 @@ impl Recall {
 }
 
 impl Metric for Recall {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
         let mut true_positives = 0;
         let mut false_negatives = 0;
         for i in 0..y_true.nrows() {
@@ -118,7 +140,7 @@ impl Metric for Recall {
         if true_positives + false_negatives == 0 {
             return 0.0;
         }
-        true_positives as f64 / (true_positives + false_negatives) as f64
+        true_positives as Float / (true_positives + false_negatives) as Float
     }
 
     fn name(&self) -> &'static str {
@@ -141,7 +163,7 @@ impl F1 {
 }
 
 impl Metric for F1 {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
         let precision = Precision.compute(y_true, y_pred);
         let recall = Recall.compute(y_true, y_pred);
         if precision + recall == 0.0 {
@@ -170,7 +192,7 @@ impl MAE {
 }
 
 impl Metric for MAE {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
         let diff = y_true - y_pred;
         diff.mapv(|v| v.abs()).mean().unwrap_or(0.0)
     }
@@ -195,7 +217,7 @@ impl MSE {
 }
 
 impl Metric for MSE {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
         let diff = y_true - y_pred;
         let squared = &diff * &diff;
         squared.mean().unwrap_or(0.0)
@@ -221,7 +243,7 @@ impl RMSE {
 }
 
 impl Metric for RMSE {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
         let mse = MSE.compute(y_true, y_pred);
         mse.sqrt()
     }
@@ -246,7 +268,7 @@ impl R2 {
 }
 
 impl Metric for R2 {
-    fn compute(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> f64 {
+    fn compute(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Float {
         let diff = y_true - y_pred;
         let ss_res = (&diff * &diff).sum();
         let y_mean = y_true.mean().unwrap_or(0.0);
@@ -282,5 +304,20 @@ pub fn create_metric(metric: &str) -> Result<Box<dyn Metric>> {
             "Geçersiz metrik: {}",
             metric
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn test_binary_accuracy_threshold() {
+        // XOR benzeri tek çıkış: argmax her zaman 0 olurdu; 0.5 eşiği gerekir.
+        let y_true = array![[0.0], [1.0], [1.0], [0.0]];
+        let y_pred = array![[0.01], [0.99], [0.97], [0.02]];
+        let acc = Accuracy::new().compute(&y_true.view(), &y_pred.view());
+        assert!((acc - 1.0).abs() < 1e-6, "beklenen 100%, gelen {acc}");
     }
 }

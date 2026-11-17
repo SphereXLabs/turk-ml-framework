@@ -8,30 +8,31 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// Katman özellikleri
+use crate::dtype::Float;
 pub trait Layer: fmt::Debug + Send + Sync {
     /// İleri yayılım
-    fn forward(&mut self, input: &ArrayView2<f64>) -> Result<Array2<f64>>;
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>>;
 
     /// Geri yayılım
     fn backward(
         &self,
-        input: &ArrayView2<f64>,
-        grad_output: &ArrayView2<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)>;
+        input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)>;
 
     /// Ağırlıkları ve bias değerlerini günceller
     fn update(
         &mut self,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
-        learning_rate: f64,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
+        learning_rate: Float,
     ) -> Result<()>;
 
     /// Ağırlıkları döndürür
-    fn get_weights(&self) -> Result<Array2<f64>>;
+    fn get_weights(&self) -> Result<Array2<Float>>;
 
     /// Bias değerlerini döndürür
-    fn get_biases(&self) -> Result<Array2<f64>>;
+    fn get_biases(&self) -> Result<Array2<Float>>;
 
     /// Aktivasyon fonksiyonunu döndürür
     fn activation_type(&self) -> Activation;
@@ -61,22 +62,22 @@ pub trait Layer: fmt::Debug + Send + Sync {
     fn reset(&mut self);
 
     /// Ağırlıkları vektör olarak döndürür (serileştirme için)
-    fn weights_as_vec(&self) -> Vec<f64>;
+    fn weights_as_vec(&self) -> Vec<Float>;
 
     /// Bias değerlerini vektör olarak döndürür (serileştirme için)
-    fn biases_as_vec(&self) -> Vec<f64>;
+    fn biases_as_vec(&self) -> Vec<Float>;
 
     /// Dropout oranını döndürür (eğer varsa)
-    fn dropout_rate(&self) -> Option<f64>;
+    fn dropout_rate(&self) -> Option<Float>;
 
     /// Batch normalizasyon kullanılıp kullanılmadığını döndürür
     fn use_batch_norm(&self) -> Option<bool>;
 
     /// Ağırlık değerlerini ayarlar
-    fn set_weights(&mut self, weights: &ArrayView2<f64>) -> Result<()>;
+    fn set_weights(&mut self, weights: &ArrayView2<Float>) -> Result<()>;
 
     /// Bias değerlerini ayarlar
-    fn set_biases(&mut self, biases: &ArrayView2<f64>) -> Result<()>;
+    fn set_biases(&mut self, biases: &ArrayView2<Float>) -> Result<()>;
 
     /// Display için kullanılacak metod
     fn to_string(&self) -> String {
@@ -84,7 +85,7 @@ pub trait Layer: fmt::Debug + Send + Sync {
     }
 
     /// Serileştirme için ek sayısal metadata (CNN boyutları vb.)
-    fn layer_metadata(&self) -> HashMap<String, f64> {
+    fn layer_metadata(&self) -> HashMap<String, Float> {
         HashMap::new()
     }
 }
@@ -98,14 +99,14 @@ impl Clone for Box<dyn Layer> {
 /// Tam bağlantılı (Dense) katman
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dense {
-    pub weights: Array2<f64>,
-    pub biases: Array2<f64>,
+    pub weights: Array2<Float>,
+    pub biases: Array2<Float>,
     pub activation: Activation,
     pub input_shape: Option<(usize, usize)>,
     pub output_shape: Option<(usize, usize)>,
     pub kernel_initializer: String,
     pub bias_initializer: String,
-    pub dropout_rate: f64,
+    pub dropout_rate: Float,
     pub trainable: bool,
     pub batch_norm: bool,
 }
@@ -143,7 +144,7 @@ impl Dense {
 }
 
 impl Layer for Dense {
-    fn forward(&mut self, input: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
         // Boyut kontrolü
         if input.ncols() != self.weights.nrows() {
             return Err(TurkError::shape_mismatch(&format!(
@@ -164,9 +165,9 @@ impl Layer for Dense {
 
     fn backward(
         &self,
-        input: &ArrayView2<f64>,
-        grad_output: &ArrayView2<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)> {
+        input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
         // Aktivasyon girdisi hesapla - paralel dot
         let z = input.dot(&self.weights) + &self.biases;
 
@@ -225,9 +226,9 @@ impl Layer for Dense {
 
     fn update(
         &mut self,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
-        learning_rate: f64,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
+        learning_rate: Float,
     ) -> Result<()> {
         if !self.is_trainable() {
             return Ok(());
@@ -257,11 +258,11 @@ impl Layer for Dense {
         Ok(())
     }
 
-    fn get_weights(&self) -> Result<Array2<f64>> {
+    fn get_weights(&self) -> Result<Array2<Float>> {
         Ok(self.weights.clone())
     }
 
-    fn get_biases(&self) -> Result<Array2<f64>> {
+    fn get_biases(&self) -> Result<Array2<Float>> {
         Ok(self.biases.clone())
     }
 
@@ -313,15 +314,15 @@ impl Layer for Dense {
         }
     }
 
-    fn weights_as_vec(&self) -> Vec<f64> {
+    fn weights_as_vec(&self) -> Vec<Float> {
         self.weights.iter().cloned().collect()
     }
 
-    fn biases_as_vec(&self) -> Vec<f64> {
+    fn biases_as_vec(&self) -> Vec<Float> {
         self.biases.iter().cloned().collect()
     }
 
-    fn dropout_rate(&self) -> Option<f64> {
+    fn dropout_rate(&self) -> Option<Float> {
         if self.dropout_rate > 0.0 {
             Some(self.dropout_rate)
         } else {
@@ -333,7 +334,7 @@ impl Layer for Dense {
         None
     }
 
-    fn set_weights(&mut self, weights: &ArrayView2<f64>) -> Result<()> {
+    fn set_weights(&mut self, weights: &ArrayView2<Float>) -> Result<()> {
         if weights.dim() != self.weights.dim() {
             return Err(TurkError::shape_mismatch(&format!(
                 "Ağırlık ayarlama boyut uyuşmazlığı: yeni = {:?}, mevcut = {:?}",
@@ -346,7 +347,7 @@ impl Layer for Dense {
         Ok(())
     }
 
-    fn set_biases(&mut self, biases: &ArrayView2<f64>) -> Result<()> {
+    fn set_biases(&mut self, biases: &ArrayView2<Float>) -> Result<()> {
         if biases.dim() != self.biases.dim() {
             return Err(TurkError::shape_mismatch(&format!(
                 "Bias ayarlama boyut uyuşmazlığı: yeni = {:?}, mevcut = {:?}",
@@ -375,8 +376,8 @@ impl fmt::Display for Dense {
 /// Dropout katmanı
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dropout {
-    pub rate: f64,
-    pub mask: Option<Array2<f64>>,
+    pub rate: Float,
+    pub mask: Option<Array2<Float>>,
     pub input_shape: Option<(usize, usize)>,
     pub output_shape: Option<(usize, usize)>,
     pub trainable: bool,
@@ -385,7 +386,7 @@ pub struct Dropout {
 
 impl Dropout {
     /// Yeni bir Dropout katmanı oluşturur
-    pub fn new(rate: f64) -> Self {
+    pub fn new(rate: Float) -> Self {
         if !(0.0..1.0).contains(&rate) {
             warn!(
                 "Dropout oranı [0, 1) aralığında olmalıdır, alınan: {}",
@@ -412,7 +413,7 @@ impl Dropout {
 }
 
 impl Layer for Dropout {
-    fn forward(&mut self, input: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
         if !self.training || self.rate <= 0.0 {
             return Ok(input.to_owned());
         }
@@ -443,9 +444,9 @@ impl Layer for Dropout {
 
     fn backward(
         &self,
-        _input: &ArrayView2<f64>,
-        grad_output: &ArrayView2<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)> {
+        _input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
         if !self.training || self.rate <= 0.0 {
             return Ok((
                 grad_output.to_owned(),
@@ -478,20 +479,20 @@ impl Layer for Dropout {
 
     fn update(
         &mut self,
-        _grad_weights: &ArrayView2<f64>,
-        _grad_biases: &ArrayView2<f64>,
-        _learning_rate: f64,
+        _grad_weights: &ArrayView2<Float>,
+        _grad_biases: &ArrayView2<Float>,
+        _learning_rate: Float,
     ) -> Result<()> {
         // Dropout katmanında eğitilebilir parametre olmadığından güncelleme yapmaz
         Ok(())
     }
 
-    fn get_weights(&self) -> Result<Array2<f64>> {
+    fn get_weights(&self) -> Result<Array2<Float>> {
         // Dropout katmanında ağırlık yoktur
         Ok(Array2::zeros((0, 0)))
     }
 
-    fn get_biases(&self) -> Result<Array2<f64>> {
+    fn get_biases(&self) -> Result<Array2<Float>> {
         // Dropout katmanında bias yoktur
         Ok(Array2::zeros((0, 0)))
     }
@@ -540,15 +541,15 @@ impl Layer for Dropout {
         self.mask = None;
     }
 
-    fn weights_as_vec(&self) -> Vec<f64> {
+    fn weights_as_vec(&self) -> Vec<Float> {
         Vec::new() // Dropout katmanında ağırlık yoktur
     }
 
-    fn biases_as_vec(&self) -> Vec<f64> {
+    fn biases_as_vec(&self) -> Vec<Float> {
         Vec::new() // Dropout katmanında bias yoktur
     }
 
-    fn dropout_rate(&self) -> Option<f64> {
+    fn dropout_rate(&self) -> Option<Float> {
         Some(self.rate)
     }
 
@@ -556,12 +557,12 @@ impl Layer for Dropout {
         None
     }
 
-    fn set_weights(&mut self, _weights: &ArrayView2<f64>) -> Result<()> {
+    fn set_weights(&mut self, _weights: &ArrayView2<Float>) -> Result<()> {
         // Dropout katmanında ağırlık olmadığından, işlem yapmaz
         Ok(())
     }
 
-    fn set_biases(&mut self, _biases: &ArrayView2<f64>) -> Result<()> {
+    fn set_biases(&mut self, _biases: &ArrayView2<Float>) -> Result<()> {
         // Dropout katmanında bias olmadığından, işlem yapmaz
         Ok(())
     }
@@ -585,30 +586,30 @@ pub struct BatchNormalization {
     /// Özellik sayısı (features)
     pub num_features: usize,
     /// Sayısal kararlılık için epsilon
-    pub epsilon: f64,
+    pub epsilon: Float,
     /// Hareketli ortalama momentum (çıkarım için)
-    pub momentum: f64,
+    pub momentum: Float,
     /// Ölçekleme parametresi (gamma), shape: (1, num_features)
-    pub gamma: Array2<f64>,
+    pub gamma: Array2<Float>,
     /// Kaydırma parametresi (beta), shape: (1, num_features)
-    pub beta: Array2<f64>,
+    pub beta: Array2<Float>,
     /// Hareketli ortalama (çıkarım modu)
-    pub running_mean: Array2<f64>,
+    pub running_mean: Array2<Float>,
     /// Hareketli varyans (çıkarım modu)
-    pub running_var: Array2<f64>,
+    pub running_var: Array2<Float>,
     /// Eğitim modu mu?
     pub training: bool,
     /// Eğitilebilir mi?
     pub trainable: bool,
     /// Son forward geçişinin normalize edilmiş çıktısı (backward için)
     #[serde(skip)]
-    pub last_x_norm: Option<Array2<f64>>,
+    pub last_x_norm: Option<Array2<Float>>,
     /// Son forward geçişinin standart sapması (backward için)
     #[serde(skip)]
-    pub last_std: Option<Array2<f64>>,
+    pub last_std: Option<Array2<Float>>,
     /// Son forward geçişinin batch ortalaması
     #[serde(skip)]
-    pub last_mean: Option<Array2<f64>>,
+    pub last_mean: Option<Array2<Float>>,
 }
 
 impl BatchNormalization {
@@ -617,7 +618,7 @@ impl BatchNormalization {
         Self::with_params(num_features, 1e-5, 0.1)
     }
 
-    pub fn with_params(num_features: usize, epsilon: f64, momentum: f64) -> Self {
+    pub fn with_params(num_features: usize, epsilon: Float, momentum: Float) -> Self {
         Self {
             num_features,
             epsilon,
@@ -640,7 +641,7 @@ impl BatchNormalization {
 }
 
 impl Layer for BatchNormalization {
-    fn forward(&mut self, input: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
         let (n, d) = input.dim();
         if d != self.num_features {
             return Err(TurkError::shape_mismatch(&format!(
@@ -660,7 +661,7 @@ impl Layer for BatchNormalization {
                 .unwrap()
                 .insert_axis(Axis(0));
 
-            let std = (&var + self.epsilon).mapv(f64::sqrt);
+            let std = (&var + self.epsilon).mapv(Float::sqrt);
             let x_norm = &diff / &std;
 
             // Hareketli istatistikleri güncelle
@@ -675,7 +676,7 @@ impl Layer for BatchNormalization {
             Ok(&x_norm * &self.gamma + &self.beta)
         } else {
             // Çıkarım modu: hareketli istatistikleri kullan
-            let std = (&self.running_var + self.epsilon).mapv(f64::sqrt);
+            let std = (&self.running_var + self.epsilon).mapv(Float::sqrt);
             let x_norm = (input - &self.running_mean) / &std;
             Ok(&x_norm * &self.gamma + &self.beta)
         }
@@ -683,10 +684,10 @@ impl Layer for BatchNormalization {
 
     fn backward(
         &self,
-        _input: &ArrayView2<f64>,
-        grad_output: &ArrayView2<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)> {
-        let n = grad_output.nrows() as f64;
+        _input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
+        let n = grad_output.nrows() as Float;
 
         let x_norm = self.last_x_norm.as_ref().ok_or_else(|| {
             TurkError::LayerError("BatchNorm: forward çağrılmadan backward yapılamaz".into())
@@ -724,9 +725,9 @@ impl Layer for BatchNormalization {
 
     fn update(
         &mut self,
-        grad_gamma: &ArrayView2<f64>,
-        grad_beta: &ArrayView2<f64>,
-        learning_rate: f64,
+        grad_gamma: &ArrayView2<Float>,
+        grad_beta: &ArrayView2<Float>,
+        learning_rate: Float,
     ) -> Result<()> {
         if !self.trainable {
             return Ok(());
@@ -736,18 +737,18 @@ impl Layer for BatchNormalization {
         Ok(())
     }
 
-    fn get_weights(&self) -> Result<Array2<f64>> {
+    fn get_weights(&self) -> Result<Array2<Float>> {
         Ok(self.gamma.clone())
     }
-    fn get_biases(&self) -> Result<Array2<f64>> {
+    fn get_biases(&self) -> Result<Array2<Float>> {
         Ok(self.beta.clone())
     }
 
-    fn set_weights(&mut self, w: &ArrayView2<f64>) -> Result<()> {
+    fn set_weights(&mut self, w: &ArrayView2<Float>) -> Result<()> {
         self.gamma = w.to_owned();
         Ok(())
     }
-    fn set_biases(&mut self, b: &ArrayView2<f64>) -> Result<()> {
+    fn set_biases(&mut self, b: &ArrayView2<Float>) -> Result<()> {
         self.beta = b.to_owned();
         Ok(())
     }
@@ -786,14 +787,14 @@ impl Layer for BatchNormalization {
         self.last_mean = None;
     }
 
-    fn weights_as_vec(&self) -> Vec<f64> {
+    fn weights_as_vec(&self) -> Vec<Float> {
         self.gamma.iter().copied().collect()
     }
-    fn biases_as_vec(&self) -> Vec<f64> {
+    fn biases_as_vec(&self) -> Vec<Float> {
         self.beta.iter().copied().collect()
     }
 
-    fn dropout_rate(&self) -> Option<f64> {
+    fn dropout_rate(&self) -> Option<Float> {
         None
     }
     fn use_batch_norm(&self) -> Option<bool> {

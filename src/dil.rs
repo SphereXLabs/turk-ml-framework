@@ -1,5 +1,6 @@
 use crate::aktivasyon::Activation;
 use crate::cihaz::{cihaz_listesi_metin, Cihaz};
+use crate::dtype::{self, Float};
 use crate::error::{Result, TurkError};
 use crate::initializers::{GlorotUniform, Zeros};
 use crate::katman_kayit::KatmanKayit;
@@ -529,9 +530,9 @@ impl TurkDil {
 
         let validation_data = veri.val_veri().map(|(x, y)| (x.clone(), y.clone()));
 
-        let mut early_stopping = p
-            .sabir
-            .map(|patience| EarlyStopping::new(patience, p.min_delta.unwrap_or(0.0)));
+        let mut early_stopping = p.sabir.map(|patience| {
+            EarlyStopping::new(patience, dtype::from_f64(p.min_delta.unwrap_or(0.0)))
+        });
 
         info!(
             "Model eğitiliyor (lazy stream): kaynak='{}', egitim={}, val={}, {} özellik, \
@@ -554,8 +555,8 @@ impl TurkDil {
                 let _ = tx.send(EgitimIlerleme::Epoch {
                     epoch,
                     toplam,
-                    train_loss: loss,
-                    val_loss: val,
+                    train_loss: dtype::to_f64(loss),
+                    val_loss: val.map(dtype::to_f64),
                 });
             }));
         }
@@ -594,32 +595,32 @@ impl TurkDil {
                      loss={en_iyi_train:.6}, val_loss={en_iyi_val:.6}",
                     history.epochs_run(),
                 );
-                en_iyi_train
+                dtype::to_f64(en_iyi_train)
             } else {
-                let son = history.last_train_loss().unwrap_or(f64::NAN);
+                let son = history.last_train_loss().unwrap_or(Float::NAN);
                 info!(
                     "Eğitim tamamlandı — {} epoch, son kayıp: {son:.6}",
                     history.epochs_run(),
                 );
-                son
+                dtype::to_f64(son)
             }
         } else {
-            let son = history.last_train_loss().unwrap_or(f64::NAN);
+            let son = history.last_train_loss().unwrap_or(Float::NAN);
             info!(
                 "Eğitim tamamlandı — {} epoch, son kayıp: {son:.6}",
                 history.epochs_run(),
             );
-            son
+            dtype::to_f64(son)
         };
 
         if let Some(tx) = &self.egitim_tx {
             let (en_iyi_train, en_iyi_val) = history
                 .en_iyi_val_kayitlari()
-                .map(|(t, v, _)| (t, Some(v)))
+                .map(|(t, v, _)| (dtype::to_f64(t), Some(dtype::to_f64(v))))
                 .unwrap_or_else(|| {
                     (
-                        history.last_train_loss().unwrap_or(f64::NAN),
-                        history.last_val_loss(),
+                        dtype::to_f64(history.last_train_loss().unwrap_or(Float::NAN)),
+                        history.last_val_loss().map(dtype::to_f64),
                     )
                 });
             let _ = tx.send(EgitimIlerleme::Tamamlandi {
@@ -840,7 +841,7 @@ impl TurkDil {
             let anahtar = dosya_yolu.to_lowercase();
             if anahtar.contains("xor") || anahtar == "sentetik" || anahtar.ends_with(".csv") {
                 info!("WASM sentetik veri yükleniyor: '{dosya_yolu}' → XOR");
-                CsvVeriAkisi::sentetik_xor(bolme)?
+                CsvVeriAkisi::sentetik_xor(bolme.map(dtype::from_f64))?
             } else {
                 return Err(TurkError::DataError(format!(
                     "WASM'da yalnızca sentetik veri desteklenir. Örnek: veri_yukle(\"xor\") \
@@ -857,11 +858,15 @@ impl TurkDil {
             CsvVeriAkisi::yeni_bolme_with_progress(
                 &dosya_yolu,
                 hedef_kolon.as_deref(),
-                bolme,
+                bolme.map(dtype::from_f64),
                 Some(&mut on_satir),
             )?
         } else {
-            CsvVeriAkisi::yeni_bolme(&dosya_yolu, hedef_kolon.as_deref(), bolme)?
+            CsvVeriAkisi::yeni_bolme(
+                &dosya_yolu,
+                hedef_kolon.as_deref(),
+                bolme.map(dtype::from_f64),
+            )?
         };
 
         if let Some(tx) = &self.egitim_tx {
@@ -1084,17 +1089,12 @@ fn derle_parametreleri_parse(icerik: &str) -> Result<DerleParametreleri> {
 }
 
 fn optimizer_olustur(ad: &str, lr: Option<f64>) -> Result<Box<dyn crate::optimizer::Optimizer>> {
+    let lr = dtype::from_f64(lr.unwrap_or(0.001));
     match ad.to_lowercase().as_str() {
-        "sgd" => Ok(Box::new(SGD::new(lr.unwrap_or(0.01), None, false))),
-        "adam" => Ok(Box::new(Adam::new(lr.unwrap_or(0.001), 0.9, 0.999, 1e-8))),
-        "adamw" => Ok(Box::new(AdamW::new(
-            lr.unwrap_or(0.001),
-            0.9,
-            0.999,
-            1e-8,
-            0.01,
-        ))),
-        "rmsprop" => Ok(Box::new(RMSProp::new(lr.unwrap_or(0.001), 0.9, 1e-8))),
+        "sgd" => Ok(Box::new(SGD::new(lr, None, false))),
+        "adam" => Ok(Box::new(Adam::new(lr, 0.9, 0.999, 1e-8))),
+        "adamw" => Ok(Box::new(AdamW::new(lr, 0.9, 0.999, 1e-8, 0.01))),
+        "rmsprop" => Ok(Box::new(RMSProp::new(lr, 0.9, 1e-8))),
         _ => Err(TurkError::ValueError(format!(
             "Desteklenmeyen optimizasyon algoritması: {ad}"
         ))),

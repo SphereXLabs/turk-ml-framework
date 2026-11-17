@@ -11,6 +11,7 @@ use ndarray::Array2;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 
+use crate::dtype::Float;
 use crate::error::{Result, TurkError};
 
 /// Her veri satırının dosyadaki byte ofseti.
@@ -38,10 +39,10 @@ pub struct CsvSemasi {
 pub struct CsvVeriAkisi {
     sema: CsvSemasi,
     /// Doğrulama kümesi (bir kez yüklenir, epoch boyunca bellekte kalır).
-    val_onbellek: Option<(Array2<f64>, Array2<f64>)>,
-    pub bolme_orani: Option<f64>,
+    val_onbellek: Option<(Array2<Float>, Array2<Float>)>,
+    pub bolme_orani: Option<Float>,
     /// Bellek içi eğitim verisi (WASM / sentetik). Set ise disk okunmaz.
-    egitim_onbellek: Option<(Array2<f64>, Array2<f64>)>,
+    egitim_onbellek: Option<(Array2<Float>, Array2<Float>)>,
 }
 
 impl CsvVeriAkisi {
@@ -54,7 +55,7 @@ impl CsvVeriAkisi {
     pub fn yeni_bolme(
         dosya_yolu: &str,
         hedef_kolon: Option<&str>,
-        bolme_orani: Option<f64>,
+        bolme_orani: Option<Float>,
     ) -> Result<Self> {
         Self::yeni_bolme_with_progress(dosya_yolu, hedef_kolon, bolme_orani, None::<fn(usize)>)
     }
@@ -63,7 +64,7 @@ impl CsvVeriAkisi {
     pub fn yeni_bolme_with_progress<F>(
         dosya_yolu: &str,
         hedef_kolon: Option<&str>,
-        bolme_orani: Option<f64>,
+        bolme_orani: Option<Float>,
         mut on_satir: Option<F>,
     ) -> Result<Self>
     where
@@ -104,9 +105,9 @@ impl CsvVeriAkisi {
     /// Bellek içi (disk kullanmayan) veri akışı — WASM / sentetik XOR vb.
     pub fn bellekten(
         kaynak: &str,
-        x: Array2<f64>,
-        y: Array2<f64>,
-        bolme_orani: Option<f64>,
+        x: Array2<Float>,
+        y: Array2<Float>,
+        bolme_orani: Option<Float>,
     ) -> Result<Self> {
         if x.nrows() == 0 {
             return Err(TurkError::DataError("Bellek verisi boş olamaz".into()));
@@ -130,7 +131,7 @@ impl CsvVeriAkisi {
         let ozellik_sayisi = x.ncols();
         let mut egitim_idx: Vec<usize> = (0..n).collect();
         let val_idx = if let Some(oran) = bolme_orani {
-            let val_n = ((n as f64) * oran).round() as usize;
+            let val_n = ((n as Float) * oran).round() as usize;
             if val_n == 0 || val_n >= n {
                 Vec::new()
             } else {
@@ -141,8 +142,8 @@ impl CsvVeriAkisi {
             Vec::new()
         };
 
-        let mut x_train = Array2::<f64>::zeros((egitim_idx.len(), ozellik_sayisi));
-        let mut y_train = Array2::<f64>::zeros((egitim_idx.len(), y.ncols()));
+        let mut x_train = Array2::<Float>::zeros((egitim_idx.len(), ozellik_sayisi));
+        let mut y_train = Array2::<Float>::zeros((egitim_idx.len(), y.ncols()));
         for (i, &src) in egitim_idx.iter().enumerate() {
             x_train.row_mut(i).assign(&x.row(src));
             y_train.row_mut(i).assign(&y.row(src));
@@ -151,8 +152,8 @@ impl CsvVeriAkisi {
         let val_onbellek = if val_idx.is_empty() {
             None
         } else {
-            let mut x_val = Array2::<f64>::zeros((val_idx.len(), ozellik_sayisi));
-            let mut y_val = Array2::<f64>::zeros((val_idx.len(), y.ncols()));
+            let mut x_val = Array2::<Float>::zeros((val_idx.len(), ozellik_sayisi));
+            let mut y_val = Array2::<Float>::zeros((val_idx.len(), y.ncols()));
             for (i, &src) in val_idx.iter().enumerate() {
                 x_val.row_mut(i).assign(&x.row(src));
                 y_val.row_mut(i).assign(&y.row(src));
@@ -182,7 +183,7 @@ impl CsvVeriAkisi {
     }
 
     /// Klasik XOR veri seti (4 örnek, 2 özellik).
-    pub fn sentetik_xor(bolme_orani: Option<f64>) -> Result<Self> {
+    pub fn sentetik_xor(bolme_orani: Option<Float>) -> Result<Self> {
         let x = Array2::from_shape_vec((4, 2), vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0])
             .map_err(|e| TurkError::DataError(format!("XOR X oluşturulamadı: {e}")))?;
         let y = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 1.0, 0.0])
@@ -214,7 +215,7 @@ impl CsvVeriAkisi {
     }
 
     /// Doğrulama tensörlerine erişim (varsa).
-    pub fn val_veri(&self) -> Option<(&Array2<f64>, &Array2<f64>)> {
+    pub fn val_veri(&self) -> Option<(&Array2<Float>, &Array2<Float>)> {
         self.val_onbellek.as_ref().map(|(x, y)| (x, y))
     }
 
@@ -245,7 +246,7 @@ pub struct CsvEpochOkuyucu {
     okuma_i: usize,
     bitti: bool,
     /// Bellek içi eğitim matrisleri (WASM / sentetik)
-    bellek: Option<(Array2<f64>, Array2<f64>)>,
+    bellek: Option<(Array2<Float>, Array2<Float>)>,
 }
 
 impl CsvEpochOkuyucu {
@@ -280,8 +281,8 @@ impl CsvEpochOkuyucu {
 
     /// Bellek içi matrislerden batch üretir (disk yok).
     pub fn bellekten(
-        x: &Array2<f64>,
-        y: &Array2<f64>,
+        x: &Array2<Float>,
+        y: &Array2<Float>,
         batch_boyutu: usize,
         karistir: bool,
     ) -> Result<Self> {
@@ -332,13 +333,13 @@ impl CsvEpochOkuyucu {
         Ok(satir)
     }
 
-    fn satir_isle(&self, ham: &str) -> Result<(Vec<f64>, f64)> {
-        let degerler: Vec<f64> = ham
+    fn satir_isle(&self, ham: &str) -> Result<(Vec<Float>, Float)> {
+        let degerler: Vec<Float> = ham
             .split(',')
             .map(|s| {
                 s.trim()
                     .trim_matches('"')
-                    .parse::<f64>()
+                    .parse::<Float>()
                     .map_err(|_| TurkError::DataError(format!("Sayısal olmayan hücre: '{s}'")))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -352,7 +353,7 @@ impl CsvEpochOkuyucu {
         }
 
         let hedef = degerler[self.sema.hedef_idx];
-        let ozellikler: Vec<f64> = degerler
+        let ozellikler: Vec<Float> = degerler
             .into_iter()
             .enumerate()
             .filter(|(i, _)| *i != self.sema.hedef_idx)
@@ -364,13 +365,13 @@ impl CsvEpochOkuyucu {
 
     fn matrise_cevir(
         &self,
-        x_satirlar: Vec<Vec<f64>>,
-        y_degerler: Vec<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>)> {
+        x_satirlar: Vec<Vec<Float>>,
+        y_degerler: Vec<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>)> {
         let n = x_satirlar.len();
         let d = self.sema.ozellik_sayisi;
-        let mut x = Array2::<f64>::zeros((n, d));
-        let mut y = Array2::<f64>::zeros((n, 1));
+        let mut x = Array2::<Float>::zeros((n, d));
+        let mut y = Array2::<Float>::zeros((n, 1));
 
         for (i, (satir, etiket)) in x_satirlar.iter().zip(y_degerler.iter()).enumerate() {
             for (j, &v) in satir.iter().enumerate() {
@@ -382,7 +383,7 @@ impl CsvEpochOkuyucu {
         Ok((x, y))
     }
 
-    fn sonraki_batch(&mut self) -> Result<Option<(Array2<f64>, Array2<f64>)>> {
+    fn sonraki_batch(&mut self) -> Result<Option<(Array2<Float>, Array2<Float>)>> {
         if self.okuma_i >= self.okuma_sirasi.len() {
             return Ok(None);
         }
@@ -395,8 +396,8 @@ impl CsvEpochOkuyucu {
             let n = chunk.len();
             let d = x_all.ncols();
             let c = y_all.ncols();
-            let mut x = Array2::<f64>::zeros((n, d));
-            let mut y = Array2::<f64>::zeros((n, c));
+            let mut x = Array2::<Float>::zeros((n, d));
+            let mut y = Array2::<Float>::zeros((n, c));
             for (i, &src) in chunk.iter().enumerate() {
                 x.row_mut(i).assign(&x_all.row(src));
                 y.row_mut(i).assign(&y_all.row(src));
@@ -427,7 +428,7 @@ impl CsvEpochOkuyucu {
 }
 
 impl Iterator for CsvEpochOkuyucu {
-    type Item = Result<(Array2<f64>, Array2<f64>)>;
+    type Item = Result<(Array2<Float>, Array2<Float>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.bitti {
@@ -485,7 +486,7 @@ where
         )));
     }
 
-    let baslik_var = basliklar[0].parse::<f64>().is_err();
+    let baslik_var = basliklar[0].parse::<Float>().is_err();
     let hedef_idx = if baslik_var {
         if let Some(ad) = hedef_kolon {
             basliklar
@@ -560,7 +561,7 @@ where
     Ok((sema, indeks))
 }
 
-fn satir_bol(indeks: &CsvSatirIndeksi, bolme_orani: Option<f64>) -> (Vec<usize>, Vec<usize>) {
+fn satir_bol(indeks: &CsvSatirIndeksi, bolme_orani: Option<Float>) -> (Vec<usize>, Vec<usize>) {
     let n = indeks.toplam_satir;
     let mut sirali: Vec<usize> = (0..n).collect();
     sirali.shuffle(&mut thread_rng());
@@ -570,7 +571,7 @@ fn satir_bol(indeks: &CsvSatirIndeksi, bolme_orani: Option<f64>) -> (Vec<usize>,
         return (sirali, Vec::new());
     }
 
-    let val_sayisi = ((n as f64) * bolme).round() as usize;
+    let val_sayisi = ((n as Float) * bolme).round() as usize;
     let val_sayisi = val_sayisi.clamp(1, n - 1);
     let egitim_sayisi = n - val_sayisi;
 
@@ -582,7 +583,7 @@ fn satir_bol(indeks: &CsvSatirIndeksi, bolme_orani: Option<f64>) -> (Vec<usize>,
 fn satirlari_oku(
     sema: &CsvSemasi,
     satir_indeksleri: &[usize],
-) -> Result<(Array2<f64>, Array2<f64>)> {
+) -> Result<(Array2<Float>, Array2<Float>)> {
     let mut file = File::open(&sema.kaynak)
         .map_err(|e| TurkError::IOError(format!("'{}' açılamadı: {e}", sema.kaynak)))?;
 
@@ -597,19 +598,19 @@ fn satirlari_oku(
         dosyadan_satir_oku(&mut file, &mut ham)
             .map_err(|e| TurkError::IOError(format!("Satır okunamadı: {e}")))?;
 
-        let degerler: Vec<f64> = ham
+        let degerler: Vec<Float> = ham
             .trim()
             .split(',')
             .map(|s| {
                 s.trim()
                     .trim_matches('"')
-                    .parse::<f64>()
+                    .parse::<Float>()
                     .map_err(|_| TurkError::DataError(format!("Sayısal olmayan hücre: '{s}'")))
             })
             .collect::<Result<Vec<_>>>()?;
 
         let hedef = degerler[sema.hedef_idx];
-        let ozellikler: Vec<f64> = degerler
+        let ozellikler: Vec<Float> = degerler
             .into_iter()
             .enumerate()
             .filter(|(i, _)| *i != sema.hedef_idx)
@@ -622,8 +623,8 @@ fn satirlari_oku(
 
     let n = x_satirlar.len();
     let d = sema.ozellik_sayisi;
-    let mut x = Array2::<f64>::zeros((n, d));
-    let mut y = Array2::<f64>::zeros((n, 1));
+    let mut x = Array2::<Float>::zeros((n, d));
+    let mut y = Array2::<Float>::zeros((n, 1));
     for (i, (satir, etiket)) in x_satirlar.iter().zip(y_degerler.iter()).enumerate() {
         for (j, &v) in satir.iter().enumerate() {
             x[[i, j]] = v;

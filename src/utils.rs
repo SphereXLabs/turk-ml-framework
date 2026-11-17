@@ -1,4 +1,5 @@
 //! Çeşitli yardımcı işlevler
+use crate::dtype::Float;
 use crate::error::{Result, TurkError};
 use itertools::Itertools;
 use ndarray::{s, Array2, ArrayView2, Axis};
@@ -12,12 +13,13 @@ use std::path::Path;
 
 /// Tensor matematiksel işlemleri için yardımcı fonksiyonlar
 pub mod tensor_ops {
+    use crate::dtype::Float;
     use crate::error::{Result, TurkError};
     use ndarray::{Array2, ArrayView2, Axis, Zip};
 
     /// İki tensor arasında nokta çarpımı yapar (matris çarpımı)
     /// Rayon ile paralel hesaplama kullanır
-    pub fn dot(a: &ArrayView2<f64>, b: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    pub fn dot(a: &ArrayView2<Float>, b: &ArrayView2<Float>) -> Result<Array2<Float>> {
         if a.ncols() != b.nrows() {
             return Err(TurkError::shape_mismatch(&format!(
                 "Nokta çarpımı için uyumsuz boyutlar: {}x{} ve {}x{}",
@@ -34,7 +36,7 @@ pub mod tensor_ops {
 
     /// L2 normalizasyon uygular
     /// Rayon ile paralel hesaplama kullanır
-    pub fn l2_normalize(x: &ArrayView2<f64>, axis: usize) -> Result<Array2<f64>> {
+    pub fn l2_normalize(x: &ArrayView2<Float>, axis: usize) -> Result<Array2<Float>> {
         let squared = x.mapv(|v| v * v);
         let sum_squared = squared.sum_axis(Axis(axis));
 
@@ -98,7 +100,7 @@ pub mod tensor_ops {
 
     /// Elementwise çarpım yapar
     /// Rayon ile paralel hesaplama kullanır
-    pub fn elementwise_mul(a: &ArrayView2<f64>, b: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    pub fn elementwise_mul(a: &ArrayView2<Float>, b: &ArrayView2<Float>) -> Result<Array2<Float>> {
         if a.shape() != b.shape() {
             return Err(TurkError::shape_mismatch(&format!(
                 "Elementwise çarpım için uyumsuz boyutlar: {:?} ve {:?}",
@@ -128,7 +130,7 @@ pub mod tensor_ops {
     }
 
     /// Tensor üzerinde ortalama hesaplar
-    pub fn mean(x: &ArrayView2<f64>, axis: Option<usize>) -> Result<f64> {
+    pub fn mean(x: &ArrayView2<Float>, axis: Option<usize>) -> Result<Float> {
         match axis {
             Some(ax) => {
                 if ax >= x.ndim() {
@@ -140,7 +142,7 @@ pub mod tensor_ops {
                 }
 
                 let mean = x.mean_axis(Axis(ax)).expect("Mean hesaplaması başarısız");
-                Ok(mean.sum() / mean.len() as f64)
+                Ok(mean.sum() / mean.len() as Float)
             }
             None => Ok(x.mean().unwrap_or(0.0)),
         }
@@ -148,7 +150,7 @@ pub mod tensor_ops {
 
     /// İki tensor arasındaki ortalama karesel hatayı hesaplar (MSE)
     /// Rayon ile paralel hesaplama kullanır
-    pub fn mse(y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    pub fn mse(y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::shape_mismatch(&format!(
                 "MSE hesaplaması için uyumsuz boyutlar: {:?} ve {:?}",
@@ -161,7 +163,7 @@ pub mod tensor_ops {
         let n_outputs = y_true.ncols();
 
         #[cfg(not(target_arch = "wasm32"))]
-        let squared_error_sum: f64 = Zip::from(y_true)
+        let squared_error_sum: Float = Zip::from(y_true)
             .and(y_pred)
             .par_map_collect(|&y_t, &y_p| {
                 let diff = y_t - y_p;
@@ -169,7 +171,7 @@ pub mod tensor_ops {
             })
             .sum();
         #[cfg(target_arch = "wasm32")]
-        let squared_error_sum: f64 = y_true
+        let squared_error_sum: Float = y_true
             .iter()
             .zip(y_pred.iter())
             .map(|(&y_t, &y_p)| {
@@ -178,12 +180,15 @@ pub mod tensor_ops {
             })
             .sum();
 
-        Ok(squared_error_sum / (n_samples * n_outputs) as f64)
+        Ok(squared_error_sum / (n_samples * n_outputs) as Float)
     }
 
     /// MSE kaybının gradyanını hesaplar
     /// Rayon ile paralel hesaplama kullanır
-    pub fn mse_gradient(y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    pub fn mse_gradient(
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::shape_mismatch(&format!(
                 "MSE gradyan hesaplaması için uyumsuz boyutlar: {:?} ve {:?}",
@@ -194,7 +199,7 @@ pub mod tensor_ops {
 
         let n_samples = y_true.nrows();
         let n_outputs = y_true.ncols();
-        let scale = 2.0 / (n_samples * n_outputs) as f64;
+        let scale = 2.0 / (n_samples * n_outputs) as Float;
 
         let mut gradient = Array2::zeros(y_true.dim());
         #[cfg(not(target_arch = "wasm32"))]
@@ -235,8 +240,8 @@ pub mod tensor_ops {
 /// # Dönüş
 /// - `Result<()>`: Başarılı ise Ok(()), hata durumunda ilgili hata
 pub fn validate_tensor_shapes(
-    x: &ArrayView2<f64>,
-    y: &ArrayView2<f64>,
+    x: &ArrayView2<Float>,
+    y: &ArrayView2<Float>,
     check_rows: bool,
     check_cols: bool,
     error_context: &str,
@@ -265,9 +270,9 @@ pub fn validate_tensor_shapes(
 /// Veriyi karıştır
 /// Rayon ile paralel hesaplama kullanır
 pub fn shuffle_data(
-    x: &ArrayView2<f64>,
-    y: &ArrayView2<f64>,
-) -> Result<(Array2<f64>, Array2<f64>)> {
+    x: &ArrayView2<Float>,
+    y: &ArrayView2<Float>,
+) -> Result<(Array2<Float>, Array2<Float>)> {
     validate_tensor_shapes(x, y, true, false, "Karıştırılacak veriler")?;
 
     let n_samples = x.nrows();
@@ -298,16 +303,16 @@ pub fn shuffle_data(
 /// Veri kümesini train/test olarak böl
 /// Rayon ile paralel hesaplama kullanır
 pub fn train_test_split(
-    x: &ArrayView2<f64>,
-    y: &ArrayView2<f64>,
-    test_size: f64,
-) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>, Array2<f64>)> {
+    x: &ArrayView2<Float>,
+    y: &ArrayView2<Float>,
+    test_size: Float,
+) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>, Array2<Float>)> {
     validate_tensor_shapes(x, y, true, false, "Train/test ayrımı")?;
 
     let (x_shuffled, y_shuffled) = shuffle_data(x, y)?;
 
     let n_samples = x.nrows();
-    let n_test = (n_samples as f64 * test_size).round() as usize;
+    let n_test = (n_samples as Float * test_size).round() as usize;
     let n_train = n_samples - n_test;
 
     // Slice işlemi zaten hızlıdır, ama kopyalama daha paralel olabilir
@@ -349,10 +354,10 @@ pub fn train_test_split(
 /// Bootstrap veri örneklemesi yap
 /// Rayon ile paralel hesaplama kullanır
 pub fn bootstrap_sample(
-    x: &ArrayView2<f64>,
-    y: &ArrayView2<f64>,
+    x: &ArrayView2<Float>,
+    y: &ArrayView2<Float>,
     test_n: usize,
-) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>, Array2<f64>)> {
+) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>, Array2<Float>)> {
     validate_tensor_shapes(x, y, true, false, "Bootstrap örnekleme")?;
 
     let n_samples = x.nrows();
@@ -407,10 +412,10 @@ pub fn bootstrap_sample(
 /// Batch'ler oluştur
 /// Paralel olarak batch'leri hazırlayabilir
 pub fn batch_iterator<'a>(
-    x: &'a ArrayView2<'a, f64>,
-    y: &'a ArrayView2<'a, f64>,
+    x: &'a ArrayView2<'a, Float>,
+    y: &'a ArrayView2<'a, Float>,
     batch_size: usize,
-) -> Result<Vec<(ArrayView2<'a, f64>, ArrayView2<'a, f64>)>> {
+) -> Result<Vec<(ArrayView2<'a, Float>, ArrayView2<'a, Float>)>> {
     validate_tensor_shapes(x, y, true, false, "Batch oluşturma")?;
 
     let n_samples = x.nrows();
@@ -443,7 +448,7 @@ pub fn batch_iterator<'a>(
 }
 
 /// One-hot encoding
-pub fn one_hot_encode(labels: &[usize], n_classes: usize) -> Result<Array2<f64>> {
+pub fn one_hot_encode(labels: &[usize], n_classes: usize) -> Result<Array2<Float>> {
     let n_samples = labels.len();
     let mut encoded = Array2::zeros((n_samples, n_classes));
 
@@ -461,7 +466,7 @@ pub fn one_hot_encode(labels: &[usize], n_classes: usize) -> Result<Array2<f64>>
 }
 
 /// Argmax: her satırdaki en büyük değerin indeksini döndürür
-pub fn argmax(array: &ArrayView2<f64>, axis: usize) -> Vec<usize> {
+pub fn argmax(array: &ArrayView2<Float>, axis: usize) -> Vec<usize> {
     array
         .map_axis(Axis(axis), |row| {
             row.iter()
@@ -475,7 +480,11 @@ pub fn argmax(array: &ArrayView2<f64>, axis: usize) -> Vec<usize> {
 
 /// CSV dosyasından veri yükle
 #[cfg(feature = "csv")]
-pub fn load_csv<P: AsRef<Path>>(path: P, has_header: bool, delimiter: char) -> Result<Array2<f64>> {
+pub fn load_csv<P: AsRef<Path>>(
+    path: P,
+    has_header: bool,
+    delimiter: char,
+) -> Result<Array2<Float>> {
     let file = File::open(path.as_ref())
         .map_err(|e| TurkError::IOError(format!("CSV dosyası açılamadı: {}", e)))?;
 
@@ -504,10 +513,10 @@ pub fn load_csv<P: AsRef<Path>>(path: P, has_header: bool, delimiter: char) -> R
             )));
         }
 
-        let row: Result<Vec<f64>> = record
+        let row: Result<Vec<Float>> = record
             .iter()
             .map(|s| {
-                s.parse::<f64>().map_err(|e| {
+                s.parse::<Float>().map_err(|e| {
                     TurkError::DataError(format!("Sayısal değer dönüştürülemedi '{}': {}", s, e))
                 })
             })
@@ -534,7 +543,7 @@ pub fn load_csv<P: AsRef<Path>>(path: P, has_header: bool, delimiter: char) -> R
 #[cfg(feature = "csv")]
 pub fn save_csv<P: AsRef<Path>>(
     path: P,
-    data: &Array2<f64>,
+    data: &Array2<Float>,
     headers: Option<Vec<String>>,
     delimiter: char,
 ) -> Result<()> {
@@ -686,12 +695,12 @@ pub fn classification_report(
         // tn değişkeni hiç kullanılmıyor, hesaplamıyorum
 
         let precision = if tp + fp > 0 {
-            tp as f64 / (tp + fp) as f64
+            tp as Float / (tp + fp) as Float
         } else {
             0.0
         };
         let recall = if tp + r#fn > 0 {
-            tp as f64 / (tp + r#fn) as f64
+            tp as Float / (tp + r#fn) as Float
         } else {
             0.0
         };
@@ -708,9 +717,9 @@ pub fn classification_report(
         f1_vals.push(f1);
         support_vals.push(support);
 
-        avg_precision += precision * support as f64;
-        avg_recall += recall * support as f64;
-        avg_f1 += f1 * support as f64;
+        avg_precision += precision * support as Float;
+        avg_recall += recall * support as Float;
+        avg_f1 += f1 * support as Float;
         total_support += support;
 
         // Sınıf ismini belirle
@@ -727,9 +736,9 @@ pub fn classification_report(
     }
 
     // Ortalama değerler
-    avg_precision /= total_support as f64;
-    avg_recall /= total_support as f64;
-    avg_f1 /= total_support as f64;
+    avg_precision /= total_support as Float;
+    avg_recall /= total_support as Float;
+    avg_f1 /= total_support as Float;
 
     result.push_str(&format!(
         "\n{:12} {:9.2} {:9.2} {:9.2} {:9.0}\n",
@@ -746,8 +755,11 @@ pub fn classification_report(
 /// * `indices` - Seçilecek satır indeksleri
 ///
 /// # Dönüş
-/// * `Result<Array2<f64>>` - Seçilen satırlardan oluşan yeni tensor
-pub fn stack_selected_rows(array: &ArrayView2<'_, f64>, indices: &[usize]) -> Result<Array2<f64>> {
+/// * `Result<Array2<Float>>` - Seçilen satırlardan oluşan yeni tensor
+pub fn stack_selected_rows(
+    array: &ArrayView2<'_, Float>,
+    indices: &[usize],
+) -> Result<Array2<Float>> {
     if indices.is_empty() {
         return Err(TurkError::InvalidValue("Boş indeks listesi".to_string()));
     }

@@ -47,6 +47,10 @@ turk_sistem = ["gui", "dep:sysinfo", "dep:tokio", "dep:reqwest", "dep:windows-sy
 turk_ses = ["dep:cpal", "dep:hound"]
 parallel = []
 gpu = []
+# Hassasiyet: varsayılan f64; --features f32 ile yarı bellek / daha hızlı SIMD
+f32 = []
+# BLAS hızlandırma (yerel OpenBLAS). WASM ile birlikte açılmamalı.
+blas = ["ndarray/blas", "dep:blas-src"]
 # WASM Browser Playground — tarayıcıda DSL çalıştırma köprüsü
 wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:js-sys"]
 # Gelecek: turk-llm = ["turk_sistem", "dep:llama-cpp-2"]
@@ -56,6 +60,8 @@ wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:js-sys"]
 ndarray = { version = "0.15.4", features = ["serde"] }
 ndarray-rand = "0.14.0"
 ndarray-stats = "0.5.1"
+# İsteğe bağlı BLAS backend (feature = "blas") — OpenBLAS
+blas-src = { version = "0.10", default-features = false, features = ["openblas"], optional = true }
 
 # Rastgele sayı üretimi
 rand = "0.8.5"

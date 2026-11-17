@@ -13,6 +13,7 @@ use crate::error::{Result, TurkError};
 use crate::initializers::{GlorotUniform, Initializer, Zeros};
 use crate::layer::Layer;
 
+use crate::dtype::Float;
 fn hwc_idx(h: usize, w: usize, c: usize, width: usize, channels: usize) -> usize {
     (h * width + w) * channels + c
 }
@@ -39,13 +40,13 @@ pub struct Conv2D {
     pub out_h: usize,
     pub out_w: usize,
     pub activation: Activation,
-    pub weights: Array2<f64>,
-    pub biases: Array2<f64>,
+    pub weights: Array2<Float>,
+    pub biases: Array2<Float>,
     pub trainable: bool,
     #[serde(skip)]
-    last_input: Option<Array2<f64>>,
+    last_input: Option<Array2<Float>>,
     #[serde(skip)]
-    last_pre_activation: Option<Array2<f64>>,
+    last_pre_activation: Option<Array2<Float>>,
 }
 
 impl Conv2D {
@@ -103,7 +104,7 @@ impl Conv2D {
 }
 
 impl Layer for Conv2D {
-    fn forward(&mut self, input: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
         if input.ncols() != self.girdi_boyutu_flat() {
             return Err(TurkError::ShapeMismatch(format!(
                 "Conv2D: beklenen {} özellik, gelen {}",
@@ -150,9 +151,9 @@ impl Layer for Conv2D {
 
     fn backward(
         &self,
-        _input: &ArrayView2<f64>,
-        grad_output: &ArrayView2<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)> {
+        _input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
         let input = self.last_input.as_ref().ok_or_else(|| {
             TurkError::LayerError("Conv2D: forward çağrılmadan backward yapılamaz".into())
         })?;
@@ -199,9 +200,9 @@ impl Layer for Conv2D {
 
     fn update(
         &mut self,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
-        learning_rate: f64,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
+        learning_rate: Float,
     ) -> Result<()> {
         if !self.trainable {
             return Ok(());
@@ -211,17 +212,17 @@ impl Layer for Conv2D {
         Ok(())
     }
 
-    fn get_weights(&self) -> Result<Array2<f64>> {
+    fn get_weights(&self) -> Result<Array2<Float>> {
         Ok(self.weights.clone())
     }
-    fn get_biases(&self) -> Result<Array2<f64>> {
+    fn get_biases(&self) -> Result<Array2<Float>> {
         Ok(self.biases.clone())
     }
-    fn set_weights(&mut self, w: &ArrayView2<f64>) -> Result<()> {
+    fn set_weights(&mut self, w: &ArrayView2<Float>) -> Result<()> {
         self.weights = w.to_owned();
         Ok(())
     }
-    fn set_biases(&mut self, b: &ArrayView2<f64>) -> Result<()> {
+    fn set_biases(&mut self, b: &ArrayView2<Float>) -> Result<()> {
         self.biases = b.to_owned();
         Ok(())
     }
@@ -254,28 +255,28 @@ impl Layer for Conv2D {
         self.last_input = None;
         self.last_pre_activation = None;
     }
-    fn weights_as_vec(&self) -> Vec<f64> {
+    fn weights_as_vec(&self) -> Vec<Float> {
         self.weights.iter().copied().collect()
     }
-    fn biases_as_vec(&self) -> Vec<f64> {
+    fn biases_as_vec(&self) -> Vec<Float> {
         self.biases.iter().copied().collect()
     }
-    fn dropout_rate(&self) -> Option<f64> {
+    fn dropout_rate(&self) -> Option<Float> {
         None
     }
     fn use_batch_norm(&self) -> Option<bool> {
         None
     }
 
-    fn layer_metadata(&self) -> HashMap<String, f64> {
+    fn layer_metadata(&self) -> HashMap<String, Float> {
         let mut m = HashMap::new();
-        m.insert("in_h".into(), self.in_h as f64);
-        m.insert("in_w".into(), self.in_w as f64);
-        m.insert("in_c".into(), self.in_channels as f64);
-        m.insert("out_c".into(), self.out_channels as f64);
-        m.insert("kernel".into(), self.kernel_size as f64);
-        m.insert("out_h".into(), self.out_h as f64);
-        m.insert("out_w".into(), self.out_w as f64);
+        m.insert("in_h".into(), self.in_h as Float);
+        m.insert("in_w".into(), self.in_w as Float);
+        m.insert("in_c".into(), self.in_channels as Float);
+        m.insert("out_c".into(), self.out_channels as Float);
+        m.insert("kernel".into(), self.kernel_size as Float);
+        m.insert("out_h".into(), self.out_h as Float);
+        m.insert("out_w".into(), self.out_w as Float);
         m
     }
 }
@@ -291,7 +292,7 @@ pub struct MaxPool2D {
     pub out_w: usize,
     pub trainable: bool,
     #[serde(skip)]
-    last_input: Option<Array2<f64>>,
+    last_input: Option<Array2<Float>>,
     #[serde(skip)]
     max_indices: Option<Vec<usize>>,
 }
@@ -332,7 +333,7 @@ impl MaxPool2D {
 }
 
 impl Layer for MaxPool2D {
-    fn forward(&mut self, input: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
         if input.ncols() != self.girdi_flat() {
             return Err(TurkError::ShapeMismatch(format!(
                 "MaxPool2D: beklenen {}, gelen {}",
@@ -348,7 +349,7 @@ impl Layer for MaxPool2D {
             for oh in 0..self.out_h {
                 for ow in 0..self.out_w {
                     for c in 0..self.channels {
-                        let mut max_val = f64::NEG_INFINITY;
+                        let mut max_val = Float::NEG_INFINITY;
                         let mut max_idx = 0usize;
                         for ph in 0..self.pool_size {
                             for pw in 0..self.pool_size {
@@ -377,9 +378,9 @@ impl Layer for MaxPool2D {
 
     fn backward(
         &self,
-        _input: &ArrayView2<f64>,
-        grad_output: &ArrayView2<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)> {
+        _input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
         let input = self.last_input.as_ref().ok_or_else(|| {
             TurkError::LayerError("MaxPool2D: forward çağrılmadan backward yapılamaz".into())
         })?;
@@ -401,19 +402,19 @@ impl Layer for MaxPool2D {
         Ok((grad_input, Array2::zeros((0, 0)), Array2::zeros((0, 0))))
     }
 
-    fn update(&mut self, _: &ArrayView2<f64>, _: &ArrayView2<f64>, _: f64) -> Result<()> {
+    fn update(&mut self, _: &ArrayView2<Float>, _: &ArrayView2<Float>, _: Float) -> Result<()> {
         Ok(())
     }
-    fn get_weights(&self) -> Result<Array2<f64>> {
+    fn get_weights(&self) -> Result<Array2<Float>> {
         Ok(Array2::zeros((0, 0)))
     }
-    fn get_biases(&self) -> Result<Array2<f64>> {
+    fn get_biases(&self) -> Result<Array2<Float>> {
         Ok(Array2::zeros((0, 0)))
     }
-    fn set_weights(&mut self, _: &ArrayView2<f64>) -> Result<()> {
+    fn set_weights(&mut self, _: &ArrayView2<Float>) -> Result<()> {
         Ok(())
     }
-    fn set_biases(&mut self, _: &ArrayView2<f64>) -> Result<()> {
+    fn set_biases(&mut self, _: &ArrayView2<Float>) -> Result<()> {
         Ok(())
     }
     fn activation_type(&self) -> Activation {
@@ -444,27 +445,27 @@ impl Layer for MaxPool2D {
         self.last_input = None;
         self.max_indices = None;
     }
-    fn weights_as_vec(&self) -> Vec<f64> {
+    fn weights_as_vec(&self) -> Vec<Float> {
         vec![]
     }
-    fn biases_as_vec(&self) -> Vec<f64> {
+    fn biases_as_vec(&self) -> Vec<Float> {
         vec![]
     }
-    fn dropout_rate(&self) -> Option<f64> {
+    fn dropout_rate(&self) -> Option<Float> {
         None
     }
     fn use_batch_norm(&self) -> Option<bool> {
         None
     }
 
-    fn layer_metadata(&self) -> HashMap<String, f64> {
+    fn layer_metadata(&self) -> HashMap<String, Float> {
         let mut m = HashMap::new();
-        m.insert("in_h".into(), self.in_h as f64);
-        m.insert("in_w".into(), self.in_w as f64);
-        m.insert("in_c".into(), self.channels as f64);
-        m.insert("pool".into(), self.pool_size as f64);
-        m.insert("out_h".into(), self.out_h as f64);
-        m.insert("out_w".into(), self.out_w as f64);
+        m.insert("in_h".into(), self.in_h as Float);
+        m.insert("in_w".into(), self.in_w as Float);
+        m.insert("in_c".into(), self.channels as Float);
+        m.insert("pool".into(), self.pool_size as Float);
+        m.insert("out_h".into(), self.out_h as Float);
+        m.insert("out_w".into(), self.out_w as Float);
         m
     }
 }
@@ -482,7 +483,7 @@ impl Flatten {
 }
 
 impl Layer for Flatten {
-    fn forward(&mut self, input: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
         if input.ncols() != self.size {
             return Err(TurkError::ShapeMismatch(format!(
                 "Flatten: beklenen {}, gelen {}",
@@ -495,9 +496,9 @@ impl Layer for Flatten {
 
     fn backward(
         &self,
-        _input: &ArrayView2<f64>,
-        grad_output: &ArrayView2<f64>,
-    ) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)> {
+        _input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
         Ok((
             grad_output.to_owned(),
             Array2::zeros((0, 0)),
@@ -505,19 +506,19 @@ impl Layer for Flatten {
         ))
     }
 
-    fn update(&mut self, _: &ArrayView2<f64>, _: &ArrayView2<f64>, _: f64) -> Result<()> {
+    fn update(&mut self, _: &ArrayView2<Float>, _: &ArrayView2<Float>, _: Float) -> Result<()> {
         Ok(())
     }
-    fn get_weights(&self) -> Result<Array2<f64>> {
+    fn get_weights(&self) -> Result<Array2<Float>> {
         Ok(Array2::zeros((0, 0)))
     }
-    fn get_biases(&self) -> Result<Array2<f64>> {
+    fn get_biases(&self) -> Result<Array2<Float>> {
         Ok(Array2::zeros((0, 0)))
     }
-    fn set_weights(&mut self, _: &ArrayView2<f64>) -> Result<()> {
+    fn set_weights(&mut self, _: &ArrayView2<Float>) -> Result<()> {
         Ok(())
     }
-    fn set_biases(&mut self, _: &ArrayView2<f64>) -> Result<()> {
+    fn set_biases(&mut self, _: &ArrayView2<Float>) -> Result<()> {
         Ok(())
     }
     fn activation_type(&self) -> Activation {
@@ -543,22 +544,22 @@ impl Layer for Flatten {
         Box::new(self.clone())
     }
     fn reset(&mut self) {}
-    fn weights_as_vec(&self) -> Vec<f64> {
+    fn weights_as_vec(&self) -> Vec<Float> {
         vec![]
     }
-    fn biases_as_vec(&self) -> Vec<f64> {
+    fn biases_as_vec(&self) -> Vec<Float> {
         vec![]
     }
-    fn dropout_rate(&self) -> Option<f64> {
+    fn dropout_rate(&self) -> Option<Float> {
         None
     }
     fn use_batch_norm(&self) -> Option<bool> {
         None
     }
 
-    fn layer_metadata(&self) -> HashMap<String, f64> {
+    fn layer_metadata(&self) -> HashMap<String, Float> {
         let mut m = HashMap::new();
-        m.insert("size".into(), self.size as f64);
+        m.insert("size".into(), self.size as Float);
         m
     }
 }

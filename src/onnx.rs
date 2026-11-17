@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 
 use crate::aktivasyon::Activation;
+use crate::dtype::{self, Float};
 use crate::error::{Result, TurkError};
 use crate::katman_kayit::KatmanKayit;
 use crate::model::Sequential;
@@ -131,8 +132,16 @@ impl OnnxModel {
 
                     let in_sz = layer.input_size();
                     let out_sz = layer.output_size();
-                    let w: Vec<f32> = layer.weights_as_vec().iter().map(|v| *v as f32).collect();
-                    let b: Vec<f32> = layer.biases_as_vec().iter().map(|v| *v as f32).collect();
+                    let w: Vec<f32> = layer
+                        .weights_as_vec()
+                        .iter()
+                        .map(|&v| dtype::to_f64(v) as f32)
+                        .collect();
+                    let b: Vec<f32> = layer
+                        .biases_as_vec()
+                        .iter()
+                        .map(|&v| dtype::to_f64(v) as f32)
+                        .collect();
 
                     initializers.push(f32_tensor(&w_name, vec![in_sz, out_sz], w));
                     initializers.push(f32_tensor(&b_name, vec![out_sz], b));
@@ -214,14 +223,14 @@ impl OnnxModel {
                             .clone()
                             .unwrap_or_default()
                             .iter()
-                            .map(|v| *v as f64)
+                            .map(|&v| Float::from(v))
                             .collect(),
                         biaslar: b_tensor
                             .float_data
                             .clone()
                             .unwrap_or_default()
                             .iter()
-                            .map(|v| *v as f64)
+                            .map(|&v| Float::from(v))
                             .collect(),
                         dropout_orani: None,
                         ek_veriler: HashMap::new(),
@@ -232,7 +241,7 @@ impl OnnxModel {
                     let lt = attr_string(node, "layer_type").unwrap_or_default();
                     let mut ek = HashMap::new();
                     if let Some(json) = attr_string(node, "metadata_json") {
-                        if let Ok(map) = serde_json::from_str::<HashMap<String, f64>>(&json) {
+                        if let Ok(map) = serde_json::from_str::<HashMap<String, Float>>(&json) {
                             ek = map;
                         }
                     }
@@ -294,7 +303,7 @@ impl OnnxModel {
     }
 }
 
-fn spatial_girdi(lt: &str, ek: &HashMap<String, f64>) -> usize {
+fn spatial_girdi(lt: &str, ek: &HashMap<String, Float>) -> usize {
     match lt {
         "Conv2D" => {
             (ek.get("in_h").copied().unwrap_or(0.0)
@@ -368,7 +377,7 @@ fn turk_custom_node(
     layer_type: &str,
     input: &str,
     output: &str,
-    meta: HashMap<String, f64>,
+    meta: HashMap<String, Float>,
 ) -> OnnxNode {
     let meta_json = serde_json::to_string(&meta).unwrap_or_else(|_| "{}".into());
     OnnxNode {

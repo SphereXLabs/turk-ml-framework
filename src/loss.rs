@@ -5,12 +5,17 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Loss trait'i
+use crate::dtype::Float;
 pub trait Loss: fmt::Debug + Send + Sync {
     /// Kayıp değerini hesaplar
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64>;
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float>;
 
     /// Kayıp fonksiyonunun gradyanını hesaplar
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>>;
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>>;
 
     /// Kayıp fonksiyonunun adını döndürür
     fn name(&self) -> &'static str;
@@ -22,7 +27,7 @@ pub trait Loss: fmt::Debug + Send + Sync {
 /// Çapraz Entropi kayıp fonksiyonu
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossEntropy {
-    pub epsilon: f64,
+    pub epsilon: Float,
     pub from_logits: bool,
 }
 
@@ -45,7 +50,7 @@ impl Default for CrossEntropy {
 }
 
 impl Loss for CrossEntropy {
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::DimensionMismatch(format!(
                 "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
@@ -57,7 +62,7 @@ impl Loss for CrossEntropy {
         let predictions = if self.from_logits {
             // Logits'ten olasılıklara dönüşüm (softmax)
             let max_vals = y_pred.map_axis(Axis(1), |row| {
-                row.fold(f64::NEG_INFINITY, |max, &val| max.max(val))
+                row.fold(Float::NEG_INFINITY, |max, &val| max.max(val))
             });
 
             let mut softmax_probs = Array2::zeros(y_pred.raw_dim());
@@ -98,10 +103,14 @@ impl Loss for CrossEntropy {
             }
         }
 
-        Ok(loss / y_true.nrows() as f64)
+        Ok(loss / y_true.nrows() as Float)
     }
 
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::DimensionMismatch(format!(
                 "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
@@ -113,7 +122,7 @@ impl Loss for CrossEntropy {
         let predictions = if self.from_logits {
             // Logits'ten olasılıklara dönüşüm (softmax)
             let max_vals = y_pred.map_axis(Axis(1), |row| {
-                row.fold(f64::NEG_INFINITY, |max, &val| max.max(val))
+                row.fold(Float::NEG_INFINITY, |max, &val| max.max(val))
             });
 
             let mut softmax_probs = Array2::zeros(y_pred.raw_dim());
@@ -142,7 +151,7 @@ impl Loss for CrossEntropy {
         };
 
         // Softmax CE için gradient hesapla
-        let batch_size = y_true.nrows() as f64;
+        let batch_size = y_true.nrows() as Float;
         let mut grad = predictions.clone();
 
         // Gradient: (y_pred - y_true) / batch_size
@@ -172,7 +181,7 @@ impl Default for MSE {
 }
 
 impl Loss for MSE {
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::DimensionMismatch(format!(
                 "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
@@ -186,7 +195,11 @@ impl Loss for MSE {
         Ok(mse)
     }
 
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::DimensionMismatch(format!(
                 "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
@@ -195,7 +208,7 @@ impl Loss for MSE {
             )));
         }
 
-        let grad = 2.0 * (y_pred - y_true) / y_true.len() as f64;
+        let grad = 2.0 * (y_pred - y_true) / y_true.len() as Float;
         Ok(grad)
     }
 
@@ -219,7 +232,7 @@ impl Default for MAE {
 }
 
 impl Loss for MAE {
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::DimensionMismatch(format!(
                 "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
@@ -229,11 +242,15 @@ impl Loss for MAE {
         }
 
         let diff = (y_pred - y_true).mapv(|x| x.abs());
-        let mae = diff.sum() / y_true.len() as f64;
+        let mae = diff.sum() / y_true.len() as Float;
         Ok(mae)
     }
 
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         if y_true.shape() != y_pred.shape() {
             return Err(TurkError::DimensionMismatch(format!(
                 "Gerçek ve tahmin değerlerin şekilleri uyuşmuyor: {:?} vs {:?}",
@@ -252,7 +269,7 @@ impl Loss for MAE {
             }
         });
 
-        Ok(diff / y_true.len() as f64)
+        Ok(diff / y_true.len() as Float)
     }
 
     fn name(&self) -> &'static str {
@@ -267,11 +284,11 @@ impl Loss for MAE {
 /// Huber kayıp fonksiyonu - MSE ve MAE'nin bir kombinasyonu
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Huber {
-    pub delta: f64,
+    pub delta: Float,
 }
 
 impl Huber {
-    pub fn new(delta: f64) -> Self {
+    pub fn new(delta: Float) -> Self {
         Self { delta }
     }
 }
@@ -283,7 +300,7 @@ impl Default for Huber {
 }
 
 impl Loss for Huber {
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         let mut loss_sum = 0.0;
 
         for (t, p) in y_true.iter().zip(y_pred.iter()) {
@@ -298,10 +315,14 @@ impl Loss for Huber {
             }
         }
 
-        Ok(loss_sum / y_true.len() as f64)
+        Ok(loss_sum / y_true.len() as Float)
     }
 
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         let mut gradient = Array2::zeros(y_true.raw_dim());
 
         for (i, (t, p)) in y_true.iter().zip(y_pred.iter()).enumerate() {
@@ -316,7 +337,7 @@ impl Loss for Huber {
             }
         }
 
-        Ok(gradient / y_true.len() as f64)
+        Ok(gradient / y_true.len() as Float)
     }
 
     fn name(&self) -> &'static str {
@@ -334,16 +355,20 @@ impl Loss for Huber {
 pub struct CategoricalCrossEntropy;
 
 impl Loss for CategoricalCrossEntropy {
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         let epsilon = 1e-7;
         let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
-        Ok(-(y_true * y_pred.mapv(|v| v.ln())).sum() / y_true.len() as f64)
+        Ok(-(y_true * y_pred.mapv(|v| v.ln())).sum() / y_true.len() as Float)
     }
 
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         let epsilon = 1e-7;
         let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
-        Ok((y_pred - y_true) / y_true.len() as f64)
+        Ok((y_pred - y_true) / y_true.len() as Float)
     }
 
     fn name(&self) -> &'static str {
@@ -360,7 +385,7 @@ impl Loss for CategoricalCrossEntropy {
 pub struct BinaryCrossentropy;
 
 impl Loss for BinaryCrossentropy {
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         let epsilon = 1e-7;
         let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
         Ok(
@@ -370,13 +395,17 @@ impl Loss for BinaryCrossentropy {
         )
     }
 
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         let epsilon = 1e-7;
         let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
         let y_pred_clone = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
         Ok((y_pred_clone.clone() - y_true)
             / (y_pred_clone.clone() * (1.0 - y_pred_clone))
-            / y_true.len() as f64)
+            / y_true.len() as Float)
     }
 
     fn name(&self) -> &'static str {
@@ -393,7 +422,7 @@ impl Loss for BinaryCrossentropy {
 pub struct SparseCategoricalCrossentropy;
 
 impl Loss for SparseCategoricalCrossentropy {
-    fn loss(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<f64> {
+    fn loss(&self, y_true: &ArrayView2<Float>, y_pred: &ArrayView2<Float>) -> Result<Float> {
         let epsilon = 1e-7;
         let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
         let mut loss = 0.0;
@@ -401,10 +430,14 @@ impl Loss for SparseCategoricalCrossentropy {
             let class = y_true[[i, 0]] as usize;
             loss -= y_pred[[i, class]].ln();
         }
-        Ok(loss / y_true.len() as f64)
+        Ok(loss / y_true.len() as Float)
     }
 
-    fn gradient(&self, y_true: &ArrayView2<f64>, y_pred: &ArrayView2<f64>) -> Result<Array2<f64>> {
+    fn gradient(
+        &self,
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<Array2<Float>> {
         let epsilon = 1e-7;
         let y_pred = y_pred.mapv(|v| v.max(epsilon).min(1.0 - epsilon));
         let mut grad = Array2::zeros(y_pred.raw_dim());
@@ -412,7 +445,7 @@ impl Loss for SparseCategoricalCrossentropy {
             let class = y_true[[i, 0]] as usize;
             grad[[i, class]] = y_pred[[i, class]] - 1.0;
         }
-        Ok(grad / y_true.len() as f64)
+        Ok(grad / y_true.len() as Float)
     }
 
     fn name(&self) -> &'static str {

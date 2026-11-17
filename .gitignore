@@ -68,6 +68,9 @@ egitim_grafigi.png
 egitim_gecmisi.json
 mnist_model.json
 *_model*.json
+model_en_iyi.json
+xor_model.json
+xor_model_en_iyi.json
 
 # Yanlışlıkla oluşmuş kopya klasör
 /TÜRK, src/

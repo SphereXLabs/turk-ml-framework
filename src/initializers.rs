@@ -7,9 +7,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Ağırlık başlangıç değerleri için trait
+use crate::dtype::Float;
 pub trait Initializer: fmt::Debug + Send + Sync {
     /// Verilen boyutlarda rastgele değerlerle bir array oluşturur
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>>;
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>>;
 
     /// Başlatıcının adını döndürür
     fn name(&self) -> &'static str;
@@ -18,7 +19,7 @@ pub trait Initializer: fmt::Debug + Send + Sync {
 /// Xavier/Glorot başlangıç değerleri
 #[derive(Debug, Clone)]
 pub struct Xavier {
-    pub gain: f64,
+    pub gain: Float,
 }
 
 impl Default for Xavier {
@@ -28,9 +29,9 @@ impl Default for Xavier {
 }
 
 impl Initializer for Xavier {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
-        let fan_in = shape.0 as f64;
-        let fan_out = shape.1 as f64;
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
+        let fan_in = shape.0 as Float;
+        let fan_out = shape.1 as Float;
         let std = self.gain * (2.0 / (fan_in + fan_out)).sqrt();
 
         let normal = Normal::new(0.0, std).map_err(|e| {
@@ -38,7 +39,7 @@ impl Initializer for Xavier {
         })?;
 
         let mut rng = thread_rng();
-        let values: Vec<f64> = (0..shape.0 * shape.1)
+        let values: Vec<Float> = (0..shape.0 * shape.1)
             .map(|_| normal.sample(&mut rng))
             .collect();
 
@@ -64,15 +65,15 @@ impl GlorotUniform {
 }
 
 impl Initializer for GlorotUniform {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
-        let fan_in = shape.0 as f64;
-        let fan_out = shape.1 as f64;
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
+        let fan_in = shape.0 as Float;
+        let fan_out = shape.1 as Float;
         let limit = (6.0 / (fan_in + fan_out)).sqrt();
 
         let mut rng = thread_rng();
         let dist = Uniform::new(-limit, limit);
 
-        let values: Vec<f64> = (0..shape.0 * shape.1)
+        let values: Vec<Float> = (0..shape.0 * shape.1)
             .map(|_| dist.sample(&mut rng))
             .collect();
 
@@ -101,9 +102,9 @@ impl GlorotNormal {
 }
 
 impl Initializer for GlorotNormal {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
-        let fan_in = shape.0 as f64;
-        let fan_out = shape.1 as f64;
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
+        let fan_in = shape.0 as Float;
+        let fan_out = shape.1 as Float;
         let std = (2.0 / (fan_in + fan_out)).sqrt();
 
         let normal = Normal::new(0.0, std).map_err(|e| {
@@ -111,7 +112,7 @@ impl Initializer for GlorotNormal {
         })?;
 
         let mut rng = thread_rng();
-        let values: Vec<f64> = (0..shape.0 * shape.1)
+        let values: Vec<Float> = (0..shape.0 * shape.1)
             .map(|_| normal.sample(&mut rng))
             .collect();
 
@@ -131,7 +132,7 @@ impl Initializer for GlorotNormal {
 /// He normal başlangıç değerleri
 #[derive(Debug, Clone)]
 pub struct HeNormal {
-    pub gain: f64,
+    pub gain: Float,
 }
 
 impl Default for HeNormal {
@@ -148,8 +149,8 @@ impl HeNormal {
 }
 
 impl Initializer for HeNormal {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
-        let fan_in = shape.0 as f64;
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
+        let fan_in = shape.0 as Float;
         let std = self.gain * (2.0 / fan_in).sqrt();
 
         let normal = Normal::new(0.0, std).map_err(|e| {
@@ -157,7 +158,7 @@ impl Initializer for HeNormal {
         })?;
 
         let mut rng = thread_rng();
-        let values: Vec<f64> = (0..shape.0 * shape.1)
+        let values: Vec<Float> = (0..shape.0 * shape.1)
             .map(|_| normal.sample(&mut rng))
             .collect();
 
@@ -183,14 +184,14 @@ impl HeUniform {
 }
 
 impl Initializer for HeUniform {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
-        let fan_in = shape.0 as f64;
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
+        let fan_in = shape.0 as Float;
         let limit = (6.0 / fan_in).sqrt();
 
         let mut rng = thread_rng();
         let dist = Uniform::new(-limit, limit);
 
-        let values: Vec<f64> = (0..shape.0 * shape.1)
+        let values: Vec<Float> = (0..shape.0 * shape.1)
             .map(|_| dist.sample(&mut rng))
             .collect();
 
@@ -216,7 +217,7 @@ impl Zeros {
 }
 
 impl Initializer for Zeros {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
         Ok(Array2::zeros(shape))
     }
 
@@ -237,7 +238,7 @@ impl Ones {
 }
 
 impl Initializer for Ones {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
         Ok(Array2::ones(shape))
     }
 
@@ -249,8 +250,8 @@ impl Initializer for Ones {
 /// Rastgele normal dağılım başlangıç değerleri
 #[derive(Debug, Clone)]
 pub struct RandomNormal {
-    pub mean: f64,
-    pub stddev: f64,
+    pub mean: Float,
+    pub stddev: Float,
 }
 
 impl Default for RandomNormal {
@@ -263,7 +264,7 @@ impl Default for RandomNormal {
 }
 
 impl RandomNormal {
-    pub fn new(mean: f64, stddev: f64) -> Result<Self> {
+    pub fn new(mean: Float, stddev: Float) -> Result<Self> {
         if stddev <= 0.0 {
             return Err(TurkError::InvalidValue(format!(
                 "Standart sapma pozitif olmalıdır: {}",
@@ -275,13 +276,13 @@ impl RandomNormal {
 }
 
 impl Initializer for RandomNormal {
-    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<f64>> {
+    fn initialize(&self, shape: (usize, usize)) -> Result<Array2<Float>> {
         let normal = Normal::new(self.mean, self.stddev).map_err(|e| {
             TurkError::InvalidValue(format!("Normal dağılım oluşturulurken hata: {}", e))
         })?;
 
         let mut rng = thread_rng();
-        let values: Vec<f64> = (0..shape.0 * shape.1)
+        let values: Vec<Float> = (0..shape.0 * shape.1)
             .map(|_| normal.sample(&mut rng))
             .collect();
 

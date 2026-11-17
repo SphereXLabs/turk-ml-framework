@@ -4,21 +4,22 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Optimizer trait'i - Tüm optimizasyon algoritmaları bu trait'i implemente etmelidir
+use crate::dtype::Float;
 pub trait Optimizer: fmt::Debug + Send + Sync {
     /// Ağırlık ve bias değerlerini gradyanlarına göre günceller
     fn update(
         &self,
-        weights: &mut Array2<f64>,
-        biases: &mut Array2<f64>,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
+        weights: &mut Array2<Float>,
+        biases: &mut Array2<Float>,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
     ) -> Result<()>;
 
     /// Öğrenme oranını döndürür
-    fn learning_rate(&self) -> f64;
+    fn learning_rate(&self) -> Float;
 
     /// Öğrenme oranını ayarlar
-    fn set_learning_rate(&mut self, learning_rate: f64);
+    fn set_learning_rate(&mut self, learning_rate: Float);
 
     /// Optimizer durumunu sıfırlar
     fn reset(&mut self);
@@ -41,24 +42,24 @@ impl Clone for Box<dyn Optimizer> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SGD {
     /// Öğrenme oranı
-    learning_rate: f64,
+    learning_rate: Float,
     /// Momentum değeri (isteğe bağlı)
-    momentum: Option<f64>,
+    momentum: Option<Float>,
     /// Nesterov momentum'u kullan
     nesterov: bool,
     /// Hızlar (momentum için)
-    velocity_weights: Option<Array2<f64>>,
+    velocity_weights: Option<Array2<Float>>,
     /// Hızlar (bias için)
-    velocity_biases: Option<Array2<f64>>,
+    velocity_biases: Option<Array2<Float>>,
     /// İterasyon sayısı
     iterations: usize,
     /// Öğrenme oranının azalma oranı
-    decay: f64,
+    decay: Float,
 }
 
 impl SGD {
     /// Yeni bir SGD optimizer oluşturur
-    pub fn new(learning_rate: f64, momentum: Option<f64>, nesterov: bool) -> Self {
+    pub fn new(learning_rate: Float, momentum: Option<Float>, nesterov: bool) -> Self {
         Self {
             learning_rate,
             momentum,
@@ -79,10 +80,10 @@ impl SGD {
 impl Optimizer for SGD {
     fn update(
         &self,
-        weights: &mut Array2<f64>,
-        biases: &mut Array2<f64>,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
+        weights: &mut Array2<Float>,
+        biases: &mut Array2<Float>,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
     ) -> Result<()> {
         // Boyut kontrolü
         if weights.shape() != grad_weights.shape() {
@@ -102,7 +103,7 @@ impl Optimizer for SGD {
         }
 
         // Öğrenme oranını hesapla (decay ile)
-        let actual_lr = self.learning_rate / (1.0 + self.decay * self.iterations as f64);
+        let actual_lr = self.learning_rate / (1.0 + self.decay * self.iterations as Float);
 
         // Gradyanları öğrenme oranıyla çarp
         let weight_updates = grad_weights * actual_lr;
@@ -155,11 +156,11 @@ impl Optimizer for SGD {
         "sgd"
     }
 
-    fn learning_rate(&self) -> f64 {
+    fn learning_rate(&self) -> Float {
         self.learning_rate
     }
 
-    fn set_learning_rate(&mut self, learning_rate: f64) {
+    fn set_learning_rate(&mut self, learning_rate: Float) {
         self.learning_rate = learning_rate;
     }
 
@@ -177,28 +178,28 @@ impl Optimizer for SGD {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Adam {
     /// Öğrenme oranı
-    learning_rate: f64,
+    learning_rate: Float,
     /// Beta1 (ilk moment için momentum faktörü)
-    beta1: f64,
+    beta1: Float,
     /// Beta2 (ikinci moment için momentum faktörü)
-    beta2: f64,
+    beta2: Float,
     /// Epsilon (sayısal stabilite için)
-    epsilon: f64,
+    epsilon: Float,
     /// İlk moment (weights)
-    m_weights: Option<Array2<f64>>,
+    m_weights: Option<Array2<Float>>,
     /// İlk moment (biases)
-    m_biases: Option<Array2<f64>>,
+    m_biases: Option<Array2<Float>>,
     /// İkinci moment (weights)
-    v_weights: Option<Array2<f64>>,
+    v_weights: Option<Array2<Float>>,
     /// İkinci moment (biases)
-    v_biases: Option<Array2<f64>>,
+    v_biases: Option<Array2<Float>>,
     /// Adım sayacı
     t: usize,
 }
 
 impl Adam {
     /// Yeni bir Adam optimizer oluşturur
-    pub fn new(learning_rate: f64, beta1: f64, beta2: f64, epsilon: f64) -> Self {
+    pub fn new(learning_rate: Float, beta1: Float, beta2: Float, epsilon: Float) -> Self {
         Self {
             learning_rate,
             beta1,
@@ -221,10 +222,10 @@ impl Adam {
 impl Optimizer for Adam {
     fn update(
         &self,
-        weights: &mut Array2<f64>,
-        biases: &mut Array2<f64>,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
+        weights: &mut Array2<Float>,
+        biases: &mut Array2<Float>,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
     ) -> Result<()> {
         // Boyut kontrolü
         if weights.shape() != grad_weights.shape() {
@@ -292,11 +293,11 @@ impl Optimizer for Adam {
         Ok(())
     }
 
-    fn learning_rate(&self) -> f64 {
+    fn learning_rate(&self) -> Float {
         self.learning_rate
     }
 
-    fn set_learning_rate(&mut self, learning_rate: f64) {
+    fn set_learning_rate(&mut self, learning_rate: Float) {
         self.learning_rate = learning_rate;
     }
 
@@ -321,23 +322,23 @@ impl Optimizer for Adam {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdamW {
     /// Öğrenme oranı
-    learning_rate: f64,
+    learning_rate: Float,
     /// Beta1 (ilk moment için momentum faktörü)
-    beta1: f64,
+    beta1: Float,
     /// Beta2 (ikinci moment için momentum faktörü)
-    beta2: f64,
+    beta2: Float,
     /// Epsilon (sayısal stabilite için)
-    epsilon: f64,
+    epsilon: Float,
     /// Ağırlık bozunumu
-    weight_decay: f64,
+    weight_decay: Float,
     /// İlk moment (weights)
-    m_weights: Option<Array2<f64>>,
+    m_weights: Option<Array2<Float>>,
     /// İlk moment (biases)
-    m_biases: Option<Array2<f64>>,
+    m_biases: Option<Array2<Float>>,
     /// İkinci moment (weights)
-    v_weights: Option<Array2<f64>>,
+    v_weights: Option<Array2<Float>>,
     /// İkinci moment (biases)
-    v_biases: Option<Array2<f64>>,
+    v_biases: Option<Array2<Float>>,
     /// Adım sayacı
     t: usize,
 }
@@ -345,11 +346,11 @@ pub struct AdamW {
 impl AdamW {
     /// Yeni bir AdamW optimizer oluşturur
     pub fn new(
-        learning_rate: f64,
-        beta1: f64,
-        beta2: f64,
-        epsilon: f64,
-        weight_decay: f64,
+        learning_rate: Float,
+        beta1: Float,
+        beta2: Float,
+        epsilon: Float,
+        weight_decay: Float,
     ) -> Self {
         Self {
             learning_rate,
@@ -374,10 +375,10 @@ impl AdamW {
 impl Optimizer for AdamW {
     fn update(
         &self,
-        weights: &mut Array2<f64>,
-        biases: &mut Array2<f64>,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
+        weights: &mut Array2<Float>,
+        biases: &mut Array2<Float>,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
     ) -> Result<()> {
         // Boyut kontrolü
         if weights.shape() != grad_weights.shape() {
@@ -449,11 +450,11 @@ impl Optimizer for AdamW {
         Ok(())
     }
 
-    fn learning_rate(&self) -> f64 {
+    fn learning_rate(&self) -> Float {
         self.learning_rate
     }
 
-    fn set_learning_rate(&mut self, learning_rate: f64) {
+    fn set_learning_rate(&mut self, learning_rate: Float) {
         self.learning_rate = learning_rate;
     }
 
@@ -478,20 +479,20 @@ impl Optimizer for AdamW {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RMSProp {
     /// Öğrenme oranı
-    learning_rate: f64,
+    learning_rate: Float,
     /// Bozunum oranı
-    decay: f64,
+    decay: Float,
     /// Epsilon (sayısal stabilite için)
-    epsilon: f64,
+    epsilon: Float,
     /// Kare gradyan ortalaması (weights)
-    cache_weights: Option<Array2<f64>>,
+    cache_weights: Option<Array2<Float>>,
     /// Kare gradyan ortalaması (biases)
-    cache_biases: Option<Array2<f64>>,
+    cache_biases: Option<Array2<Float>>,
 }
 
 impl RMSProp {
     /// Yeni bir RMSProp optimizer oluşturur
-    pub fn new(learning_rate: f64, decay: f64, epsilon: f64) -> Self {
+    pub fn new(learning_rate: Float, decay: Float, epsilon: Float) -> Self {
         Self {
             learning_rate,
             decay,
@@ -510,10 +511,10 @@ impl RMSProp {
 impl Optimizer for RMSProp {
     fn update(
         &self,
-        weights: &mut Array2<f64>,
-        biases: &mut Array2<f64>,
-        grad_weights: &ArrayView2<f64>,
-        grad_biases: &ArrayView2<f64>,
+        weights: &mut Array2<Float>,
+        biases: &mut Array2<Float>,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
     ) -> Result<()> {
         // Boyut kontrolü
         if weights.shape() != grad_weights.shape() {
@@ -561,11 +562,11 @@ impl Optimizer for RMSProp {
         Ok(())
     }
 
-    fn learning_rate(&self) -> f64 {
+    fn learning_rate(&self) -> Float {
         self.learning_rate
     }
 
-    fn set_learning_rate(&mut self, learning_rate: f64) {
+    fn set_learning_rate(&mut self, learning_rate: Float) {
         self.learning_rate = learning_rate;
     }
 
@@ -600,12 +601,12 @@ pub fn create_optimizer(optimizer_type: &str) -> Result<Box<dyn Optimizer>> {
 /// Model yükleme için parametrelerden optimizer oluşturur
 pub fn create_optimizer_from_params(
     optimizer_type: &str,
-    learning_rate: f64,
-    momentum: Option<f64>,
-    beta1: Option<f64>,
-    beta2: Option<f64>,
-    epsilon: Option<f64>,
-    weight_decay: Option<f64>,
+    learning_rate: Float,
+    momentum: Option<Float>,
+    beta1: Option<Float>,
+    beta2: Option<Float>,
+    epsilon: Option<Float>,
+    weight_decay: Option<Float>,
 ) -> Result<Box<dyn Optimizer>> {
     match optimizer_type.to_lowercase().as_str() {
         "sgd" => {

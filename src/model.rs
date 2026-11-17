@@ -1,5 +1,6 @@
 use crate::aktivasyon::Activation;
 use crate::cihaz::Cihaz;
+use crate::dtype::{self, Float};
 use crate::error::{Result, TurkError};
 use crate::initializers::{GlorotUniform, Zeros};
 use crate::katman_kayit::{KatmanKayit, KatmanYukleVerisi};
@@ -24,19 +25,19 @@ use std::io::{Read, Write};
 // ─────────────────────────────────────────────
 
 /// Epoch sonunda GUI / CLI geri bildirimi için callback.
-pub type EpochCallback = Box<dyn FnMut(usize, usize, f64, Option<f64>) + Send>;
+pub type EpochCallback = Box<dyn FnMut(usize, usize, Float, Option<Float>) + Send>;
 
 /// Eğitim süreci boyunca toplanan metrik ve kayıp değerleri.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct History {
     /// Her epoch'taki eğitim kaybı
-    pub train_losses: Vec<f64>,
+    pub train_losses: Vec<Float>,
     /// Her epoch'taki doğrulama kaybı (doğrulama verisi yoksa boş)
-    pub val_losses: Vec<f64>,
+    pub val_losses: Vec<Float>,
     /// Her epoch'taki eğitim metrikleri (henüz: MSE)
-    pub train_metrics: Vec<f64>,
+    pub train_metrics: Vec<Float>,
     /// Her epoch'taki doğrulama metrikleri
-    pub val_metrics: Vec<f64>,
+    pub val_metrics: Vec<Float>,
 }
 
 impl History {
@@ -45,12 +46,12 @@ impl History {
     }
 
     /// Son eğitim kaybını döndürür.
-    pub fn last_train_loss(&self) -> Option<f64> {
+    pub fn last_train_loss(&self) -> Option<Float> {
         self.train_losses.last().copied()
     }
 
     /// Son doğrulama kaybını döndürür.
-    pub fn last_val_loss(&self) -> Option<f64> {
+    pub fn last_val_loss(&self) -> Option<Float> {
         self.val_losses.last().copied()
     }
 
@@ -61,7 +62,7 @@ impl History {
 
     /// val_loss'un en düşük olduğu epoch'taki kayıtları döndürür:
     /// `(train_loss, val_loss, epoch_no)` — epoch_no 1 tabanlıdır.
-    pub fn en_iyi_val_kayitlari(&self) -> Option<(f64, f64, usize)> {
+    pub fn en_iyi_val_kayitlari(&self) -> Option<(Float, Float, usize)> {
         let (idx, &best_val) = self
             .val_losses
             .iter()
@@ -105,10 +106,10 @@ impl History {
             "toplam_epoch": epoch_sayisi,
             "ilk_train_loss": self.train_losses.first(),
             "son_train_loss": self.train_losses.last(),
-            "en_dusuk_train_loss": self.train_losses.iter().cloned().reduce(f64::min),
+            "en_dusuk_train_loss": self.train_losses.iter().cloned().reduce(Float::min),
             "ilk_val_loss": self.val_losses.first(),
             "son_val_loss": self.val_losses.last(),
-            "en_dusuk_val_loss": self.val_losses.iter().cloned().reduce(f64::min),
+            "en_dusuk_val_loss": self.val_losses.iter().cloned().reduce(Float::min),
         });
 
         let json_cikti = json!({
@@ -145,9 +146,9 @@ pub struct EarlyStopping {
     /// Kaç epoch boyunca iyileşme bekleneceği
     pub patience: usize,
     /// Minimum iyileşme miktarı (bu kadar düşmezse sayaç artar)
-    pub min_delta: f64,
+    pub min_delta: Float,
     /// Mevcut en iyi kayıp
-    best_loss: f64,
+    best_loss: Float,
     /// İyileşme olmayan epoch sayacı
     counter: usize,
 }
@@ -157,22 +158,22 @@ impl EarlyStopping {
     ///
     /// `patience`: iyileşme gözlemlenmeden beklenecek epoch sayısı.  
     /// `min_delta`: iyileşme sayılabilmesi için gereken minimum düşüş.
-    pub fn new(patience: usize, min_delta: f64) -> Self {
+    pub fn new(patience: usize, min_delta: Float) -> Self {
         Self {
             patience,
             min_delta,
-            best_loss: f64::INFINITY,
+            best_loss: Float::INFINITY,
             counter: 0,
         }
     }
 
     /// Mevcut en iyi val_loss değerini döndürür (henüz adım yoksa +∞).
-    pub fn best_val_loss(&self) -> f64 {
+    pub fn best_val_loss(&self) -> Float {
         self.best_loss
     }
 
     /// Verilen val_loss ile sayacı günceller; durdurulması gerekiyorsa `true` döner.
-    pub fn step(&mut self, val_loss: f64) -> bool {
+    pub fn step(&mut self, val_loss: Float) -> bool {
         if val_loss < self.best_loss - self.min_delta {
             self.best_loss = val_loss;
             self.counter = 0;
@@ -185,7 +186,7 @@ impl EarlyStopping {
 
     /// İç durumu sıfırlar (modeli yeniden eğitmeden önce çağırın).
     pub fn reset(&mut self) {
-        self.best_loss = f64::INFINITY;
+        self.best_loss = Float::INFINITY;
         self.counter = 0;
     }
 }
@@ -219,11 +220,11 @@ impl EarlyStopping {
 ///      .add(dense(128, 10, Activation::Softmax))
 ///      .compile(SGD::new(0.01, None, false));
 ///
-/// let x_train = Array2::<f64>::zeros((100, 784));
-/// let y_train = Array2::<f64>::zeros((100, 10));
+/// let x_train = Array2::<Float>::zeros((100, 784));
+/// let y_train = Array2::<Float>::zeros((100, 10));
 /// model.fit(&x_train.view(), &y_train.view(), 10, 32, None).unwrap();
 ///
-/// let x_test = Array2::<f64>::zeros((10, 784));
+/// let x_test = Array2::<Float>::zeros((10, 784));
 /// let _predictions = model.predict(&x_test.view()).unwrap();
 /// ```
 /// Model trait - Makine öğrenmesi modelleri için arayüz
@@ -240,8 +241,8 @@ pub trait Model: Send + Sync + fmt::Debug {
     /// - `input`: Girdi tensörü, boyut (batch_size, input_features)
     ///
     /// # Dönüş
-    /// - `Result<Array2<f64>>`: Başarılı ise model çıktısı, hata durumunda ilgili hata
-    fn forward<'a>(&mut self, input: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>>;
+    /// - `Result<Array2<Float>>`: Başarılı ise model çıktısı, hata durumunda ilgili hata
+    fn forward<'a>(&mut self, input: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>>;
 
     /// Geri yayılım (backpropagation)
     ///
@@ -252,8 +253,8 @@ pub trait Model: Send + Sync + fmt::Debug {
     /// - `grad`: Çıktı gradyanı tensörü
     ///
     /// # Dönüş
-    /// - `Result<Array2<f64>>`: Girdiye göre gradyan, hata durumunda ilgili hata
-    fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>>;
+    /// - `Result<Array2<Float>>`: Girdiye göre gradyan, hata durumunda ilgili hata
+    fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>>;
 
     /// Ağırlık güncellemesi
     ///
@@ -306,11 +307,11 @@ pub trait Model: Send + Sync + fmt::Debug {
     /// - `Result<History>`: Her epoch için toplanan eğitim/doğrulama kayıp ve metrikleri
     fn fit<'a>(
         &mut self,
-        x_train: &'a ArrayView2<'a, f64>,
-        y_train: &'a ArrayView2<'a, f64>,
+        x_train: &'a ArrayView2<'a, Float>,
+        y_train: &'a ArrayView2<'a, Float>,
         epochs: usize,
         batch_size: usize,
-        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+        validation_data: Option<(&'a ArrayView2<'a, Float>, &'a ArrayView2<'a, Float>)>,
     ) -> Result<History>;
 
     /// Tahmin yapar
@@ -321,8 +322,8 @@ pub trait Model: Send + Sync + fmt::Debug {
     /// - `x`: Girdi verileri
     ///
     /// # Dönüş
-    /// - `Result<Array2<f64>>`: Model tahminleri
-    fn predict<'a>(&mut self, x: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>>;
+    /// - `Result<Array2<Float>>`: Model tahminleri
+    fn predict<'a>(&mut self, x: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>>;
 
     /// Modeli değerlendirir
     ///
@@ -333,12 +334,12 @@ pub trait Model: Send + Sync + fmt::Debug {
     /// - `y_val`: Test hedef değerleri
     ///
     /// # Dönüş
-    /// - `Result<f64>`: Değerlendirme skoru (genellikle kayıp değeri)
+    /// - `Result<Float>`: Değerlendirme skoru (genellikle kayıp değeri)
     fn evaluate<'a>(
         &mut self,
-        x_val: &'a ArrayView2<'a, f64>,
-        y_val: &'a ArrayView2<'a, f64>,
-    ) -> Result<f64>;
+        x_val: &'a ArrayView2<'a, Float>,
+        y_val: &'a ArrayView2<'a, Float>,
+    ) -> Result<Float>;
 }
 
 /// Sıralı model sınıfı (Sequential model).
@@ -384,9 +385,9 @@ pub struct Sequential {
     pub compiled: bool,
     pub input_shape: Option<(usize, usize)>,
     pub output_shape: Option<(usize, usize)>,
-    pub loss_history: Vec<f64>,
-    pub val_loss_history: Vec<f64>,
-    pub inputs: Option<Array2<f64>>,
+    pub loss_history: Vec<Float>,
+    pub val_loss_history: Vec<Float>,
+    pub inputs: Option<Array2<Float>>,
     pub cihaz: Cihaz,
 }
 
@@ -412,23 +413,23 @@ impl Clone for Sequential {
 #[derive(Debug, Serialize, Deserialize)]
 struct LayerData {
     layer_type: String,
-    weights: Vec<f64>,
-    biases: Vec<f64>,
+    weights: Vec<Float>,
+    biases: Vec<Float>,
     activation: Activation,
     input_size: usize,
     output_size: usize,
-    dropout_rate: Option<f64>,
+    dropout_rate: Option<Float>,
     /// BatchNormalization: özellik sayısı
     #[serde(default)]
     num_features: usize,
     /// BatchNormalization: epsilon
     #[serde(default)]
-    bn_epsilon: f64,
+    bn_epsilon: Float,
     /// BatchNormalization: momentum
     #[serde(default)]
-    bn_momentum: f64,
+    bn_momentum: Float,
     #[serde(default)]
-    extra: std::collections::HashMap<String, f64>,
+    extra: std::collections::HashMap<String, Float>,
 }
 
 /// Model verisi - Serileştirme/Deserileştirme için
@@ -449,12 +450,12 @@ fn default_cihaz_str() -> String {
 /// Optimizer parametreleri
 #[derive(Debug, Serialize, Deserialize)]
 struct OptimizerParams {
-    learning_rate: f64,
-    momentum: Option<f64>,
-    beta1: Option<f64>,
-    beta2: Option<f64>,
-    epsilon: Option<f64>,
-    weight_decay: Option<f64>,
+    learning_rate: Float,
+    momentum: Option<Float>,
+    beta1: Option<Float>,
+    beta2: Option<Float>,
+    epsilon: Option<Float>,
+    weight_decay: Option<Float>,
 }
 
 impl Sequential {
@@ -675,9 +676,9 @@ impl Sequential {
 
     fn batch_loss_and_grad(
         &self,
-        y_true: &ArrayView2<f64>,
-        y_pred: &ArrayView2<f64>,
-    ) -> Result<(f64, Array2<f64>)> {
+        y_true: &ArrayView2<Float>,
+        y_pred: &ArrayView2<Float>,
+    ) -> Result<(Float, Array2<Float>)> {
         let loss_fn = self.loss_fn()?;
         let batch_loss = loss_fn.loss(y_true, y_pred)?;
         let grad = loss_fn.gradient(y_true, y_pred)?;
@@ -710,8 +711,8 @@ impl Sequential {
     /// - `input`: Girdi tensörü
     ///
     /// # Dönüş
-    /// - `Result<Array2<f64>>`: Modelin çıktısı, hata durumunda ilgili hata
-    pub fn forward<'a>(&mut self, input: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+    /// - `Result<Array2<Float>>`: Modelin çıktısı, hata durumunda ilgili hata
+    pub fn forward<'a>(&mut self, input: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>> {
         self.ensure_compiled()?;
 
         self.inputs = Some(input.to_owned());
@@ -728,7 +729,7 @@ impl Sequential {
     ///
     /// # Parametreler
     /// - `grad`: Gradyan tensörü
-    pub fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+    pub fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>> {
         self.ensure_compiled()?;
 
         // Kayıt ettiğimiz ileri yayılım sonuçlarını kullanalım
@@ -799,8 +800,8 @@ impl Sequential {
             // Optimizeri kullanarak güncelleme yap (sadece optimizer varsa)
             if let Some(optimizer) = &mut self.optimizer {
                 // Dummy gradient değerleri oluştur
-                let grad_weights = Array2::<f64>::zeros(weights.dim());
-                let grad_biases = Array2::<f64>::zeros(biases.dim());
+                let grad_weights = Array2::<Float>::zeros(weights.dim());
+                let grad_biases = Array2::<Float>::zeros(biases.dim());
 
                 optimizer.update(
                     &mut weights,
@@ -928,7 +929,7 @@ impl Sequential {
             };
 
             let mut ek = std::collections::HashMap::new();
-            ek.insert("num_features".into(), ld.num_features as f64);
+            ek.insert("num_features".into(), ld.num_features as Float);
             ek.insert("bn_epsilon".into(), ld.bn_epsilon);
             ek.insert("bn_momentum".into(), ld.bn_momentum);
             for (k, v) in &ld.extra {
@@ -980,7 +981,7 @@ impl Sequential {
     ///
     /// # Hatalar
     /// - Eğer x ve y aynı sayıda örneğe (satır) sahip değilse ShapeMismatch hatası döner
-    fn validate_inputs(&self, x: &ArrayView2<f64>, y: &ArrayView2<f64>) -> Result<()> {
+    fn validate_inputs(&self, x: &ArrayView2<Float>, y: &ArrayView2<Float>) -> Result<()> {
         validate_tensor_shapes(x, y, true, false, "Eğitim verileri")
     }
 
@@ -1010,12 +1011,12 @@ impl Sequential {
     /// * `validation_data` - Opsiyonel doğrulama veri seti
     fn train_epoch<'a>(
         &mut self,
-        x_train: &'a ArrayView2<'a, f64>,
-        y_train: &'a ArrayView2<'a, f64>,
+        x_train: &'a ArrayView2<'a, Float>,
+        y_train: &'a ArrayView2<'a, Float>,
         batch_size: usize,
         _metrics: &[Box<dyn Metric>],
-        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
-    ) -> Result<(f64, Option<f64>)> {
+        validation_data: Option<(&'a ArrayView2<'a, Float>, &'a ArrayView2<'a, Float>)>,
+    ) -> Result<(Float, Option<Float>)> {
         // Toplam kaybı tutacak değişken
         let mut total_loss = 0.0;
 
@@ -1058,7 +1059,7 @@ impl Sequential {
         }
 
         // Ortalama eğitim kaybını hesapla
-        let avg_train_loss = total_loss / batch_count as f64;
+        let avg_train_loss = total_loss / batch_count as Float;
 
         // Doğrulama kaybını hesapla (eğer varsa)
         let val_loss = if let Some((x_val, y_val)) = validation_data {
@@ -1084,11 +1085,11 @@ impl Sequential {
     /// `Result<History>` — kayıp ve metrik geçmişi
     pub fn fit<'a>(
         &mut self,
-        x_train: &'a ArrayView2<'a, f64>,
-        y_train: &'a ArrayView2<'a, f64>,
+        x_train: &'a ArrayView2<'a, Float>,
+        y_train: &'a ArrayView2<'a, Float>,
         epochs: usize,
         batch_size: usize,
-        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+        validation_data: Option<(&'a ArrayView2<'a, Float>, &'a ArrayView2<'a, Float>)>,
     ) -> Result<History> {
         self.fit_with_early_stopping(x_train, y_train, epochs, batch_size, validation_data, None)
     }
@@ -1096,11 +1097,11 @@ impl Sequential {
     /// Erken durdurma destekli eğitim.
     pub fn fit_with_early_stopping<'a>(
         &mut self,
-        x_train: &'a ArrayView2<'a, f64>,
-        y_train: &'a ArrayView2<'a, f64>,
+        x_train: &'a ArrayView2<'a, Float>,
+        y_train: &'a ArrayView2<'a, Float>,
         epochs: usize,
         batch_size: usize,
-        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+        validation_data: Option<(&'a ArrayView2<'a, Float>, &'a ArrayView2<'a, Float>)>,
         early_stopping: Option<&mut EarlyStopping>,
     ) -> Result<History> {
         self.fit_with_checkpoint(
@@ -1122,11 +1123,11 @@ impl Sequential {
     /// Eğitim bittiğinde veya erken durdurma tetiklendiğinde en iyi checkpoint geri yüklenir.
     pub fn fit_with_checkpoint<'a>(
         &mut self,
-        x_train: &'a ArrayView2<'a, f64>,
-        y_train: &'a ArrayView2<'a, f64>,
+        x_train: &'a ArrayView2<'a, Float>,
+        y_train: &'a ArrayView2<'a, Float>,
         epochs: usize,
         batch_size: usize,
-        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+        validation_data: Option<(&'a ArrayView2<'a, Float>, &'a ArrayView2<'a, Float>)>,
         mut early_stopping: Option<&mut EarlyStopping>,
         checkpoint_yolu: Option<&str>,
         mut epoch_cb: Option<EpochCallback>,
@@ -1136,7 +1137,7 @@ impl Sequential {
         self.validate_inputs(x_train, y_train)?;
 
         let mut history = History::new();
-        let mut en_iyi_metrik = f64::MAX;
+        let mut en_iyi_metrik = Float::MAX;
         let val_kullaniliyor = validation_data.is_some();
 
         for epoch in 0..epochs {
@@ -1196,11 +1197,11 @@ impl Sequential {
     }
 
     /// Checkpoint metriği: val_loss varsa onu, yoksa train loss kullan.
-    fn checkpoint_metrik(epoch_loss: f64, val_loss: Option<f64>) -> f64 {
+    fn checkpoint_metrik(epoch_loss: Float, val_loss: Option<Float>) -> Float {
         val_loss.unwrap_or(epoch_loss)
     }
 
-    fn checkpoint_metrik_adi(val_loss: Option<f64>) -> &'static str {
+    fn checkpoint_metrik_adi(val_loss: Option<Float>) -> &'static str {
         if val_loss.is_some() {
             "val_loss"
         } else {
@@ -1213,9 +1214,9 @@ impl Sequential {
         &mut self,
         yol: &str,
         epoch: usize,
-        epoch_loss: f64,
-        val_loss: Option<f64>,
-        en_iyi: &mut f64,
+        epoch_loss: Float,
+        val_loss: Option<Float>,
+        en_iyi: &mut Float,
     ) {
         let metrik = Self::checkpoint_metrik(epoch_loss, val_loss);
         let metrik_adi = Self::checkpoint_metrik_adi(val_loss);
@@ -1237,12 +1238,12 @@ impl Sequential {
         &mut self,
         yol: &str,
         val_kullaniliyor: bool,
-        en_iyi_metrik: f64,
+        en_iyi_metrik: Float,
     ) -> Result<()> {
         if !std::path::Path::new(yol).exists() {
             return Ok(());
         }
-        if val_kullaniliyor && en_iyi_metrik < f64::MAX {
+        if val_kullaniliyor && en_iyi_metrik < Float::MAX {
             info!("En iyi model geri yükleniyor: '{yol}' (val_loss={en_iyi_metrik:.6})");
             self.load(yol)?;
         }
@@ -1255,10 +1256,10 @@ impl Sequential {
     pub fn train_epoch_from_batches<I>(
         &mut self,
         batches: I,
-        validation_data: Option<(&Array2<f64>, &Array2<f64>)>,
-    ) -> Result<(f64, Option<f64>)>
+        validation_data: Option<(&Array2<Float>, &Array2<Float>)>,
+    ) -> Result<(Float, Option<Float>)>
     where
-        I: Iterator<Item = Result<(Array2<f64>, Array2<f64>)>>,
+        I: Iterator<Item = Result<(Array2<Float>, Array2<Float>)>>,
     {
         let mut total_loss = 0.0;
         let mut batch_count = 0usize;
@@ -1284,7 +1285,7 @@ impl Sequential {
             ));
         }
 
-        let avg_train_loss = total_loss / batch_count as f64;
+        let avg_train_loss = total_loss / batch_count as Float;
 
         let val_loss = if let Some((x_val, y_val)) = validation_data {
             let y_val_pred = self.forward(&x_val.view())?;
@@ -1305,21 +1306,21 @@ impl Sequential {
         &mut self,
         mut batch_kaynak: F,
         epochs: usize,
-        validation_data: Option<(Array2<f64>, Array2<f64>)>,
+        validation_data: Option<(Array2<Float>, Array2<Float>)>,
         mut early_stopping: Option<&mut EarlyStopping>,
         checkpoint_yolu: Option<&str>,
         mut epoch_cb: Option<EpochCallback>,
     ) -> Result<History>
     where
         F: FnMut() -> Result<I>,
-        I: Iterator<Item = Result<(Array2<f64>, Array2<f64>)>>,
+        I: Iterator<Item = Result<(Array2<Float>, Array2<Float>)>>,
     {
         self.cihaz.hazirla()?;
         self.ensure_compiled()?;
 
         let val_ref = validation_data.as_ref().map(|pair| (&pair.0, &pair.1));
         let mut history = History::new();
-        let mut en_iyi_metrik = f64::MAX;
+        let mut en_iyi_metrik = Float::MAX;
         let val_kullaniliyor = validation_data.is_some();
 
         for epoch in 0..epochs {
@@ -1384,7 +1385,7 @@ impl Sequential {
     ///
     /// # Dönüş
     /// Model çıktısı
-    pub fn predict<'a>(&mut self, x: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+    pub fn predict<'a>(&mut self, x: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>> {
         self.forward(x)
     }
 
@@ -1398,9 +1399,9 @@ impl Sequential {
     /// Model çıktısı
     pub fn evaluate<'a>(
         &mut self,
-        x_val: &'a ArrayView2<'a, f64>,
-        y_val: &'a ArrayView2<'a, f64>,
-    ) -> Result<f64> {
+        x_val: &'a ArrayView2<'a, Float>,
+        y_val: &'a ArrayView2<'a, Float>,
+    ) -> Result<Float> {
         let y_pred = self.forward(x_val)?;
         let mse = tensor_ops::mse(&y_val.view(), &y_pred.view())?;
         Ok(mse)
@@ -1428,7 +1429,9 @@ impl Sequential {
                     crate::ast::Aktivasyon::ReLU => Activation::Relu,
                     crate::ast::Aktivasyon::Sigmoid => Activation::Sigmoid,
                     crate::ast::Aktivasyon::Tanh => Activation::Tanh,
-                    crate::ast::Aktivasyon::LeakyReLU(alpha) => Activation::LeakyRelu(*alpha),
+                    crate::ast::Aktivasyon::LeakyReLU(alpha) => {
+                        Activation::LeakyRelu(dtype::from_f64(*alpha))
+                    }
                     crate::ast::Aktivasyon::Softmax => Activation::Softmax,
                     crate::ast::Aktivasyon::Swish => Activation::Swish,
                     crate::ast::Aktivasyon::Yok => Activation::Linear,
@@ -1457,7 +1460,7 @@ impl Sequential {
                 self.add(layer);
             }
             crate::ast::Katman::Dropout { orani } => {
-                self.add(Dropout::new(*orani));
+                self.add(Dropout::new(dtype::from_f64(*orani)));
             }
             crate::ast::Katman::BatchNormalization { momentum, epsilon } => {
                 let num_features = if self.layers.is_empty() {
@@ -1467,8 +1470,8 @@ impl Sequential {
                 };
                 self.add(BatchNormalization::with_params(
                     num_features,
-                    *epsilon,
-                    *momentum,
+                    dtype::from_f64(*epsilon),
+                    dtype::from_f64(*momentum),
                 ));
             }
             _ => {
@@ -1493,7 +1496,11 @@ impl Sequential {
                 momentum,
                 nesterov,
             } => {
-                let sgd = SGD::new(*lr, *momentum, nesterov.unwrap_or(false));
+                let sgd = SGD::new(
+                    dtype::from_f64(*lr),
+                    momentum.map(dtype::from_f64),
+                    nesterov.unwrap_or(false),
+                );
                 self.compile_boxed(Box::new(sgd));
             }
             crate::ast::OptimizerTipi::Adam {
@@ -1503,10 +1510,10 @@ impl Sequential {
                 epsilon,
             } => {
                 let adam = Adam::new(
-                    *lr,
-                    beta1.unwrap_or(0.9),
-                    beta2.unwrap_or(0.999),
-                    epsilon.unwrap_or(1e-8),
+                    dtype::from_f64(*lr),
+                    dtype::from_f64(beta1.unwrap_or(0.9)),
+                    dtype::from_f64(beta2.unwrap_or(0.999)),
+                    dtype::from_f64(epsilon.unwrap_or(1e-8)),
                 );
                 self.compile_boxed(Box::new(adam));
             }
@@ -1518,16 +1525,20 @@ impl Sequential {
                 epsilon,
             } => {
                 let adamw = AdamW::new(
-                    *lr,
-                    beta1.unwrap_or(0.9),
-                    beta2.unwrap_or(0.999),
-                    epsilon.unwrap_or(1e-8),
-                    weight_decay.unwrap_or(0.01),
+                    dtype::from_f64(*lr),
+                    dtype::from_f64(beta1.unwrap_or(0.9)),
+                    dtype::from_f64(beta2.unwrap_or(0.999)),
+                    dtype::from_f64(epsilon.unwrap_or(1e-8)),
+                    dtype::from_f64(weight_decay.unwrap_or(0.01)),
                 );
                 self.compile_boxed(Box::new(adamw));
             }
             crate::ast::OptimizerTipi::RMSProp { lr, rho, epsilon } => {
-                let rmsprop = RMSProp::new(*lr, rho.unwrap_or(0.9), epsilon.unwrap_or(1e-8));
+                let rmsprop = RMSProp::new(
+                    dtype::from_f64(*lr),
+                    dtype::from_f64(rho.unwrap_or(0.9)),
+                    dtype::from_f64(epsilon.unwrap_or(1e-8)),
+                );
                 self.compile_boxed(Box::new(rmsprop));
             }
         }
@@ -1630,11 +1641,11 @@ impl Sequential {
 }
 
 impl Model for Sequential {
-    fn forward<'a>(&mut self, input: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+    fn forward<'a>(&mut self, input: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>> {
         self.forward(input)
     }
 
-    fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+    fn backward<'a>(&mut self, grad: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>> {
         self.backward(grad)
     }
 
@@ -1656,24 +1667,24 @@ impl Model for Sequential {
 
     fn fit<'a>(
         &mut self,
-        x_train: &'a ArrayView2<'a, f64>,
-        y_train: &'a ArrayView2<'a, f64>,
+        x_train: &'a ArrayView2<'a, Float>,
+        y_train: &'a ArrayView2<'a, Float>,
         epochs: usize,
         batch_size: usize,
-        validation_data: Option<(&'a ArrayView2<'a, f64>, &'a ArrayView2<'a, f64>)>,
+        validation_data: Option<(&'a ArrayView2<'a, Float>, &'a ArrayView2<'a, Float>)>,
     ) -> Result<History> {
         self.fit(x_train, y_train, epochs, batch_size, validation_data)
     }
 
-    fn predict<'a>(&mut self, x: &'a ArrayView2<'a, f64>) -> Result<Array2<f64>> {
+    fn predict<'a>(&mut self, x: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>> {
         self.predict(x)
     }
 
     fn evaluate<'a>(
         &mut self,
-        x_val: &'a ArrayView2<'a, f64>,
-        y_val: &'a ArrayView2<'a, f64>,
-    ) -> Result<f64> {
+        x_val: &'a ArrayView2<'a, Float>,
+        y_val: &'a ArrayView2<'a, Float>,
+    ) -> Result<Float> {
         self.evaluate(x_val, y_val)
     }
 }
@@ -1719,7 +1730,7 @@ mod tests {
         .unwrap()
     }
 
-    fn sgd(lr: f64) -> SGD {
+    fn sgd(lr: Float) -> SGD {
         SGD::new(lr, None, false)
     }
 
@@ -1880,10 +1891,10 @@ mod tests {
     #[test]
     fn test_metrics() {
         let mut model = create_test_model();
-        let input = Array2::<f64>::ones((5, 2));
+        let input = Array2::<Float>::ones((5, 2));
         let output = model.forward(&input.view()).unwrap();
         let accuracy = Accuracy::new();
-        let targets = Array2::<f64>::ones((5, 1));
+        let targets = Array2::<Float>::ones((5, 1));
         let acc_value = accuracy.compute(&targets.view(), &output.view());
         assert!((0.0..=1.0).contains(&acc_value));
     }
@@ -1956,7 +1967,7 @@ mod tests {
 
         // backward() içinde zaten optimizer.update() çağrılıyor;
         // başlangıç anlık görüntüsünü forward'dan ÖNCE al.
-        let initial_weights: Vec<Array2<f64>> = model
+        let initial_weights: Vec<Array2<Float>> = model
             .layers
             .iter()
             .map(|l| l.get_weights().unwrap_or_else(|_| Array2::zeros((0, 0))))
@@ -1984,7 +1995,7 @@ mod tests {
             }
             let w = l.get_weights().unwrap_or_else(|_| Array2::zeros((0, 0)));
             (&w - &initial_weights[i])
-                .mapv(f64::abs)
+                .mapv(Float::abs)
                 .iter()
                 .any(|&d| d > 1e-12)
         });
@@ -2004,7 +2015,7 @@ mod tests {
     #[test]
     fn test_invalid_input_dimensions() {
         let mut model = create_test_model();
-        let invalid_input = Array2::<f64>::zeros((1, 4));
+        let invalid_input = Array2::<Float>::zeros((1, 4));
         let result = model.forward(&invalid_input.view());
         assert!(result.is_err());
         if let Err(TurkError::ShapeMismatch(_)) = result {
@@ -2017,9 +2028,9 @@ mod tests {
     fn test_uncompiled_model_errors() {
         let mut model = Sequential::new();
         model.add(dense(2, 3, Activation::Relu));
-        let input = Array2::<f64>::zeros((1, 2));
+        let input = Array2::<Float>::zeros((1, 2));
         assert!(model.forward(&input.view()).is_err());
-        let target = Array2::<f64>::zeros((1, 1));
+        let target = Array2::<Float>::zeros((1, 1));
         assert!(model
             .fit(&input.view(), &target.view(), 1, 1, None)
             .is_err());
@@ -2034,8 +2045,8 @@ mod tests {
         let _ = std::fs::remove_file(&temp_path);
 
         let mut model = create_test_model();
-        let input = Array2::<f64>::zeros((2, 2));
-        let bad_target = Array2::<f64>::zeros((3, 1));
+        let input = Array2::<Float>::zeros((2, 2));
+        let bad_target = Array2::<Float>::zeros((3, 1));
         let result = model.fit(&input.view(), &bad_target.view(), 1, 1, None);
         assert!(result.is_err());
     }
@@ -2045,7 +2056,7 @@ mod tests {
         let x = arr2(&[[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]);
         let y = arr2(&[[0.0], [1.0], [1.0], [0.0]]);
         let lrs = [0.001f64, 0.5];
-        let losses: Vec<f64> = lrs
+        let losses: Vec<Float> = lrs
             .iter()
             .map(|&lr| {
                 let mut m = Sequential::new();
@@ -2076,7 +2087,7 @@ mod tests {
         let initial_loss =
             tensor_ops::mse(&y.view(), &model.forward(&x.view()).unwrap().view()).unwrap();
         let history = model.fit(&x.view(), &y.view(), 3000, 4, None).unwrap();
-        let final_loss = history.last_train_loss().unwrap_or(f64::INFINITY);
+        let final_loss = history.last_train_loss().unwrap_or(Float::INFINITY);
         assert!(
             final_loss < initial_loss,
             "kayıp düşmeli: {final_loss} < {initial_loss}"
@@ -2139,7 +2150,12 @@ mod tests {
         assert!((1..=3).contains(&ep));
         assert_eq!(
             vl,
-            history.val_losses.iter().cloned().reduce(f64::min).unwrap()
+            history
+                .val_losses
+                .iter()
+                .cloned()
+                .reduce(Float::min)
+                .unwrap()
         );
         assert_eq!(tr, history.train_losses[ep - 1]);
     }
@@ -2212,7 +2228,12 @@ mod tests {
 
         assert!(history.epochs_run() >= 1);
         // En iyi checkpoint val_loss'a gore kaydedilmeli (epoch 1 genelde en iyi val)
-        let best_val = history.val_losses.iter().cloned().reduce(f64::min).unwrap();
+        let best_val = history
+            .val_losses
+            .iter()
+            .cloned()
+            .reduce(Float::min)
+            .unwrap();
         assert!(
             es.best_val_loss() <= best_val + 1e-9,
             "EarlyStopping en iyi val_loss takip etmeli"
@@ -2257,7 +2278,7 @@ mod tests {
         let output = bn.forward(&input.view()).unwrap();
         assert_eq!(output.shape(), input.shape());
         for col in 0..4 {
-            let mu: f64 = output.column(col).iter().sum::<f64>() / 3.0;
+            let mu: Float = output.column(col).iter().sum::<Float>() / 3.0;
             assert!(
                 mu.abs() < 1e-6,
                 "normalize sonrası ortalama ≈0 olmalı: {mu}"

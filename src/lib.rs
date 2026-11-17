@@ -11,8 +11,13 @@
 
 extern crate lazy_static;
 
+// BLAS (isteğe bağlı) — ndarray matmul hızlandırır
+#[cfg(feature = "blas")]
+extern crate blas_src;
+
 // Standart modüller
 pub mod aktivasyon;
+pub mod dtype;
 pub mod error;
 pub mod initializers;
 pub mod layer;
@@ -76,6 +81,7 @@ pub use cnn::{Conv2D, Flatten, MaxPool2D};
 pub use dil::TurkDil;
 pub use dil::{EgitimIlerleme, Value};
 pub use dsl_parser::{hata_satirini_goster, komut_ayristir, DslKomut};
+pub use dtype::Float;
 pub use error::{Result, TurkError};
 pub use initializers::{GlorotNormal, GlorotUniform, HeNormal, HeUniform, Initializer};
 pub use katman_kayit::{Katman, KatmanKayit, KatmanYukleVerisi};

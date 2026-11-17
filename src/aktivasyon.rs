@@ -9,16 +9,18 @@ use ndarray::{Array2, Axis};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::dtype::Float;
+
 /// Aktivasyon fonksiyonları
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Activation {
     Relu,
-    LeakyRelu(f64), // alpha değeri
+    LeakyRelu(Float), // alpha değeri
     Sigmoid,
     Tanh,
     Softmax,
     Linear,
-    Elu(f64), // alpha değeri
+    Elu(Float), // alpha değeri
     Selu,
     Swish,
 }
@@ -44,7 +46,7 @@ impl Activation {
     }
 
     /// İleri hesaplama
-    pub fn forward(&self, x: &Array2<f64>) -> Array2<f64> {
+    pub fn forward(&self, x: &Array2<Float>) -> Array2<Float> {
         match self {
             Self::Relu => x.mapv(|v| if v > 0.0 { v } else { 0.0 }),
             Self::LeakyRelu(alpha) => x.mapv(|v| if v > 0.0 { v } else { v * alpha }),
@@ -54,7 +56,7 @@ impl Activation {
                 let mut result = Array2::zeros(x.dim());
                 for (i, mut row) in result.axis_iter_mut(Axis(0)).enumerate() {
                     let x_row = x.row(i);
-                    let max = x_row.fold(f64::NEG_INFINITY, |max, &v| max.max(v));
+                    let max = x_row.fold(Float::NEG_INFINITY, |max, &v| max.max(v));
                     let exp_x = x_row.mapv(|v| (v - max).exp());
                     let sum_exp = exp_x.sum();
                     for (j, v) in row.iter_mut().enumerate() {
@@ -66,8 +68,8 @@ impl Activation {
             Self::Linear => x.to_owned(),
             Self::Elu(alpha) => x.mapv(|v| if v > 0.0 { v } else { alpha * (v.exp() - 1.0) }),
             Self::Selu => x.mapv(|v| {
-                let alpha = 1.6732632423543772;
-                let scale = 1.0507009873554804;
+                let alpha = crate::dtype::from_f64(1.673_263_242_354_377_2);
+                let scale = crate::dtype::from_f64(1.050_700_987_355_480_4);
                 if v > 0.0 {
                     scale * v
                 } else {
@@ -82,7 +84,7 @@ impl Activation {
     }
 
     /// Geri hesaplama (türev)
-    pub fn backward(&self, x: &Array2<f64>) -> Array2<f64> {
+    pub fn backward(&self, x: &Array2<Float>) -> Array2<Float> {
         match self {
             Self::Relu => x.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }),
             Self::LeakyRelu(alpha) => x.mapv(|v| if v > 0.0 { 1.0 } else { *alpha }),
@@ -102,8 +104,8 @@ impl Activation {
             Self::Linear => Array2::ones(x.dim()),
             Self::Elu(alpha) => x.mapv(|v| if v > 0.0 { 1.0 } else { alpha * v.exp() }),
             Self::Selu => x.mapv(|v| {
-                let alpha = 1.6732632423543772;
-                let scale = 1.0507009873554804;
+                let alpha = crate::dtype::from_f64(1.673_263_242_354_377_2);
+                let scale = crate::dtype::from_f64(1.050_700_987_355_480_4);
                 if v > 0.0 {
                     scale
                 } else {

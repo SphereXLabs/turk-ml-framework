@@ -25,21 +25,25 @@ use crate::layer::{BatchNormalization, Dense, Dropout, Layer};
 ///
 /// `Layer` trait'ini implemente eden her tür bu trait'i otomatik olarak kazanır
 /// (blanket implementation).
+use crate::dtype::Float;
 pub trait Katman: Layer {
     /// İleri besleme — `Layer::forward`'ın Türkçe adı.
-    fn ileri_besleme(&mut self, girdi: &ndarray::ArrayView2<f64>) -> Result<ndarray::Array2<f64>> {
+    fn ileri_besleme(
+        &mut self,
+        girdi: &ndarray::ArrayView2<Float>,
+    ) -> Result<ndarray::Array2<Float>> {
         self.forward(girdi)
     }
 
     /// Geri besleme — `Layer::backward`'ın Türkçe adı.
     fn geri_besleme(
         &mut self,
-        girdi: &ndarray::ArrayView2<f64>,
-        gradyan: &ndarray::ArrayView2<f64>,
+        girdi: &ndarray::ArrayView2<Float>,
+        gradyan: &ndarray::ArrayView2<Float>,
     ) -> Result<(
-        ndarray::Array2<f64>,
-        ndarray::Array2<f64>,
-        ndarray::Array2<f64>,
+        ndarray::Array2<Float>,
+        ndarray::Array2<Float>,
+        ndarray::Array2<Float>,
     )> {
         self.backward(girdi, gradyan)
     }
@@ -67,9 +71,9 @@ pub trait Katman: Layer {
     /// Ağırlık güncelleme — `update`'in Türkçe adı.
     fn parametreleri_guncelle(
         &mut self,
-        grad_agirlik: &ndarray::ArrayView2<f64>,
-        grad_bias: &ndarray::ArrayView2<f64>,
-        lr: f64,
+        grad_agirlik: &ndarray::ArrayView2<Float>,
+        grad_bias: &ndarray::ArrayView2<Float>,
+        lr: Float,
     ) -> Result<()> {
         self.update(grad_agirlik, grad_bias, lr)
     }
@@ -84,18 +88,18 @@ impl<T: Layer> Katman for T {}
 /// Yeni katmanlar `ek_veriler` HashMap'ine kendi alanlarını yazabilir.
 #[derive(Debug, Clone)]
 pub struct KatmanYukleVerisi {
-    pub agirliklar: Vec<f64>,
-    pub biaslar: Vec<f64>,
+    pub agirliklar: Vec<Float>,
+    pub biaslar: Vec<Float>,
     pub aktivasyon: Activation,
     pub girdi_boyutu: usize,
     pub cikti_boyutu: usize,
-    pub dropout_orani: Option<f64>,
+    pub dropout_orani: Option<Float>,
     /// Katmana özgü ek sayısal veriler (ör. "num_features", "bn_epsilon")
-    pub ek_veriler: HashMap<String, f64>,
+    pub ek_veriler: HashMap<String, Float>,
 }
 
 impl KatmanYukleVerisi {
-    pub fn ek<T: Into<String>>(&self, anahtar: T) -> f64 {
+    pub fn ek<T: Into<String>>(&self, anahtar: T) -> Float {
         self.ek_veriler.get(&anahtar.into()).copied().unwrap_or(0.0)
     }
 }
@@ -281,7 +285,7 @@ fn yukle_dense(veri: &KatmanYukleVerisi) -> Result<Box<dyn Layer>> {
 fn uret_dropout(params: &str) -> Result<Box<dyn Layer>> {
     let oran = params
         .trim()
-        .parse::<f64>()
+        .parse::<Float>()
         .map_err(|_| TurkError::SyntaxError(format!("Dropout oranı sayı olmalıdır: '{params}'")))?;
     if !(0.0..1.0).contains(&oran) {
         return Err(TurkError::ValueError(
@@ -309,8 +313,8 @@ fn uret_batch_norm(params: &str) -> Result<Box<dyn Layer>> {
         ))
     })?;
     let bn = if parts.len() >= 3 {
-        let eps = parts[1].parse::<f64>().unwrap_or(1e-5);
-        let mom = parts[2].parse::<f64>().unwrap_or(0.1);
+        let eps = parts[1].parse::<Float>().unwrap_or(1e-5);
+        let mom = parts[2].parse::<Float>().unwrap_or(0.1);
         BatchNormalization::with_params(nf, eps, mom)
     } else {
         BatchNormalization::new(nf)
@@ -549,28 +553,28 @@ mod tests {
         }
 
         impl Layer for OzelKatman {
-            fn forward(&mut self, input: &ArrayView2<f64>) -> TResult<Array2<f64>> {
+            fn forward(&mut self, input: &ArrayView2<Float>) -> TResult<Array2<Float>> {
                 Ok(input.to_owned())
             }
             fn backward(
                 &self,
-                _i: &ArrayView2<f64>,
-                g: &ArrayView2<f64>,
-            ) -> TResult<(Array2<f64>, Array2<f64>, Array2<f64>)> {
+                _i: &ArrayView2<Float>,
+                g: &ArrayView2<Float>,
+            ) -> TResult<(Array2<Float>, Array2<Float>, Array2<Float>)> {
                 Ok((g.to_owned(), Array2::zeros((0, 0)), Array2::zeros((0, 0))))
             }
             fn update(
                 &mut self,
-                _gw: &ArrayView2<f64>,
-                _gb: &ArrayView2<f64>,
-                _lr: f64,
+                _gw: &ArrayView2<Float>,
+                _gb: &ArrayView2<Float>,
+                _lr: Float,
             ) -> TResult<()> {
                 Ok(())
             }
-            fn get_weights(&self) -> TResult<Array2<f64>> {
+            fn get_weights(&self) -> TResult<Array2<Float>> {
                 Ok(Array2::zeros((0, 0)))
             }
-            fn get_biases(&self) -> TResult<Array2<f64>> {
+            fn get_biases(&self) -> TResult<Array2<Float>> {
                 Ok(Array2::zeros((0, 0)))
             }
             fn activation_type(&self) -> crate::aktivasyon::Activation {
@@ -596,22 +600,22 @@ mod tests {
                 Box::new(self.clone())
             }
             fn reset(&mut self) {}
-            fn weights_as_vec(&self) -> Vec<f64> {
+            fn weights_as_vec(&self) -> Vec<Float> {
                 vec![]
             }
-            fn biases_as_vec(&self) -> Vec<f64> {
+            fn biases_as_vec(&self) -> Vec<Float> {
                 vec![]
             }
-            fn dropout_rate(&self) -> Option<f64> {
+            fn dropout_rate(&self) -> Option<Float> {
                 None
             }
             fn use_batch_norm(&self) -> Option<bool> {
                 None
             }
-            fn set_weights(&mut self, _w: &ArrayView2<f64>) -> TResult<()> {
+            fn set_weights(&mut self, _w: &ArrayView2<Float>) -> TResult<()> {
                 Ok(())
             }
-            fn set_biases(&mut self, _b: &ArrayView2<f64>) -> TResult<()> {
+            fn set_biases(&mut self, _b: &ArrayView2<Float>) -> TResult<()> {
                 Ok(())
             }
         }
