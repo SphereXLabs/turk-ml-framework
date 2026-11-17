@@ -5,7 +5,6 @@
 
 use crate::dil::{EgitimIlerleme, TurkDil};
 use crate::metrics::{Accuracy, Metric};
-use ndarray::Array2;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -106,7 +105,7 @@ impl TurkWasmRunner {
             logs.push(ilerleme_log(&olay));
         }
 
-        let accuracy = self.xor_accuracy().unwrap_or(0.0);
+        let accuracy = self.dataset_accuracy().unwrap_or(0.0);
         for m in &mut metrics {
             m.accuracy = accuracy;
         }
@@ -136,13 +135,13 @@ impl Default for TurkWasmRunner {
 }
 
 impl TurkWasmRunner {
-    fn xor_accuracy(&mut self) -> Option<f64> {
+    /// Aktif sentetik veri (xor / kume) üzerinde ikili doğruluk.
+    fn dataset_accuracy(&mut self) -> Option<f64> {
+        let (x, y) = self.dil.aktif_degerlendirme_verisi()?;
         let model = self.dil.model.as_mut()?;
-        let x =
-            Array2::from_shape_vec((4, 2), vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0]).ok()?;
-        let y = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 1.0, 0.0]).ok()?;
         let pred = model.predict(&x.view()).ok()?;
-        Some(Accuracy::new().compute(&y.view(), &pred.view()))
+        let acc = Accuracy::new().compute(&y.view(), &pred.view());
+        Some(crate::dtype::to_f64(acc))
     }
 }
 

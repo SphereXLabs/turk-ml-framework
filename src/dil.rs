@@ -146,6 +146,25 @@ impl TurkDil {
         self.egitim_tx = Some(tx);
     }
 
+    /// Aktif veri setinin eğitim (+ varsa doğrulama) matrislerini döndürür.
+    /// WASM playground doğruluk hesabı için kullanılır.
+    pub fn aktif_degerlendirme_verisi(
+        &self,
+    ) -> Option<(ndarray::Array2<Float>, ndarray::Array2<Float>)> {
+        use ndarray::{concatenate, Axis};
+
+        let isim = self.aktif_veri.as_ref()?;
+        let veri = self.veri_setleri.get(isim)?;
+        let (x_tr, y_tr) = veri.egitim_matrisleri()?;
+        if let Some((x_val, y_val)) = veri.val_veri() {
+            let x = concatenate(Axis(0), &[x_tr.view(), x_val.view()]).ok()?;
+            let y = concatenate(Axis(0), &[y_tr.view(), y_val.view()]).ok()?;
+            Some((x, y))
+        } else {
+            Some((x_tr, y_tr))
+        }
+    }
+
     fn egitim_durum_gonder(&self, mesaj: impl Into<String>) {
         if let Some(tx) = &self.egitim_tx {
             let _ = tx.send(EgitimIlerleme::Durum {
@@ -834,18 +853,23 @@ impl TurkDil {
             )
         })?;
 
-        // WASM / tarayıcı: disk yok — xor veya sentetik anahtarlar bellekten yüklenir
+        // WASM / tarayıcı: disk yok — sentetik anahtarlar bellekten yüklenir
         #[cfg(target_arch = "wasm32")]
         let veri = {
             let _ = &hedef_kolon;
             let anahtar = dosya_yolu.to_lowercase();
-            if anahtar.contains("xor") || anahtar == "sentetik" || anahtar.ends_with(".csv") {
+            let bolme_f = bolme.map(dtype::from_f64);
+            if anahtar.contains("kume") || anahtar.contains("cluster") {
+                info!("WASM sentetik veri yükleniyor: '{dosya_yolu}' → 2-küme (240 örnek)");
+                CsvVeriAkisi::sentetik_kume(bolme_f)?
+            } else if anahtar.contains("xor") || anahtar == "sentetik" || anahtar.ends_with(".csv")
+            {
                 info!("WASM sentetik veri yükleniyor: '{dosya_yolu}' → XOR");
-                CsvVeriAkisi::sentetik_xor(bolme.map(dtype::from_f64))?
+                CsvVeriAkisi::sentetik_xor(bolme_f)?
             } else {
                 return Err(TurkError::DataError(format!(
                     "WASM'da yalnızca sentetik veri desteklenir. Örnek: veri_yukle(\"xor\") \
-                     (istenen: '{dosya_yolu}')"
+                     veya veri_yukle(\"kume\") (istenen: '{dosya_yolu}')"
                 )));
             }
         };

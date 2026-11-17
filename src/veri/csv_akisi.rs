@@ -191,6 +191,42 @@ impl CsvVeriAkisi {
         Self::bellekten("sentetik:xor", x, y, bolme_orani)
     }
 
+    /// İki ayrılabilir Gaussian küme — 240 örnek, 2 özellik, ikili sınıf.
+    ///
+    /// Deterministik (seed=42). `bolme=0.25` ile ~60 örnek doğrulama kümesi oluşur.
+    pub fn sentetik_kume(bolme_orani: Option<Float>) -> Result<Self> {
+        use rand::SeedableRng;
+        use rand_distr::{Distribution, Normal};
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let n_per = 120usize;
+        let sigma = 0.45;
+        let c0 = Normal::new(-1.5, sigma)
+            .map_err(|e| TurkError::DataError(format!("Normal dağılım: {e}")))?;
+        let c1 = Normal::new(1.5, sigma)
+            .map_err(|e| TurkError::DataError(format!("Normal dağılım: {e}")))?;
+
+        let mut x = Array2::<Float>::zeros((n_per * 2, 2));
+        let mut y = Array2::<Float>::zeros((n_per * 2, 1));
+
+        for i in 0..n_per {
+            x[[i, 0]] = crate::dtype::from_f64(c0.sample(&mut rng));
+            x[[i, 1]] = crate::dtype::from_f64(c0.sample(&mut rng));
+            y[[i, 0]] = 0.0;
+            let j = i + n_per;
+            x[[j, 0]] = crate::dtype::from_f64(c1.sample(&mut rng));
+            x[[j, 1]] = crate::dtype::from_f64(c1.sample(&mut rng));
+            y[[j, 0]] = 1.0;
+        }
+
+        Self::bellekten("sentetik:kume", x, y, bolme_orani)
+    }
+
+    /// Bellek içi eğitim matrisleri (WASM sentetik veri).
+    pub fn egitim_matrisleri(&self) -> Option<(Array2<Float>, Array2<Float>)> {
+        self.egitim_onbellek.clone()
+    }
+
     pub fn kaynak(&self) -> &str {
         &self.sema.kaynak
     }

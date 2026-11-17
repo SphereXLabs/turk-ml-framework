@@ -327,10 +327,10 @@ derle(adam, loss=mse, ogrenme_orani=0.05)
 model_bilgisi()
 egit(120, 4)
 `,
-      mlp: `# Derin MLP Sınıflandırıcı (XOR)
-# Daha derin mimari + erken durdurma
+      mlp: `# Derin MLP Sınıflandırıcı (2-küme)
+# 240 örnek, bolme=0.25 → ~60 örnek anlamlı doğrulama
 
-veri_yukle("xor", bolme=0.25)
+veri_yukle("kume", bolme=0.25)
 model_olustur()
 katman_ekle(yogun(2, 16, "relu"))
 katman_ekle(batch_norm(16))
@@ -343,15 +343,15 @@ model_bilgisi()
 egit(200, 4, sabir=25, min_delta=0.0001)
 `,
       ozel: `# Özel Mimari — düzenleyip çalıştırın
-# İpucu: WASM'da veri_yukle("xor") kullanın
+# İpucu: WASM'da veri_yukle("xor") veya veri_yukle("kume")
 
 veri_yukle("xor")
 model_olustur()
 katman_ekle(yogun(2, 4, "tanh"))
 katman_ekle(yogun(4, 1, "sigmoid"))
-derle(sgd, loss=mse, ogrenme_orani=0.1)
+derle(adam, loss=mse, ogrenme_orani=0.05)
 model_bilgisi()
-egit(80, 4)
+egit(150, 4)
 `,
     };
 

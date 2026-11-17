@@ -55,6 +55,10 @@ pub trait Layer: fmt::Debug + Send + Sync {
     /// Katmanın eğitilebilir olup olmadığını döndürür
     fn is_trainable(&self) -> bool;
 
+    /// Dropout / BatchNorm için eğitim vs çıkarım modu.
+    /// Varsayılan: no-op (Dense vb.).
+    fn set_training(&mut self, _training: bool) {}
+
     /// Katmanı klonlar
     fn clone_box(&self) -> Box<dyn Layer>;
 
@@ -533,6 +537,10 @@ impl Layer for Dropout {
         self.trainable
     }
 
+    fn set_training(&mut self, training: bool) {
+        self.training = training;
+    }
+
     fn clone_box(&self) -> Box<dyn Layer> {
         Box::new(self.clone())
     }
@@ -776,6 +784,10 @@ impl Layer for BatchNormalization {
     }
     fn is_trainable(&self) -> bool {
         self.trainable
+    }
+
+    fn set_training(&mut self, training: bool) {
+        self.training = training;
     }
 
     fn clone_box(&self) -> Box<dyn Layer> {

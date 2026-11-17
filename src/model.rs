@@ -1061,11 +1061,9 @@ impl Sequential {
         // Ortalama eğitim kaybını hesapla
         let avg_train_loss = total_loss / batch_count as Float;
 
-        // Doğrulama kaybını hesapla (eğer varsa)
+        // Doğrulama kaybını hesapla (eğer varsa) — çıkarım modu
         let val_loss = if let Some((x_val, y_val)) = validation_data {
-            let y_val_pred = self.forward(x_val)?;
-            let loss_fn = self.loss_fn()?;
-            Some(loss_fn.loss(y_val, &y_val_pred.view())?)
+            Some(self.validation_loss(x_val, y_val)?)
         } else {
             None
         };
@@ -1288,9 +1286,7 @@ impl Sequential {
         let avg_train_loss = total_loss / batch_count as Float;
 
         let val_loss = if let Some((x_val, y_val)) = validation_data {
-            let y_val_pred = self.forward(&x_val.view())?;
-            let loss_fn = self.loss_fn()?;
-            Some(loss_fn.loss(&y_val.view(), &y_val_pred.view())?)
+            Some(self.validation_loss(&x_val.view(), &y_val.view())?)
         } else {
             None
         };
@@ -1378,6 +1374,29 @@ impl Sequential {
         Ok(history)
     }
 
+    /// Dropout / BatchNorm eğitim bayrağını tüm katmanlarda ayarlar.
+    pub fn set_training_mode(&mut self, training: bool) {
+        for layer in &mut self.layers {
+            layer.set_training(training);
+        }
+    }
+
+    /// Doğrulama kaybı — geçici olarak çıkarım moduna geçer.
+    fn validation_loss<'a>(
+        &mut self,
+        x_val: &'a ArrayView2<'a, Float>,
+        y_val: &'a ArrayView2<'a, Float>,
+    ) -> Result<Float> {
+        self.set_training_mode(false);
+        let sonuc = (|| {
+            let y_val_pred = self.forward(x_val)?;
+            let loss_fn = self.loss_fn()?;
+            loss_fn.loss(y_val, &y_val_pred.view())
+        })();
+        self.set_training_mode(true);
+        sonuc
+    }
+
     /// Tahmin yapar
     ///
     /// # Parametreler
@@ -1386,7 +1405,10 @@ impl Sequential {
     /// # Dönüş
     /// Model çıktısı
     pub fn predict<'a>(&mut self, x: &'a ArrayView2<'a, Float>) -> Result<Array2<Float>> {
-        self.forward(x)
+        self.set_training_mode(false);
+        let out = self.forward(x);
+        self.set_training_mode(true);
+        out
     }
 
     /// Modeli değerlendirir
@@ -1402,9 +1424,13 @@ impl Sequential {
         x_val: &'a ArrayView2<'a, Float>,
         y_val: &'a ArrayView2<'a, Float>,
     ) -> Result<Float> {
-        let y_pred = self.forward(x_val)?;
-        let mse = tensor_ops::mse(&y_val.view(), &y_pred.view())?;
-        Ok(mse)
+        self.set_training_mode(false);
+        let sonuc = (|| {
+            let y_pred = self.forward(x_val)?;
+            tensor_ops::mse(&y_val.view(), &y_pred.view())
+        })();
+        self.set_training_mode(true);
+        sonuc
     }
 
     /// AST içerisinden bir katmanı işler ve Sequential modeline ekler
