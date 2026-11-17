@@ -1,14 +1,21 @@
 # TÜRK - Türkçe Yapay Zeka Dili
 
 [![CI](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/ci.yml/badge.svg)](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/ci.yml)
-[![Documentation](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/docs.yml/badge.svg)](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/docs.yml)
+[![Docs / Pages](https://github.com/SphereXLabs/turk-ml-framework/actions/workflows/docs.yml/badge.svg)](https://spherexlabs.github.io/turk-ml-framework/turk/)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-**[🌐 Tarayıcıda Canlı Dene (WASM Playground)](https://spherexlabs.github.io/turk-ml-framework/playground/)**
+[![crates.io](https://img.shields.io/crates/v/turk.svg)](https://crates.io/crates/turk)
 
 TÜRK, Türkçe kullanarak yapay sinir ağları oluşturmanızı, eğitmenizi ve değerlendirmenizi sağlayan açık kaynaklı bir yapay zeka kütüphanesi ve DSL (Domain Specific Language) projesidir.
 
-> **v3.0.0 — Göktürk Kokpit:** Yerel semantik hafıza, otonom araç zinciri ve sistem paneli (`turk_sistem`) dahildir.
+> **v3.0.0 — Göktürk Kokpit:** Yerel semantik hafıza, otonom araç zinciri, sistem paneli (`turk_sistem`), WASM tarayıcı playground, `f32` / BLAS hızlandırma ve modernize CI/CD dahildir.
+
+> [!IMPORTANT]
+> ### Canlı Tarayıcı Demosu (WASM Playground)
+>
+> Kurulum olmadan `.turk` DSL’ini tarayıcıda çalıştırın — XOR / 2-küme preset’leri, epoch grafikleri ve model özeti:
+>
+> **[▶ WASM Playground](https://spherexlabs.github.io/turk-ml-framework/playground/)** &nbsp;·&nbsp; **[API Docs (`turk`)](https://spherexlabs.github.io/turk-ml-framework/turk/)**
 
 ## 🎯 Vizyon ve Felsefe
 
@@ -25,11 +32,13 @@ Bu vizyon doğrultusunda, TÜRK projesi yalnızca bir dil veya kütüphane deği
 ## 🌟 Özellikler
 
 - **Türkçe Programlama Dili**: Yapay sinir ağlarını Türkçe komutlarla tanımlayın ve eğitin
+- **WASM Playground**: Tarayıcıda canlı DSL demosu (kurulum gerekmez)
 - **Kolay Kullanım**: Basit sözdizimi ile karmaşık yapay sinir ağları oluşturun
 - **Çeşitli Ağ Mimarileri**: Yoğun katmanlar, dropout, aktivasyon fonksiyonları ve daha fazlası
 - **Farklı Optimizasyon Algoritmaları**: SGD, Adam, AdamW, RMSProp
 - **Kapsamlı Kayıp Fonksiyonları**: MSE, MAE, Cross Entropy, Binary Cross Entropy
-- **Metrikler**: Doğruluk, kesinlik, duyarlılık, F1-skoru
+- **Metrikler**: Doğruluk, kesinlik, duyarlılık, F1-skoru (ikili sınıflandırmada 0.5 eşiği)
+- **Hassasiyet & Hız**: Varsayılan `f64`; isteğe bağlı `f32` ve OpenBLAS
 - **Serileştirme**: Modelleri JSON formatında kaydedin ve yükleyin
 - **Ön İşleme Araçları**: Veri normalleştirme, standartlaştırma ve daha fazlası
 - **MNIST ve Diğer Veri Setleri**: Örnekler ve başlangıç kodları
@@ -55,6 +64,34 @@ cargo build --release
 ```
 
 Detaylı kurulum talimatları, farklı işletim sistemleri için özel adımlar ve sorun giderme için [INSTALL.md](INSTALL.md) dosyasına bakınız.
+
+### Cargo özellikler (`features`)
+
+| Feature | Açıklama |
+|---------|----------|
+| *(varsayılan)* | `f64` hassasiyet + CSV veri akışı |
+| `f32` | Tek hassasiyet (`Float = f32`) — daha az bellek, daha hızlı SIMD |
+| `blas` | Yerel OpenBLAS hızlandırma (`ndarray/blas`). **WASM ile birlikte açmayın.** |
+| `wasm` | Tarayıcı playground köprüsü (`wasm-bindgen`) |
+| `turk_sistem` | Göktürk Kokpit GUI + sistem otomasyonu (Windows odaklı) |
+| `gui` / `cli` / `full` | Arayüz ve yardımcı araç setleri |
+
+```bash
+# f32 hassasiyet
+cargo build --release --features f32
+
+# OpenBLAS hızlandırma (sistemde OpenBLAS gerekir)
+cargo build --release --features blas
+
+# f32 + BLAS birlikte
+cargo build --release --features "f32,blas"
+
+# WASM playground paketi (disk I/O yok; sentetik xor / kume)
+rustup target add wasm32-unknown-unknown
+cargo check --target wasm32-unknown-unknown --no-default-features --features wasm
+# veya wasm-pack:
+# wasm-pack build --target web --out-dir playground/pkg -- --no-default-features --features wasm
+```
 
 ### İlk TÜRK Programınız
 
