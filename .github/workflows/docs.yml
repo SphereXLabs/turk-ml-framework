@@ -36,15 +36,17 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: WASM Playground Derle
-        run: |
-          wasm-pack build --target web --out-dir playground/pkg \
-            --no-default-features --features wasm
-
-      - name: Playground'ı Doc Çıktısına Kopyala
+      - name: Playground HTML Kopyala
         run: |
           mkdir -p target/doc/playground
-          cp -a playground/. target/doc/playground/
+          cp playground/index.html target/doc/playground/index.html
+
+      - name: WASM Playground Derle
+        run: |
+          wasm-pack build --target web --out-dir target/doc/playground/pkg \
+            --no-default-features --features wasm
+          rm -f target/doc/playground/pkg/.gitignore
+          touch target/doc/.nojekyll
 
       - name: GitHub Pages'e Yükle
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'

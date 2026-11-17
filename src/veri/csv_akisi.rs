@@ -135,8 +135,7 @@ impl CsvVeriAkisi {
                 Vec::new()
             } else {
                 egitim_idx.shuffle(&mut thread_rng());
-                let val = egitim_idx.split_off(n - val_n);
-                val
+                egitim_idx.split_off(n - val_n)
             }
         } else {
             Vec::new()

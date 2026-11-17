@@ -77,17 +77,15 @@ impl TurkWasmRunner {
             }
 
             while let Ok(olay) = rx.try_recv() {
-                match &olay {
-                    EgitimIlerleme::Epoch {
-                        epoch, train_loss, ..
-                    } => {
-                        metrics.push(EpochMetrik {
-                            epoch: *epoch,
-                            loss: *train_loss,
-                            accuracy: 0.0, // eğitim sonrası doldurulur
-                        });
-                    }
-                    _ => {}
+                if let EgitimIlerleme::Epoch {
+                    epoch, train_loss, ..
+                } = &olay
+                {
+                    metrics.push(EpochMetrik {
+                        epoch: *epoch,
+                        loss: *train_loss,
+                        accuracy: 0.0, // eğitim sonrası doldurulur
+                    });
                 }
                 logs.push(ilerleme_log(&olay));
             }

@@ -5,7 +5,7 @@ Rust `turk.exe` binary'sini Python'dan çağırır.
 ## Kurulum
 
 ```powershell
-cd C:\Users\snnkr.SINAN\Desktop\AI\TURK
+cd <repo-root>
 .\cargo.ps1 build          # veya tam yol ile cargo build
 
 cd python

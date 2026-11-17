@@ -32,10 +32,18 @@ debug/
 /temp/
 *.log
 
-# Ortam
+# Ortam / sırlar
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+**/secrets/**
+credentials.json
+*.local
 
 # Sistem
 .DS_Store
@@ -59,6 +67,7 @@ datatrain-*
 egitim_grafigi.png
 egitim_gecmisi.json
 mnist_model.json
+*_model*.json
 
 # Yanlışlıkla oluşmuş kopya klasör
 /TÜRK, src/
