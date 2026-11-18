@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 TÜRK — Siberpunk Eğitim Grafiği
-Kullanım: python grafik_ciz.py [--dosya egitim_gecmisi.json] [--cikti egitim_grafigi.png]
+Kullanım: python scripts/grafik_ciz.py [--dosya egitim_gecmisi.json] [--cikti egitim_grafigi.png]
 """
 
 import json

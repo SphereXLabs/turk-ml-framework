@@ -24,8 +24,9 @@ debug/
 /doc/
 /docs/_build/
 
-# WASM playground derleme çıktısı (CI üretir)
+# WASM playground / kokpit derleme çıktısı (CI üretir)
 /playground/pkg/
+/kokpit/pkg/
 
 # Geçici
 /tmp/

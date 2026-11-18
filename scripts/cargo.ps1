@@ -1,11 +1,10 @@
 # cargo kisayolu - Rust PATH'te degilse kullanin.
-# Kullanim: .\cargo.ps1 build
-#           .\cargo.ps1 build
-#           .\cargo.ps1 build --no-default-features --features csv   # tek cekirdek
-#           .\cargo.ps1 test
-#           .\cargo.ps1 run -- check proje.turk
+# Kullanim: .\scripts\cargo.ps1 build
+#           .\scripts\cargo.ps1 test
+#           .\scripts\cargo.ps1 run -- check examples/proje.turk
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 $CargoExe = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 
 if (-not (Test-Path $CargoExe)) {

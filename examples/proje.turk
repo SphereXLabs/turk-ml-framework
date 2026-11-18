@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════
 #  TÜRK — XOR Sınıflandırıcı (Gerçek CSV Verisiyle)
-#  Çalıştır: cargo run -- run proje.turk
+#  Çalıştır: cargo run -- run examples/proje.turk
 # ══════════════════════════════════════════════════════
 
 # 1. CSV verisini yükle (xor_data.csv — x1,x2,label)

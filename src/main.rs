@@ -52,8 +52,8 @@ const KULLANIM: &str = r#"
     turk -y  | --yardim       — bu yardım ekranını göster
 
   Örnekler:
-    cargo run -- run proje.turk
-    cargo run -- check proje.turk
+    cargo run -- run examples/proje.turk
+    cargo run -- check examples/proje.turk
     cargo run -- repl
     cargo run -- run egitimler/mnist.turk
 
@@ -95,7 +95,9 @@ fn run() -> Result<()> {
         Some("run") => {
             let dosya = args.get(2).ok_or_else(|| {
                 eprintln!("{KULLANIM}");
-                TurkError::SyntaxError("Dosya yolu belirtilmedi. Örnek: turk run proje.turk".into())
+                TurkError::SyntaxError(
+                    "Dosya yolu belirtilmedi. Örnek: turk run examples/proje.turk".into(),
+                )
             })?;
             dosyayi_calistir(dosya)
         }
@@ -105,7 +107,7 @@ fn run() -> Result<()> {
             let dosya = args.get(2).ok_or_else(|| {
                 eprintln!("{KULLANIM}");
                 TurkError::SyntaxError(
-                    "Dosya yolu belirtilmedi. Örnek: turk check proje.turk".into(),
+                    "Dosya yolu belirtilmedi. Örnek: turk check examples/proje.turk".into(),
                 )
             })?;
             dosyayi_kontrol_et(dosya)

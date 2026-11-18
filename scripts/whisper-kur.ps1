@@ -1,5 +1,5 @@
 # TÜRK Whisper kurulumu — whisper-cli + ggml-small model
-# Kullanim: .\whisper-kur.ps1
+# Kullanim: .\scripts\whisper-kur.ps1
 
 $ErrorActionPreference = "Stop"
 
@@ -62,4 +62,4 @@ if (Test-Path $ModelHedef) {
 
 Write-Host ""
 Write-Host "Kurulum tamam. TÜRK sistemini yeniden baslatin:" -ForegroundColor Cyan
-Write-Host "  .\turk-sistem.ps1"
+Write-Host "  .\scripts\turk-sistem.ps1"

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **WASM browser playground** — tarayıcıda `.turk` DSL çalıştırma (`--features wasm`), GitHub Pages demosu
+- **Göktürk Kokpit (Jarvis)** — `/kokpit/` birleşik web portalı: Türkçe NL/ses komutları + canlı eğitim/çıkarım
 - **Interactive live inference** — playground’da `tahmin_et` / `predict`, dinamik girdi alanları ve model JSON indirme
 - **`f32` precision feature** — varsayılan `f64` yerine tek hassasiyet (`--features f32`)
 - **Optional BLAS acceleration** — OpenBLAS üzerinden `ndarray` hızlandırma (`--features blas`)
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - SemVer hizası: paket sürümü `0.3.0` (önceki yanlış etiket `v3.0.0` kaldırıldı)
+- Yardımcı scriptler `scripts/` altına taşındı; kök `.turk` örnekleri `examples/` içinde
 - İkili doğruluk metriği: tek çıkışlı modellerde 0.5 eşiği
 - Doğrulama / `evaluate` sırasında Dropout ve BatchNorm **inference mode** (`set_training(false)`)
 - CI/CD modernizasyonu (fmt, clippy `-D warnings`, çoklu OS test, Docs/Pages WASM yayınlama)

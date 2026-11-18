@@ -6,7 +6,7 @@ Rust `turk.exe` binary'sini Python'dan çağırır.
 
 ```powershell
 cd <repo-root>
-.\cargo.ps1 build          # veya tam yol ile cargo build
+.\scripts\cargo.ps1 build  # veya tam yol ile cargo build
 
 cd python
 pip install -e .
@@ -35,21 +35,21 @@ pip uyarısındaki Scripts klasörü PATH'te olmayabilir. Şunlardan birini kull
 # Yöntem 1 — python -m (önerilen)
 cd python
 $env:TURK_BIN = "..\target\debug\turk.exe"
-python -m cli check ..\proje.turk
-python -m cli run ..\proje.turk
+python -m cli check ..\examples\proje.turk
+python -m cli run ..\examples\proje.turk
 python -m cli export ..\xor_model.json ..\model.onnx.json
 
 # Yöntem 2 — tam yol
-& "$env:LOCALAPPDATA\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\Scripts\turk-py.exe" check ..\proje.turk
+& "$env:LOCALAPPDATA\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\Scripts\turk-py.exe" check ..\examples\proje.turk
 
 # Yöntem 3 — Python API
-python -c "from turk import TurkRunner; r=TurkRunner(); print(r.check('../proje.turk'))"
+python -c "from turk import TurkRunner; r=TurkRunner(); print(r.check('../examples/proje.turk'))"
 ```
 
 ## Proje kökünden (PATH gerekmez)
 
 ```powershell
-.\turk.ps1 check proje.turk
-.\turk.ps1 run proje.turk
-.\turk.ps1 export xor_model.json model.onnx.json
+.\scripts\turk.ps1 check examples/proje.turk
+.\scripts\turk.ps1 run examples/proje.turk
+.\scripts\turk.ps1 export xor_model.json model.onnx.json
 ```

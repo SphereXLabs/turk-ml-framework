@@ -30,7 +30,7 @@ impl Cihaz {
                     Err(TurkError::RuntimeError(
                         "Paralel mod bu derlemede yok. \
                          Derleyin: cargo build  \
-                         veya .\\cargo.ps1 build  \
+                         veya .\\scripts\\cargo.ps1 build  \
                          (tek cekirdek icin: --no-default-features --features csv)"
                             .into(),
                     ))

@@ -1,13 +1,13 @@
 # TURK CLI kisayolu - PATH'te cargo olmasa da calisir.
-# Kullanim: .\turk.ps1 check proje.turk
-#           .\turk.ps1 run proje.turk
-#           .\turk.ps1 cihaz
-#           .\turk.ps1 zoo list
-#           .\turk.ps1 zoo calistir xor
-# Paralel mod varsayilan (--features parallel otomatik).
-# Tek cekirdek test: .\cargo.ps1 build --no-default-features --features csv
+# Kullanim: .\scripts\turk.ps1 check examples/proje.turk
+#           .\scripts\turk.ps1 run examples/proje.turk
+#           .\scripts\turk.ps1 cihaz
+#           .\scripts\turk.ps1 zoo list
+#           .\scripts\turk.ps1 zoo calistir xor
+# Tek cekirdek test: .\scripts\cargo.ps1 build --no-default-features --features csv
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 $TurkExe = Join-Path $Root "target\debug\turk.exe"
 $CargoExe = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 
@@ -64,5 +64,5 @@ if (Test-Path $TurkExe) {
     exit $LASTEXITCODE
 }
 
-Write-Error "turk.exe bulunamadi. Once: .\cargo.ps1 build"
+Write-Error "turk.exe bulunamadi. Once: .\scripts\cargo.ps1 build"
 exit 1

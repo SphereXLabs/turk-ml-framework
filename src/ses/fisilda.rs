@@ -95,7 +95,7 @@ fn cli_hazir_mi() -> Result<PathBuf, String> {
     if !cli.is_file() {
         return Err(format!(
             "Whisper CLI bulunamadı: {}\n\
-             Kurulum: .\\whisper-kur.ps1 çalıştırın\n\
+             Kurulum: .\\scripts\\whisper-kur.ps1 çalıştırın\n\
              veya whisper-cli.exe dosyasını ~/.turk/sistem/bin/ dizinine kopyalayın.",
             cli.display()
         ));
@@ -159,7 +159,7 @@ pub fn konusmayi_metne_cevir(ornekler: &[f32], ornekleme_hz: u32) -> Result<Stri
         let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let detay = if !stderr.is_empty() { stderr } else { stdout };
         return Err(if detay.is_empty() {
-            "Whisper çıkış kodu sıfır değil — DLL eksik olabilir, .\\whisper-kur.ps1 tekrar çalıştırın.".into()
+            "Whisper çıkış kodu sıfır değil — DLL eksik olabilir, .\\scripts\\whisper-kur.ps1 tekrar çalıştırın.".into()
         } else {
             format!("Whisper hatası: {detay}")
         });

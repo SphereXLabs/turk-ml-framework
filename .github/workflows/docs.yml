@@ -36,16 +36,18 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: Playground HTML Kopyala
+      - name: Playground & Kokpit HTML Kopyala
         run: |
-          mkdir -p target/doc/playground
+          mkdir -p target/doc/playground target/doc/kokpit
           cp playground/index.html target/doc/playground/index.html
+          cp kokpit/index.html target/doc/kokpit/index.html
 
-      - name: WASM Playground Derle
+      - name: WASM Derle (Playground + Kokpit paylaşır)
         run: |
           wasm-pack build --target web --out-dir target/doc/playground/pkg \
             --no-default-features --features wasm
           rm -f target/doc/playground/pkg/.gitignore
+          # Kokpit ../playground/pkg üzerinden aynı WASM paketini kullanır
           touch target/doc/.nojekyll
 
       - name: GitHub Pages'e Yükle

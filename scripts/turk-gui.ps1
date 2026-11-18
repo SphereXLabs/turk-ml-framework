@@ -1,7 +1,8 @@
 # TURK GUI kisayolu
-# Kullanim: .\turk-gui.ps1
+# Kullanim: .\scripts\turk-gui.ps1
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 $CargoExe = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 $GuiExe = Join-Path $Root "target\debug\turk_gui.exe"
 

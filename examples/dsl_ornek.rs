@@ -7,7 +7,7 @@ use turk::error::Result;
 /// Çalıştırmak için:
 ///   cargo run --example dsl_ornek
 ///
-/// Kök dizinde main.turk olmak zorunda.
+/// `examples/main.turk` dosyasını okur (yoksa yerleşik mimari kullanılır).
 use turk::{
     aktivasyon::Activation,
     initializers::{GlorotUniform, Zeros},
@@ -21,18 +21,18 @@ fn main() -> Result<()> {
     Builder::new().filter(None, LevelFilter::Info).init();
 
     info!("======================================================");
-    info!(" TÜRK DSL Örneği — main.turk + XOR + BatchNorm + ES  ");
+    info!(" TÜRK DSL Örneği — examples/main.turk + XOR + BatchNorm + ES  ");
     info!("======================================================");
 
     // ── main.turk dosyasını oku ────────────────────────────────────────────
-    let turk_dosyasi = "main.turk";
+    let turk_dosyasi = "examples/main.turk";
     let _icerik = std::fs::read_to_string(turk_dosyasi).unwrap_or_else(|e| {
         warn!("{turk_dosyasi} okunamadı ({e}), yerleşik DSL kullanılıyor.");
         String::new()
     });
 
     if !_icerik.is_empty() {
-        info!("--- main.turk içeriği ---");
+        info!("--- examples/main.turk içeriği ---");
         for satir in _icerik.lines() {
             let s = satir.trim();
             if !s.is_empty() {

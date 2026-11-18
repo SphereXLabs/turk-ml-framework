@@ -1,8 +1,9 @@
-# TÜRK Çekirdeği GUI kisayolu
-# Kullanim: .\turk-sistem.ps1
+# TÜRK Çekirdeği GUI kisayolu (Göktürk Kokpit)
+# Kullanim: .\scripts\turk-sistem.ps1
 # Her calistirmada kaynak degistiysa otomatik yeniden derler (cargo run).
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 $CargoExe = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
 
 if (-not (Test-Path $CargoExe)) {

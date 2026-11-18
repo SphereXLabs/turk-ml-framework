@@ -431,7 +431,7 @@ impl Default for TurkSistemGui {
             loglar.push(format!("[{damga}] ▸ Mikrofon: [ 🎤 MIC ] ile etkinleştir."));
         } else {
             loglar.push(format!(
-                "[{damga}] ▸ Whisper: .\\whisper-kur.ps1 ile kurun."
+                "[{damga}] ▸ Whisper: .\\scripts\\whisper-kur.ps1 ile kurun."
             ));
         }
         loglar.push(format!(
@@ -758,7 +758,7 @@ impl TurkSistemGui {
                 return;
             }
             if !whisper_hazir_mi() {
-                self.log_ekle("Whisper kurulu degil — .\\whisper-kur.ps1 calistirin.");
+                self.log_ekle("Whisper kurulu degil — .\\scripts\\whisper-kur.ps1 calistirin.");
             }
             self.ses_dinliyor = true;
             self.log_ekle("🎙️ Dinleniyor — tekrar tıkla");
