@@ -464,6 +464,53 @@ impl AlperBeyin {
         serde_wasm_bindgen::to_value(&sonuc).map_err(|e| JsValue::from_str(&format!("JSON: {e}")))
     }
 
+    /// Eğitilmiş ALPER ağırlıklarını kompakt JSON olarak döndürür (localStorage önbellek).
+    #[wasm_bindgen]
+    pub fn model_json(&self) -> Result<String, JsValue> {
+        let pretty = self
+            .model
+            .to_json_string()
+            .map_err(|e| JsValue::from_str(&format!("ALPER model_json: {e}")))?;
+        // localStorage kotası için pretty → kompakt
+        let value: serde_json::Value = serde_json::from_str(&pretty)
+            .map_err(|e| JsValue::from_str(&format!("ALPER model_json parse: {e}")))?;
+        serde_json::to_string(&value)
+            .map_err(|e| JsValue::from_str(&format!("ALPER model_json compact: {e}")))
+    }
+
+    /// `model_json` çıktısından ALPER beynini geri yükler (eğitim atlanır).
+    #[wasm_bindgen]
+    pub fn yukle_json(model_json: &str) -> Result<AlperBeyin, JsValue> {
+        let mut model = Sequential::new();
+        model
+            .load_from_json_str(model_json)
+            .map_err(|e| JsValue::from_str(&format!("ALPER yukle_json: {e}")))?;
+
+        if model.layers.is_empty() {
+            return Err(JsValue::from_str("ALPER yukle_json: boş model"));
+        }
+        let input_dim = model.layers.first().map(|l| l.input_size()).unwrap_or(0);
+        let output_dim = model.layers.last().map(|l| l.output_size()).unwrap_or(0);
+        if input_dim == 0 || output_dim < 2 {
+            return Err(JsValue::from_str(
+                "ALPER yukle_json: geçersiz girdi/çıktı boyutu",
+            ));
+        }
+
+        // Niyet sınıflandırma için CE + Softmax eğitim hattını yeniden bağla
+        let lr = dtype::from_f64(0.035);
+        model.compile_with_loss(
+            Box::new(Adam::new(lr, 0.9, 0.999, dtype::from_f64(1e-8))),
+            Box::new(CrossEntropy::new(false)),
+        );
+
+        Ok(Self {
+            model,
+            input_dim,
+            output_dim,
+        })
+    }
+
     /// Tek BoW/TF-IDF vektörü → niyet indeksi + softmax güven.
     #[wasm_bindgen]
     pub fn niyet_tahmin(&mut self, x_json: &str) -> Result<String, JsValue> {

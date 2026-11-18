@@ -902,16 +902,9 @@ impl Sequential {
         Ok(())
     }
 
-    /// Modeli dosyadan yükler
-    ///
-    /// # Parametreler
-    /// - `path`: Yüklenecek dosya yolu
-    pub fn load(&mut self, path: &str) -> Result<()> {
-        let mut file = fs::File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        let model_data: ModelData = serde_json::from_str(&contents)?;
+    /// Model ağırlıklarını JSON metninden yükler (WASM / localStorage önbellek uyumlu).
+    pub fn load_from_json_str(&mut self, contents: &str) -> Result<()> {
+        let model_data: ModelData = serde_json::from_str(contents)?;
 
         // Eski modeli temizle
         self.layers.clear();
@@ -967,7 +960,18 @@ impl Sequential {
         )?;
 
         self.compile_boxed(optimizer);
+        Ok(())
+    }
 
+    /// Modeli dosyadan yükler
+    ///
+    /// # Parametreler
+    /// - `path`: Yüklenecek dosya yolu
+    pub fn load(&mut self, path: &str) -> Result<()> {
+        let mut file = fs::File::open(path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        self.load_from_json_str(&contents)?;
         info!("Model başarıyla yüklendi: {}", path);
         Ok(())
     }

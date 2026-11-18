@@ -1,5 +1,5 @@
 // ALPER v3 beyin verisi — otomatik üretim / bakım: _gen_alper_beyin.py
-export const ALPER_VERSION = "3.0";
+export const ALPER_VERSION = "3.1";
 export const INTENTS = [
   "selamlama",
   "hal_hatir",
@@ -11,6 +11,8 @@ export const INTENTS = [
   "motivasyon_tavsiye",
   "saat_tarih",
   "hesaplama",
+  "doviz_kuru",
+  "haber_gundem",
   "model_egit_xor",
   "model_egit_derin",
   "kod_uretme_dsl",
@@ -168,6 +170,35 @@ export const DATASET = {
     "5 arti 5", "10 eksi 3", "hesapla 16*16", "karekök 100",
     "hesapla 7+8*2",
   ],
+
+  doviz_kuru: [
+    "dolar kaç tl", "dolar ne kadar", "euro kaç tl", "euro ne kadar",
+    "döviz kurları", "doviz kurlari", "kur durumu", "güncel kur",
+    "100 dolar kaç lira", "50 euro kaç tl", "usd try", "eur try",
+    "dolar kuru", "euro kuru", "sterlin kaç tl", "döviz ne durumda",
+    "bugün dolar kaç", "bugün euro kaç", "dolar tl kuru", "euro tl kuru",
+    "kaç tl bir dolar", "bir euro kaç lira", "döviz sor", "kurları söyle",
+    "usd kaç try", "eur kaç try", "dolar fiyatı", "euro fiyatı",
+    "200 dolar kaç tl", "75 euro kaç lira", "döviz hesapla", "kur hesapla",
+    "frankfurter kur", "canlı döviz", "anlık kur", "exchange rate",
+    "dolar euro kuru", "try kurları", "tl karşılığı dolar", "tl karşılığı euro",
+    "kripto bitcoin kaç tl", "btc try", "ethereum kaç tl", "kripto kurları",
+    "dolar yükseldi mi", "euro düştü mü",
+  ],
+  haber_gundem: [
+    "ekonomi haberlerini getir", "günün haberleri", "son dakika gelişmeleri",
+    "teknoloji haberleri", "gündemde ne var", "bugünün haberleri", "bu günün haberleri",
+    "haberleri getir", "gündem nedir", "son dakika", "haber özeti",
+    "güncel haberler", "bugün gündemde ne var", "spor haberleri", "bilim haberleri",
+    "yapay zeka haberleri", "dünya haberleri", "türkiye gündemi", "manşetler",
+    "haber başlıkları", "günün manşetleri", "haber oku", "gündem başlıkları",
+    "teknoloji gündemi", "ekonomi gündemi", "son gelişmeler", "haber akışı",
+    "bugün ne oldu", "gündem özeti ver", "haberleri listele", "wiki gündem",
+    "güncel olaylar", "current events", "news headlines", "haber getir alper",
+    "son dakika haberi", "önemli haberler", "bugünkü gelişmeler", "gündemden haber",
+    "ekonomi manşet", "teknoloji manşet", "haber kartları", "başlıkları getir",
+    "ne var gündemde", "haber durumları değil gündem", "gazete manşeti",
+  ],
   model_egit_xor: [
     "xor modelini eğit", "xor eğit", "xor ağı kur", "xor çalıştır",
     "xor mlp eğit", "xor örneğini çalıştır", "basit xor eğitimi", "xor motorunu başlat",
@@ -282,7 +313,7 @@ export const DATASET = {
   ],
   sistem_durumu: [
     "sistem durumu", "status", "sağlık kontrolü", "wasm hazır mı",
-    "beyin eğitildi mi", "sistem raporu", "durum nedir", "health check",
+    "beyin eğitildi mi", "sistem raporu", "health check",
     "alper hazır mı", "motor yüklü mü", "vocab kaç", "niyet sayısı",
     "öğretilen kaç", "profil durumu", "telemetry durumu", "status nedir",
     "sağlık nasıl", "çalışıyor musun", "online mısın", "hazır mısın",
@@ -292,7 +323,7 @@ export const DATASET = {
     "hafıza durumu", "bağlam durumu", "last intent ne", "sistem diagnostik",
     "rapor ver sistem", "alper status", "ping", "alive misin",
     "checkup", "sistem sağlığı", "kaynak durumu", "beyin bar durumu",
-    "eğitim durumu beyin", "genel durum",
+    "eğitim durumu beyin", "kokpit sağlık özeti",
   ],
   performans_f32_blas: [
     "f32 mi f64 mı", "blas hızlandırma", "simd kullanıyor mu", "performans nasıl",
@@ -627,16 +658,13 @@ export const ARTICLE_ALIASES = {
 
 export const HINTS = [
   "Selam",
-  "Nasılsın",
   "Benim adım Sinan",
-  "Senin adın ne",
-  "Saat kaç",
+  "Dolar kaç tl",
+  "100 dolar kaç lira",
+  "Günün haberleri",
+  "Teknoloji haberleri",
   "XOR modelini eğit",
-  "Derin MLP eğit",
-  "XOR DSL üret",
-  "Binary DSL yaz",
   "ReLU'yu anlat",
-  "Overfitting çözümü",
   "Sistem durumu"
 ];
 
