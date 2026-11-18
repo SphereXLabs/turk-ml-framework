@@ -351,16 +351,14 @@ impl AlperBeyin {
             ));
         }
 
-        let hidden1 = (input_dim * 2).clamp(32, 96);
-        let hidden2 = (output_dim * 4).clamp(16, 48);
-
+        // Sabit kapasite: girdi → 64 → 32 → sınıf (softmax)
         let mut model = Sequential::new();
         model
-            .add(dense_layer(input_dim, hidden1, Activation::Relu)?)
-            .add(dense_layer(hidden1, hidden2, Activation::Relu)?)
-            .add(dense_layer(hidden2, output_dim, Activation::Softmax)?);
+            .add(dense_layer(input_dim, 64, Activation::Relu)?)
+            .add(dense_layer(64, 32, Activation::Relu)?)
+            .add(dense_layer(32, output_dim, Activation::Softmax)?);
 
-        let lr = dtype::from_f64(0.02);
+        let lr = dtype::from_f64(0.015);
         model.compile_with_loss(
             Box::new(Adam::new(lr, 0.9, 0.999, dtype::from_f64(1e-8))),
             Box::new(CrossEntropy::new(false)),
