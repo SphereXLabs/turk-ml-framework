@@ -358,7 +358,7 @@ impl AlperBeyin {
             .add(dense_layer(64, 32, Activation::Relu)?)
             .add(dense_layer(32, output_dim, Activation::Softmax)?);
 
-        let lr = dtype::from_f64(0.015);
+        let lr = dtype::from_f64(0.035);
         model.compile_with_loss(
             Box::new(Adam::new(lr, 0.9, 0.999, dtype::from_f64(1e-8))),
             Box::new(CrossEntropy::new(false)),

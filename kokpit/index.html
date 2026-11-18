@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TÜRK — ALPER &amp; Göktürk Kokpit</title>
-  <meta name="description" content="ALPER: unigram+bigram TF-IDF, 16 niyet, kullanıcı hafızası, zengin sohbet — turk WASM, harici LLM yok" />
+  <meta name="description" content="ALPER v3: 24 niyet, 1000+ örnek, 40+ makale, bigram TF-IDF — turk WASM, harici LLM yok" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -93,7 +93,7 @@
       <p class="runes" aria-hidden="true">𐱅𐰇𐰼𐰰 · ALPER</p>
       <h1 class="brand">Göktürk <span>Kokpit</span></h1>
       <p class="tagline">
-        ALPER — unigram+bigram TF-IDF → <code>turk</code> MLP (64→32→16), 450+ Türkçe örnek, kullanıcı hafızası ve zengin sohbet.
+        ALPER v3 — <code>alper_beyin.js</code> + unigram/bigram TF-IDF → <code>turk</code> MLP (64→32→24), 1000+ örnek, 40+ makale.
         Harici LLM/API anahtarı yok.
       </p>
       <div class="nav-links">
@@ -108,7 +108,7 @@
       <section class="panel" aria-label="ALPER asistan">
         <div class="panel-h">
           <strong>ALPER · Derin Sohbet Beyni</strong>
-          <span>16 niyet · bigram</span>
+          <span>24 niyet · v3 beyin</span>
         </div>
         <div class="chat" id="chat" aria-live="polite"></div>
         <div class="hints" id="hints"></div>
@@ -124,7 +124,7 @@
         </div>
         <div class="composer">
           <button type="button" class="btn btn-mic" id="mic-btn" title="Mikrofon">🎙</button>
-          <input id="cmd" type="text" placeholder='Örn: "benim adım Sinan" · "senin adın ne" · "XOR DSL üret"' autocomplete="off" />
+          <input id="cmd" type="text" placeholder='Örn: "benim adım Sinan" · "relu nedir" · "XOR DSL üret" · "aşırı uyum"' autocomplete="off" />
           <button type="button" class="btn btn-primary" id="send-btn">Gönder</button>
         </div>
       </section>
@@ -155,246 +155,40 @@
     </div>
 
     <footer>
-      <span>SphereX Labs · TÜRK v0.3 · ALPER</span>
+      <span>SphereX Labs · TÜRK v0.3 · ALPER v3</span>
       <a href="../playground/">Playground</a>
       <a href="../turk/">Dokümantasyon</a>
     </footer>
   </div>
 
   <script type="module">
-    const INTENTS = [
-      "selamlama","hal_hatir","kimlik_sohbet","kullanici_hafiza","saat_tarih","hesaplama",
-      "model_egit_xor","model_egit_derin","kod_uretme_dsl","hiperparametre_ayar","egitim_teshis",
-      "canli_tahmin","web_arastirma","kavram_aciklama","sistem_durumu","takip_detay",
-    ];
+    import {
+      ALPER_VERSION, INTENTS, DATASET, ARTICLES, HINTS, ENGINE_PRESETS,
+      lookupArticle, datasetStats,
+    } from "./alper_beyin.js";
+
     const CONFIDENCE_GATE = 0.72;
-    const MEMORY_KEY = "alper_kokpit_memory_v1";
-    const TAUGHT_KEY = "alper_taught_examples_v1";
+    const MEMORY_KEY = "alper_kokpit_memory_v3";
+    const TAUGHT_KEY = "alper_taught_examples_v3";
     const PROFILE_KEY = "alper_user_profile";
-    const CONTEXT_KEY = "alper_dialog_context_v1";
-
-    /* ─── 450+ Türkçe örnek (16 niyet) ─── */
-    const DATASET = {
-      selamlama: [
-        "selam","merhaba","selamlar","günaydın","iyi akşamlar","hey alper","merhaba alper","selam alper",
-        "selamun aleyküm","hello","hi","iyi günler","iyi geceler","hoş geldin","merhabalar","selam kanka",
-        "alper selam","selam dostum","hey","günaydın alper","iyi akşamlar alper","selamlar alper",
-        "merhaba dostum","alper burda mısın","selam millet","merhaba arkadaş","hey dostum","selam sana",
-        "günaydın dostum","iyi akşamlar dost","hoşbulduk","selamlar herkese",
-      ],
-      hal_hatir: [
-        "nasılsın","naber","ne haber","iyi misin","nasıl gidiyor","keyfin nasıl","moralin nasıl",
-        "bugün nasılsın","alper nasılsın","iyi misiniz","ne var ne yok","nasıl hissediyorsun",
-        "durumlar nasıl","işler nasıl","keyifler nasıl","sen nasılsın alper","bugün iyi misin",
-        "hala iyi misin","moralin yerinde mi","nasıl gidiyor işler","ne alemdesin","iyi gidiyor musun",
-        "nasıl geçiyor günün","bugün enerjin nasıl","kendini nasıl hissediyorsun","iyi günler nasılsın",
-        "selam nasılsın","merhaba nasılsın","naber alper","ne haberler",
-      ],
-      kimlik_sohbet: [
-        "sen kimsin","adın ne","senin adın ne","seni kim yaptı","neler yapabilirsin","ne işe yararsın",
-        "kimin eserisin","kendini tanıt","alper kim","sen bir yapay zeka mısın","ne yapıyorsun",
-        "yeteneklerin neler","kim geliştirdi seni","spherex labs mı yaptı","nasıl çalışıyorsun",
-        "llm kullanıyor musun","harici api var mı","sen alper misin","adın alper mi",
-        "kimsin sen","seni kim yazdı","hangi motorla çalışıyorsun","turk framework mü",
-        "wasm mı kullanıyorsun","openai kullanıyor musun","groq var mı","yerel misin",
-        "ne kadar akıllısın","yetkinliklerin neler","senin görevin ne","ne için varsın",
-      ],
-      kullanici_hafiza: [
-        "benim adım sinan","adım sinan","benim adım ne","beni tanıyor musun","adımı hatırlıyor musun",
-        "benim ismim ahmet","ismim mehmet","beni tanı","adımı söyle","ben kimim",
-        "benim adımı biliyor musun","adımı kaydet","benim adım ayşe","ben geliştiriciyim",
-        "ben mühendisim","rolüm data scientist","ben öğrenciym","tercihim rust",
-        "benim adım can","adım elif","beni hatırla","adımı unutma","kim olduğumu biliyor musun",
-        "profilimi söyle","kayıtlı adım ne","benim adım neydi","adımı hatırla lütfen",
-        "ben turk kullanıcısıyım","ben spherex ekibindenim","adım kerem beni tanı",
-      ],
-      saat_tarih: [
-        "saat kaç","bugün tarih ne","günlerden ne","tarih kaç","zamanı söyle","hangi aydayız",
-        "saati göster","bugün günlerden ne","şu an saat kaç","tarihi söyle","bugünün tarihi",
-        "hangi yıldayız","saat nedir","zamanı göster","takvimde bugün ne","local saat kaç",
-        "saat kaç oldu","bugün ayın kaçı","hangi gündeyiz","saat ve tarih","tarih saat söyle",
-        "şu anın tarihi","saat bilgisi","günün tarihi","ayın kaçı","yılın kaçıncı günü",
-        "saat kaç göster","tarihi yaz","bugün ne","şu an ne zaman",
-      ],
-      hesaplama: [
-        "hesapla","kaç eder","topla","çarp","böl","karekökü","matematik","hesapla 12 arti 5",
-        "2 carpi 8 kac eder","karekok 16","100 bolu 4","matematik sorusu hesapla","toplama yap",
-        "carpma islemi","bolme yap","hesap makinesi","su ifadeyi hesapla","hesapla 3+5",
-        "12*7 kaç","25+25 hesapla","karekök 81","90/9 kaç eder","hesapla (2+3)*4",
-        "7 eksi 2","15 arti 20","8 carpi 8","64 bolu 8","matematik hesapla lütfen",
-        "şu işlemi yap 10+5","hesap sonucu nedir","aritmetik hesapla",
-      ],
-      model_egit_xor: [
-        "xor modelini oluştur ve eğit","xor ağını eğit","xor sinir ağı kur","basit xor eğitimi başlat",
-        "xor sınıflandırıcı çalıştır","xor örneğini eğit","iki girdili xor modeli yap","xor mlp eğit",
-        "xor verisiyle model kur","xor problemi çöz ve eğit","küçük xor ağı oluştur","xor için eğitim başlat",
-        "xor model eğit","xor çalıştır","xor'u eğit lütfen","xor eğitimi yap","xor ağı kur ve eğit",
-        "xor sınıflandır","xor neural net eğit","xor örneği çalıştır","xor motorunu eğit",
-        "basit xor başlat","xor dataset ile eğit","xor modeli oluştur","xor eğit şimdi",
-        "xor sinir ağını başlat","xor kaybını düşür eğiterek","xor accuracy yükselt eğit",
-        "xor playground gibi eğit","xor turk dsl ile eğit",
-      ],
-      model_egit_derin: [
-        "derin mlp çalıştır","derin ağ eğit","küme verisiyle derin model","2 küme sınıflandırıcı eğit",
-        "batch norm ile derin mlp","derin öğrenme modeli kur","kume dataset ile eğit","derin mlp başlat",
-        "çok katmanlı ağ eğit","dropout'lu derin model çalıştır","derin sınıflandırıcı oluştur",
-        "mlp derin mimari eğit","büyük mlp eğit","derin model eğit lütfen","derin ağ kur",
-        "küme sınıflandırıcı eğit","2 cluster mlp","derin öğrenme başlat","batchnorm mlp eğit",
-        "derin turk modeli","çok katman eğit","derin mlp sabır ile","erken durdurmalı derin mlp",
-        "kume bolme ile eğit","derin ağ accuracy","derin sınıflandırma modeli","mlp 16 8 4 eğit",
-        "derin dropout modeli","derin adam mse eğit",
-      ],
-      kod_uretme_dsl: [
-        "xor için turk dsl üret","dsl kodu yaz","model.turk oluştur","örnek turk kodu ver",
-        "xor dsl üret","derin mlp dsl yaz",".turk dosyası üret","dsl şablonu ver",
-        "katman_ekle örneği yaz","veri_yukle xor kodu","egit komutu içeren dsl",
-        "turk dilinde model yaz","kod üret xor","dsl üret mlp","turk script yaz",
-        "model_olustur kodu ver","derle adam örnek kod","kaydet komutlu dsl",
-        "tam bir .turk örneği","dsl kod bloğu üret","xor mimarisi kodla",
-        "küme için dsl yaz","batch_norm içeren dsl","dropout'lu dsl üret",
-        "turk playground kodu ver","hazır dsl şablonu","kod olarak model yaz",
-        "dsl çıktısı ver",".turk üret lütfen",
-      ],
-      hiperparametre_ayar: [
-        "öğrenme oranını düşür","learning rate ayarla","epoch sayısını artır","batch boyutunu değiştir",
-        "adam yerine sgd kullan","hiperparametre öner","ogrenme orani 0.01 yap","sabır değerini artır",
-        "min delta ne olmalı","optimizer önerisi ver","mse mi cross entropy mi","hiperparametre tüyoları",
-        "eğitim hızını ayarla","öğrenme oranı kaç olmalı","lr kaç olsun","batch 4 mü 32 mi",
-        "epoch 100 yeter mi","adam parametreleri","beta1 beta2 ne","weight decay öner",
-        "sabır 25 iyi mi","min_delta 0.0001","hiperparametre grid","lr schedule öner",
-        "öğrenme oranı yüksek mi","batch size küçük tut","erken durdurma sabır","optimizer seçimi",
-        "mse binary için","softmax için loss",
-      ],
-      egitim_teshis: [
-        "loss düşmüyor neden","aşırı uyum var mı","overfitting teşhisi","doğruluk artmıyor",
-        "eğitim takıldı","val loss yükseliyor","model öğrenmiyor","gradyan patlaması olabilir mi",
-        "kayıp neden yüksek","erken durdurma tetiklendi mi","eğitim teşhisi yap","neden kötü öğreniyor",
-        "accuracy düşük kaldı","loss salınıyor teşhis et","underfitting mi","overfit nasıl anlarım",
-        "loss nan oldu","eğitim yavaş","doğrulama kaybı kötü","train iyi val kötü",
-        "neden %50 accuracy","sigmoid eşiği mi","veri az mı","batch norm sorun mu",
-        "dropout fazla mı","lr çok yüksek mi","teşhis raporu ver","eğitim analizi yap",
-        "model diverge etti","kaybı yorumla",
-      ],
-      canli_tahmin: [
-        "1 ve 0 için tahmin yap","tahmin et 1 0","canlı çıkarım yap","girdi 0 1 tahmin",
-        "sınıf tahmini yap","inference çalıştır","1 1 için tahmin","0 0 tahmin et",
-        "modelden tahmin al","özelliklerle tahmin yap","canlı tahmin testi","şimdi tahmin et",
-        "tahmin sonucu nedir","çıkarım yap","predict 1 0","x0=1 x1=0 tahmin",
-        "ikili tahmin yap","sınıf 1 mi 0 mı","canlı test et","modeli dene tahmin",
-        "girdi ver tahmin et","örnek tahmin çalıştır","inference paneli kullan",
-        "tahmin güveni nedir","probability ile tahmin","sigmoid çıktısı tahmin",
-        "canlı sınıflandır","hemen tahmin et","motor tahmin etsin",
-      ],
-      web_arastirma: [
-        "adam optimizer nedir araştır","relu hakkında bilgi ver","wikipedia'da softmax ara",
-        "batch normalization nedir","github'da turk ml framework ara","cross entropy nedir",
-        "dropout ne işe yarar araştır","xor problemi hakkında bilgi","gradient descent nedir",
-        "araştır: neural network","nedir bu early stopping","hakkında bilgi ver: mlp",
-        "web'de adam w araştır","tensorflow ile farkı nedir araştır","rust wasm nedir araştır",
-        "pytorch nedir","backpropagation araştır","sgd nedir","optimizer nedir ara",
-        "neural network wiki","makine öğrenmesi nedir","derin öğrenme araştır",
-        "github rust ml","web araştır adam","bilgi ver softmax","araştır batch norm",
-        "nedir bu wasm","hakkında bilgi ver rust","internetten araştır mlp",
-      ],
-      kavram_aciklama: [
-        "sinir ağı nedir açıkla","mlp nasıl çalışır","relu'yu anlat","softmax'i açıkla",
-        "backprop nedir anlat","wasm nedir açıkla","rust neden hızlı","tf idf nedir",
-        "bag of words açıkla","cross entropy anlat","adam optimizer açıkla","dropout neden var",
-        "batch norm ne işe yarar","one hot encoding nedir","gradient nedir açıkla",
-        "overfitting nedir anlat","epoch batch farkı","öğrenme oranı ne demek",
-        "aktivasyon fonksiyonu nedir","dense katman nedir","sequential model nedir",
-        "softmax vs sigmoid","mse ne zaman kullanılır","derin öğrenme temelleri",
-        "turk framework mimarisi","niyet sınıflandırma nasıl","bigram nedir açıkla",
-        "embedding olmadan nasıl","yerel llm farkı nedir","kavramı detaylı anlat",
-      ],
-      sistem_durumu: [
-        "sistem durumunu raporla","motor durumu nedir","wasm hazır mı","alper beyin durumu",
-        "sağlık kontrolü","sistem raporu ver","beyin eğitildi mi","motor ve asistan durumu",
-        "status report","çalışıyor musun","kaynak durumu","telemetri özeti",
-        "beyin accuracy nedir","kaç niyet var","vocab boyutu nedir","hafıza dolu mu",
-        "profil kayıtlı mı","son eğitim metrics","wasm yüklü mü","kokpit sağlıklı mı",
-        "alper hazır mı","motor model var mı","öğretilen cümle sayısı","context nedir",
-        "durum özeti ver","health check","sistem bilgisi","çalışma durumu",
-        "raporla durumu","status ver",
-      ],
-      takip_detay: [
-        "bunu açıkla","neden","detay ver","peki nasıl","daha fazla anlat","detaylandır",
-        "neden böyle","nasıl yani","devam et","üstüne ekle","bunu uygula","örnek ver",
-        "daha derin anlat","açıklar mısın","niçin","nasıl yapılır","adım adım anlat",
-        "biraz daha","devamını getir","peki sonra","bunu genişlet","neden önemli",
-        "nasıl kullanırım","uygula şunu","detay isterim","açıklamaya devam",
-        "neden bu niyet","peki sonuç ne","daha net söyle","bunu bozma devam",
-      ],
-    };
-
-    // ensure 450+
-    (function padDataset() {
-      const extras = {
-        selamlama: ["selam güzel insan","merhaba tekrar","hey again","selam yeniden"],
-        hal_hatir: ["bugün moralin iyi mi","keyif nasıl gidiyor"],
-        kimlik_sohbet: ["sen kimsin anlat","adını söyler misin"],
-        kullanici_hafiza: ["adımı hatırla sinan","benim adım zeynep"],
-        saat_tarih: ["saat kaç şimdi","tarih nedir bugün"],
-        hesaplama: ["hesapla 9*9","50-8 kaç"],
-        model_egit_xor: ["xor tekrar eğit","xor yeniden kur"],
-        model_egit_derin: ["derin modeli yeniden eğit","küme mlp tekrar"],
-        kod_uretme_dsl: ["dsl kod örneği","turk kod üret"],
-        hiperparametre_ayar: ["lr düşür öner","batch öner"],
-        egitim_teshis: ["neden loss yüksek","teşhis et loss"],
-        canli_tahmin: ["tahmin 0 1 yap","çıkarım 1 1"],
-        web_arastirma: ["araştır rust lang","nedir serde"],
-        kavram_aciklama: ["açıkla gradient descent","anlat neural net"],
-        sistem_durumu: ["status nedir","sağlık nasıl"],
-        takip_detay: ["neden peki","detay lütfen"],
-      };
-      for (const [k, arr] of Object.entries(extras)) {
-        DATASET[k].push(...arr);
-      }
-    })();
-
-    const ENGINE_PRESETS = {
-      xor: `veri_yukle("xor")
-model_olustur()
-katman_ekle(yogun(2, 8, "relu"))
-katman_ekle(yogun(8, 1, "sigmoid"))
-derle(adam, loss=mse, ogrenme_orani=0.05)
-model_bilgisi()
-egit(120, 4)
-`,
-      mlp: `veri_yukle("kume", bolme=0.25)
-model_olustur()
-katman_ekle(yogun(2, 16, "relu"))
-katman_ekle(batch_norm(16))
-katman_ekle(yogun(16, 8, "relu"))
-katman_ekle(dropout(0.1))
-katman_ekle(yogun(8, 4, "relu"))
-katman_ekle(yogun(4, 1, "sigmoid"))
-derle(adam, loss=mse, ogrenme_orani=0.03)
-model_bilgisi()
-egit(200, 4, sabir=25, min_delta=0.0001)
-`,
-    };
-
-    const HINTS = [
-      "Selam","Nasılsın","Benim adım Sinan","Senin adın ne","Saat kaç",
-      "XOR modelini eğit","XOR DSL üret","Adam'ı açıkla","Bunu açıkla","Sistem durumu",
-    ];
+    const CONTEXT_KEY = "alper_dialog_context_v3";
+    const TRAIN_EPOCHS = 110;
+    const TRAIN_BATCH = 16;
 
     const STOP = new Set([
       "ve","veya","ile","bir","bu","şu","o","da","de","ki","mi","mu","mü","icin","için",
       "gibi","kadar","daha","en","çok","cok","ya","ama","fakat","lütfen","lutfen",
-      "var","yok","olan","olarak","ile","için",
+      "var","yok","olan","olarak",
     ]);
 
-    /* ─── Unigram + Bigram Türkçe NLP ─── */
     function normalizeTr(s) {
       return (s || "").toLocaleLowerCase("tr-TR").normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9ğüşıöç\s._-]/gi, " ")
+        .replace(/[^a-z0-9ğüşıöç\s._'-]/gi, " ")
         .replace(/\s+/g, " ").trim();
     }
     function stemTr(tok) {
-      let t = tok;
+      let t = tok.replace(/^'+|'+$/g, "");
       const suffixes = [
         "lariniz","leriniz","larimiz","lerimiz","siniz","siniz",
         "iyorlar","uyorlar","uyoruz","iyoruz","makta","mekte",
@@ -404,6 +198,7 @@ egit(200, 4, sabir=25, min_delta=0.0001)
         "dan","den","tan","ten","nin","nın","nun","nün",
         "lar","ler","lık","lik","luk","lük","mak","mek",
         "ın","in","un","ün","ım","im","um","üm",
+        "yu","yü","yı","yi","ya","ye",
       ];
       for (const s of suffixes) {
         if (t.length > s.length + 2 && t.endsWith(s)) { t = t.slice(0, -s.length); break; }
@@ -428,7 +223,7 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       }
       return [...df.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .slice(0, 480)
+        .slice(0, 640)
         .map(([term, d]) => ({ term, df: d, idf: Math.log((1 + docs.length) / (1 + d)) + 1 }));
     }
     function vectorize(text, vocab) {
@@ -486,7 +281,6 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       return { x, y };
     }
 
-    /* ─── UI ─── */
     const chatEl = document.getElementById("chat");
     const cmdEl = document.getElementById("cmd");
     const sendBtn = document.getElementById("send-btn");
@@ -509,7 +303,9 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     let brain = null, vocab = [], engineRunner = null;
     let memory = [];
     let profile = loadProfile();
-    let context = Object.assign({ lastIntent: null, lastTopic: null, lastModelMetrics: null }, loadContext());
+    let context = Object.assign({
+      lastIntent: null, lastTopic: null, lastConcept: null, lastModelMetrics: null, userProfile: null,
+    }, loadContext());
 
     try { memory = JSON.parse(localStorage.getItem(MEMORY_KEY) || "[]"); } catch { memory = []; }
 
@@ -547,10 +343,6 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       statusEl.textContent = t;
       statusEl.className = "status" + (k ? ` ${k}` : "");
     }
-    function addressUser(prefix = "") {
-      return profile.name ? `${prefix}${profile.name}` : prefix.replace(/,\s*$/, "") || "";
-    }
-
     function escapeHtml(s) {
       return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     }
@@ -590,7 +382,6 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       label.className = "who";
       label.textContent = who === "user" ? "Siz" : "ALPER";
       div.appendChild(label);
-
       if (who === "bot") {
         const rich = document.createElement("div");
         rich.className = "rich";
@@ -599,7 +390,6 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       } else {
         div.appendChild(document.createTextNode(text));
       }
-
       if (opts.badges?.length) {
         const wrap = document.createElement("div");
         for (const b of opts.badges) {
@@ -609,20 +399,13 @@ egit(200, 4, sabir=25, min_delta=0.0001)
           wrap.appendChild(el);
         }
         div.appendChild(wrap);
-      } else if (opts.badge) {
-        const b = document.createElement("div");
-        b.className = "badge";
-        b.textContent = opts.badge;
-        div.appendChild(b);
       }
-
       if (opts.htmlExtra) {
         const wrap = document.createElement("div");
         wrap.style.marginTop = ".4rem";
         wrap.innerHTML = opts.htmlExtra;
         div.appendChild(wrap);
       }
-
       if (who === "bot" && opts.chips?.length) {
         const chips = document.createElement("div");
         chips.className = "chips";
@@ -636,7 +419,6 @@ egit(200, 4, sabir=25, min_delta=0.0001)
         }
         div.appendChild(chips);
       }
-
       chatEl.appendChild(div);
       chatEl.scrollTop = chatEl.scrollHeight;
     }
@@ -690,19 +472,22 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       const { x, y } = buildTrainingMatrices(vocab);
       brain = new AlperBeyin(vocab.length, INTENTS.length);
       const taughtN = loadTaught().length;
-      brainMeta.textContent = `Eğitiliyor… ${x.length} örnek · vocab=${vocab.length}`;
-      setStatus("ALPER beyni eğitiliyor…");
-      const sonuc = brain.egit(JSON.stringify(x), JSON.stringify(y), 80, 24);
-      updateChart(sonuc.metrics || [], "ALPER beyni");
+      const t0 = performance.now();
+      brainMeta.textContent = `Eğitiliyor… ${x.length} örnek · batch=${TRAIN_BATCH} · epoch=${TRAIN_EPOCHS}`;
+      setStatus("ALPER v3 beyni eğitiliyor…");
+      const sonuc = brain.egit(JSON.stringify(x), JSON.stringify(y), TRAIN_EPOCHS, TRAIN_BATCH);
+      const ms = performance.now() - t0;
+      updateChart(sonuc.metrics || [], "ALPER v3 beyni");
       const acc = ((sonuc.final_accuracy || 0) * 100).toFixed(1);
       brainMeta.textContent =
-        `Beyin hazır · ${sonuc.sample_count} örn · %${acc} · ${vocab.length} terim (uni+bi)` +
+        `Beyin v${ALPER_VERSION} · ${sonuc.sample_count} örn · %${acc} · ${(ms / 1000).toFixed(2)}s · vocab=${vocab.length}` +
         (taughtN ? ` · +${taughtN} öğretilen` : "");
       summaryEl.textContent =
         `ALPER MLP: girdi=${sonuc.input_dim} → 64 → 32 → ${sonuc.output_dim} (softmax)\n` +
-        `niyet=${INTENTS.length} · örnek≈${sonuc.sample_count} · accuracy %${acc}\n` +
-        `bigram TF-IDF · harici LLM yok`;
-      setStatus("ALPER beyni hazır", "ok");
+        `Adam lr≈0.035 · batch=${TRAIN_BATCH} · epochs=${TRAIN_EPOCHS}\n` +
+        `niyet=${INTENTS.length} · örnek≈${sonuc.sample_count} · accuracy %${acc} · ${(ms / 1000).toFixed(2)}s\n` +
+        `makale=${Object.keys(ARTICLES).length} · bigram TF-IDF · harici LLM yok`;
+      setStatus(`ALPER v3 hazır (%${acc}, ${(ms / 1000).toFixed(2)}s)`, "ok");
       return sonuc;
     }
 
@@ -731,6 +516,7 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     function shouldWebFallback(classified, text) {
       if (!classified || classified.intent === "web_arastirma") return false;
       if (isPureGreeting(text)) return false;
+      if (lookupArticle(text)) return false;
       const lowConf = classified.confidence < CONFIDENCE_GATE;
       const mostlyOov = classified.tokenCount > 0 && classified.oovRatio >= 0.55;
       if ((lowConf || mostlyOov) && looksLikeQuestionOrTopic(text)) return true;
@@ -738,15 +524,33 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       return false;
     }
 
-    function extractResearchQuery(text) {
-      let q = text.replace(/alper/gi, " ")
-        .replace(/\b(araştır|arastir|hakkında bilgi ver|hakkinda bilgi ver|nedir|wikipedia|github|web ara|acikla|açıkla)\b/gi, " ")
-        .replace(/[:\-–]/g, " ").trim();
+    /** Strip research verbs, github markers, Turkish case/possessive suffixes before wiki/GH query. */
+    function sanitizeWebQuery(text) {
+      let q = String(text || "");
+      q = q.replace(/github['’]?da/gi, " ");
+      q = q.replace(/\bgithubda\b/gi, " ");
+      q = q.replace(/\b(wikipedia['’]?da|wikipediada)\b/gi, " ");
+      q = q.replace(/\b(araştır|arastir|ara+ş?tır|nedir|ne demek|anlat|açıkla|acikla|bul|ara|hakkında|hakkinda|bilgi ver|web ara|web'de|webde)\b/gi, " ");
+      q = q.replace(/\balper\b/gi, " ");
+      // strip trailing Turkish suffixes stuck to tokens: 'yu 'yı 'ya 'ye 'da 'de 'nin 'nın etc.
+      q = q.replace(/[''](yu|yü|yı|yi|ya|ye|nun|nün|nin|nın|dan|den|da|de|ta|te)\b/gi, " ");
+      q = q.replace(/[:\-–?,!]/g, " ");
       q = q.replace(/\s+/g, " ").trim();
-      return (q.length < 2 ? text.trim() : q).slice(0, 80);
+      // also peel common agglutinated endings from last token
+      const parts = q.split(/\s+/).filter(Boolean).map((tok) => {
+        let t = tok.toLocaleLowerCase("tr-TR");
+        for (const s of ["sinin","sinin","lari","leri","nin","nın","nun","nün","dan","den","lar","ler","yi","yı","yu","yü","ya","ye","da","de"]) {
+          if (t.length > s.length + 2 && t.endsWith(s)) { t = t.slice(0, -s.length); break; }
+        }
+        return t;
+      });
+      q = parts.join(" ").trim();
+      return (q.length < 2 ? String(text || "").trim() : q).slice(0, 80);
     }
+    function extractResearchQuery(text) { return sanitizeWebQuery(text); }
+
     async function webAra(query) {
-      const q = extractResearchQuery(query);
+      const q = sanitizeWebQuery(query);
       const sources = [];
       let summary = "";
       try {
@@ -789,7 +593,7 @@ egit(200, 4, sabir=25, min_delta=0.0001)
 
     async function trainEngine(preset, label) {
       const kod = ENGINE_PRESETS[preset];
-      if (!kod) throw new Error("preset yok");
+      if (!kod) throw new Error("preset yok: " + preset);
       engineRunner = null; setupInference(0);
       const runner = new TurkWasmRunner();
       const sonuc = runner.calistir_kod(kod);
@@ -877,42 +681,61 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       return null;
     }
 
-    function dslFor(kind) {
-      if (kind === "mlp") return ENGINE_PRESETS.mlp.trim();
-      return ENGINE_PRESETS.xor.trim();
+    function dslFor(text) {
+      const n = normalizeTr(text);
+      if (/binary|ikili|siniflandirici|sınıflandırıcı/.test(n)) return { kind: "binary", code: ENGINE_PRESETS.binary.trim() };
+      if (/custom|ozel|özel|katman/.test(n) && !/xor|derin|mlp|kume|küme/.test(n)) {
+        return { kind: "custom", code: ENGINE_PRESETS.custom.trim() };
+      }
+      if (/derin|mlp|kume|küme/.test(n)) return { kind: "mlp", code: ENGINE_PRESETS.mlp.trim() };
+      return { kind: "xor", code: ENGINE_PRESETS.xor.trim() };
     }
 
     function kavramExplain(text) {
-      const n = normalizeTr(text);
-      if (n.includes("relu")) return "**ReLU** (Rectified Linear Unit)\n- Formül: `f(x) = max(0, x)`\n- Pozitif gradyanı korur, negatifleri sıfırlar\n- Derin ağlarda vanishing gradient’i azaltır\n- TÜRK’te: `katman_ekle(yogun(..., \"relu\"))`";
-      if (n.includes("softmax")) return "**Softmax**\n- Çok sınıflı olasılık dağılımı üretir\n- Çıktılar toplamı 1 olur\n- Cross-entropy ile birlikte kullanılır\n- ALPER niyet beyni son katmanda Softmax kullanır";
-      if (n.includes("wasm")) return "**WebAssembly (WASM)**\n- Tarayıcıda native’e yakın hızda çalışan baytkod\n- `turk` kütüphanesi `wasm32` hedefine derlenir\n- ALPER’in Sequential MLP’si tarayıcıda yerelde koşar\n- Harici sunucu / LLM API gerekmez";
-      if (n.includes("rust")) return "**Rust**\n- Bellek güvenli, sıfır maliyetli soyutlamalar\n- `ndarray` ile tensör matematiği\n- `turk-ml-framework` tamamen Rust çekirdeklidir\n- WASM’a `wasm-bindgen` ile taşınır";
-      if (n.includes("tf") || n.includes("idf") || n.includes("bigram") || n.includes("bag")) return "**TF-IDF + Bigram**\n- Unigram: tek kelime gövdeleri\n- Bigram: `benim_adim`, `saat_kac` gibi çiftler\n- TF × IDF ağırlığı nadir ama ayırt edici terimleri öne çıkarır\n- Bu vektör ALPER’in `turk` MLP girişidir";
-      if (n.includes("adam")) return "**Adam optimizer**\n- Momentum + RMSprop hibriti\n- `β1≈0.9`, `β2≈0.999` tipik\n- XOR için `lr=0.05`, derin MLP için `lr=0.03` iyi başlangıç\n- TÜRK: `derle(adam, loss=mse, ogrenme_orani=0.05)`";
-      if (n.includes("dropout")) return "**Dropout**\n- Eğitimde nöronları rastgele kapatır\n- Aşırı uyumu azaltır\n- Çıkarımda (`set_training(false)`) kapanır\n- Örnek: `katman_ekle(dropout(0.1))`";
-      if (n.includes("mlp") || n.includes("sinir") || n.includes("neural") || n.includes("ag")) return "**MLP / Sinir ağı**\n- Dense katmanlar: `y = activation(xW + b)`\n- Sequential: katmanları ardışık bağlar\n- Eğitim: forward → loss → backward → update\n- ALPER: `girdi → 64 → 32 → 16 sınıf (softmax)`";
-      return "**Genel kavram**\n- Makine öğrenmesi: veriden parametre öğrenmek\n- İleri yayılım + geri yayılım döngüsü\n- TÜRK DSL ile Türkçe sözdiziminde model kurabilirsiniz\n- Daha spesifik sorun: «relu’yu anlat», «wasm nedir açıkla»";
+      const art = lookupArticle(text) || (context.lastConcept ? lookupArticle(context.lastConcept) : null);
+      if (art) {
+        context.lastConcept = art.key;
+        saveContext(context);
+        const tips = (art.followUps || []).map((f) => `- «${f}»`).join("\n");
+        return { body: `${art.body}\n\n**İsterseniz:**\n${tips}`, key: art.key, followUps: art.followUps || [] };
+      }
+      return {
+        body: "**Yerel makalede birebir eşleşme yok.**\n- ReLU, Adam, Softmax, WASM, Ownership, Dropout… deneyin\n- Veya «… araştır» ile Wikipedia/GitHub’a düşerim",
+        key: null,
+        followUps: ["relu nedir", "adam nedir", "wasm nedir"],
+      };
+    }
+
+    function articleChips(followUps) {
+      return (followUps || []).slice(0, 3).map((f) => ({ label: f, command: f }));
     }
 
     function followUpChips(intent) {
       const map = {
         selamlama: [{ label: "Nasılsın?", command: "nasılsın" }, { label: "Sen kimsin?", command: "sen kimsin" }, { label: "Saat kaç?", command: "saat kaç" }],
-        hal_hatir: [{ label: "Sen kimsin?", command: "sen kimsin" }, { label: "XOR eğit", command: "xor modelini eğit" }],
-        kimlik_sohbet: [{ label: "Neler yapabilirsin?", command: "neler yapabilirsin" }, { label: "WASM açıkla", command: "wasm nedir açıkla" }],
+        hal_hatir: [{ label: "Motive et", command: "motive et" }, { label: "XOR eğit", command: "xor modelini eğit" }],
+        vedalasma: [{ label: "Tekrar selam", command: "selam" }, { label: "Sistem", command: "sistem durumu" }],
+        tesekkur: [{ label: "Bir kavram", command: "relu nedir" }, { label: "DSL üret", command: "xor dsl yaz" }],
+        mizah_sohbet: [{ label: "Bir daha", command: "şaka yap" }, { label: "ReLU anlat", command: "relu'yu anlat" }],
+        kimlik_sohbet: [{ label: "Neler yapabilirsin?", command: "neler yapabilirsin" }, { label: "WASM açıkla", command: "wasm nedir" }],
         kullanici_hafiza: [{ label: "Adımı söyle", command: "benim adım ne" }, { label: "Sistem durumu", command: "sistem durumu" }],
+        motivasyon_tavsiye: [{ label: "Başka tavsiye", command: "tavsiye ver" }, { label: "XOR eğit", command: "xor eğit" }],
         saat_tarih: [{ label: "Tarih ne?", command: "bugün tarih ne" }, { label: "Hesapla 3+5", command: "hesapla 3+5" }],
         hesaplama: [{ label: "Karekök 16", command: "karekök 16" }, { label: "12*7", command: "hesapla 12*7" }],
         model_egit_xor: [{ label: "Tahmin 1 0", command: "1 ve 0 için tahmin yap" }, { label: "DSL üret", command: "xor için turk dsl üret" }, { label: "Neden?", command: "neden" }],
-        model_egit_derin: [{ label: "Teşhis et", command: "eğitim teşhisi yap" }, { label: "Hiperparametre", command: "hiperparametre öner" }, { label: "Detay", command: "detay ver" }],
-        kod_uretme_dsl: [{ label: "XOR eğit", command: "xor modelini eğit" }, { label: "Derin DSL", command: "derin mlp dsl yaz" }],
+        model_egit_derin: [{ label: "Teşhis et", command: "eğitim teşhisi yap" }, { label: "Overfit çöz", command: "aşırı uyum nasıl çözülür" }, { label: "Detay", command: "detay ver" }],
+        kod_uretme_dsl: [{ label: "XOR eğit", command: "xor modelini eğit" }, { label: "Binary DSL", command: "binary classifier dsl" }, { label: "Custom DSL", command: "özel katman dsl üret" }],
         hiperparametre_ayar: [{ label: "XOR eğit", command: "xor modelini eğit" }, { label: "Teşhis", command: "loss düşmüyor neden" }],
-        egitim_teshis: [{ label: "LR öner", command: "öğrenme oranı kaç olmalı" }, { label: "Detaylandır", command: "detaylandır" }],
-        canli_tahmin: [{ label: "0 1 tahmin", command: "tahmin et 0 1" }, { label: "1 1 tahmin", command: "1 1 için tahmin" }],
-        web_arastirma: [{ label: "Daha anlat", command: "bunu açıkla" }, { label: "GitHub ara", command: "github'da rust ml ara" }],
-        kavram_aciklama: [{ label: "ReLU anlat", command: "relu'yu anlat" }, { label: "Softmax", command: "softmax'i açıkla" }, { label: "Peki nasıl?", command: "peki nasıl" }],
-        sistem_durumu: [{ label: "Yeniden eğit", command: "sistem durumu" }, { label: "Kimsin?", command: "sen kimsin" }],
-        takip_detay: [{ label: "Uygula", command: "bunu uygula" }, { label: "Örnek ver", command: "örnek ver" }, { label: "Araştır", command: "adam nedir araştır" }],
+        egitim_teshis: [{ label: "LR öner", command: "öğrenme oranı kaç olmalı" }, { label: "Overfit", command: "overfitting çözümü" }],
+        overfitting_cozum: [{ label: "Dropout anlat", command: "dropout nedir" }, { label: "Early stop", command: "early stopping nedir" }],
+        canli_tahmin: [{ label: "0 1 tahmin", command: "tahmin et 0 1" }, { label: "Modeli indir", command: "modeli json indir" }],
+        model_disa_aktar: [{ label: "XOR eğit", command: "xor eğit" }, { label: "Tahmin", command: "tahmin et 1 0" }],
+        web_arastirma: [{ label: "Daha anlat", command: "bunu açıkla" }, { label: "Yerel makale", command: "relu nedir" }],
+        kavram_aciklama: [{ label: "Daha aç", command: "bunu biraz daha aç" }, { label: "Örnek kod", command: "örnek kod ver" }, { label: "Dezavantaj", command: "peki dezavantajı ne?" }],
+        rust_mimari_soru: [{ label: "Borrowing", command: "borrowing nedir" }, { label: "Lifetimes", command: "lifetimes nedir" }, { label: "SIMD", command: "simd rust nasıl" }],
+        sistem_durumu: [{ label: "Yeniden eğit", command: "sistem durumu" }, { label: "f32/BLAS", command: "f32 mi f64 mı" }],
+        performans_f32_blas: [{ label: "SIMD", command: "simd rust nasıl" }, { label: "BLAS", command: "blas nedir turk" }],
+        takip_detay: [{ label: "Uygula", command: "bunu uygula" }, { label: "Örnek ver", command: "örnek kod ver" }, { label: "Araştır", command: "adam nedir araştır" }],
       };
       return map[intent] || [{ label: "Devam", command: "detay ver" }, { label: "Sistem", command: "sistem durumu" }];
     }
@@ -938,33 +761,53 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     function setDialogContext(intent, topic, extra = {}) {
       context.lastIntent = intent;
       context.lastTopic = topic || intent;
+      if (extra.lastConcept) context.lastConcept = extra.lastConcept;
+      if (extra.lastModelMetrics) context.lastModelMetrics = extra.lastModelMetrics;
+      context.userProfile = { name: profile.name || null, role: profile.role || null };
       Object.assign(context, extra);
       saveContext(context);
+    }
+
+    function deepenConcept(text) {
+      const n = normalizeTr(text);
+      const key = context.lastConcept || context.lastTopic || "";
+      const art = lookupArticle(key) || lookupArticle(text);
+      if (/dezavantaj|kusur|sorun|risk/.test(n)) {
+        return `**${art?.title || key || "Konu"} — dezavantaj / risk**\n- Her yöntemin trade-off’u vardır (hız ↔ kesinlik, bias ↔ variance)\n- ${art ? "Makaledeki uyarıları pratikte ölçün (val loss, latency)." : "Somut kavram adı verin."}\n- İzleme: telemetri + küçük abülasyon\n- Takip: «avantajı ne» / «örnek kod ver»`;
+      }
+      if (/ornek kod|örnek kod|kod ver|script/.test(n)) {
+        const dsl = dslFor(key.includes("mlp") || key.includes("dropout") ? "derin mlp" : "xor");
+        return `**Örnek \`.turk\` (bağlam: \`${key || "xor"}\`)**\n\n\`\`\`turk\n${dsl.code}\n\`\`\``;
+      }
+      if (/avantaj|iyi yan/.test(n)) {
+        return `**Avantajlar** (\`${key || "genel"}\`)\n- Yerel WASM: API anahtarı yok\n- Hızlı iterasyon: Kokpit + playground\n- ${art ? art.title + " için makaledeki güçlü yönlere bakın" : "Kavram seçin"}\n- Bigram niyet ayrımı + kullanıcı hafızası`;
+      }
+      if (art) return art.body + "\n\n*(bağlam devamı — lastConcept=`" + art.key + "`)*";
+      return `**Takip derinleştirme**\n- Önceki konu: \`${context.lastTopic || "—"}\`\n- lastConcept: \`${context.lastConcept || "—"}\`\n- Daha net bir anahtar söyleyin (relu, ownership, blas…)`;
     }
 
     async function handleFollowUp(text, confidence, meta) {
       const prev = context.lastIntent || "kavram_aciklama";
       const topic = context.lastTopic || prev;
       const n = normalizeTr(text);
-      let body = `**Takip:** önceki konu \`${topic}\`\n`;
+      let body = `**Takip:** önceki \`${topic}\`${context.lastConcept ? ` · kavram \`${context.lastConcept}\`` : ""}\n`;
       if (n.includes("uygula")) {
-        if (prev === "kod_uretme_dsl" || topic.includes("xor")) {
+        if (prev === "kod_uretme_dsl" || String(topic).includes("xor")) {
           return handleIntent("model_egit_xor", confidence, "xor modelini eğit", meta);
         }
-        if (topic.includes("derin") || topic.includes("mlp")) {
+        if (String(topic).includes("derin") || String(topic).includes("mlp") || String(topic).includes("binary")) {
           return handleIntent("model_egit_derin", confidence, "derin mlp çalıştır", meta);
         }
-        body += "- Uygulanacak somut bir motor eylemi için «XOR eğit» veya «Derin MLP» deyin.";
+        body += "- Uygulama için «XOR eğit», «Derin MLP» veya «modeli indir» deyin.";
+      } else if (/ac|aç|derin|detay|neden|nasil|nasıl|ornek|örnek|dezavantaj|avantaj|kod/.test(n)) {
+        body = deepenConcept(text);
       } else if (context.lastModelMetrics) {
         const m = context.lastModelMetrics;
-        body += `- Son motor metrikleri: loss=\`${m.loss}\`, acc=\`${m.acc}\` (${m.label || m.preset})\n`;
-        body += "- Loss yüksekse lr düşürün; val kötüyse dropout/sabır ekleyin.\n- «hiperparametre öner» veya «teşhis et» diyebilirsiniz.";
-      } else if (prev === "kavram_aciklama" || prev === "web_arastirma") {
-        body += kavramExplain(topic + " " + text);
-      } else if (prev === "kimlik_sohbet") {
-        body += "- ALPER: SphereX Labs × `turk-ml-framework` WASM\n- Harici LLM yok; TF-IDF+bigram → Sequential MLP\n- «neler yapabilirsin» diye sorabilirsiniz.";
+        body += `- Son motor: loss=\`${m.loss}\`, acc=\`${m.acc}\` (${m.label || m.preset})\n- Loss yüksekse lr düşürün; val kötüyse dropout/sabır.`;
+      } else if (prev === "kavram_aciklama" || prev === "rust_mimari_soru" || prev === "web_arastirma") {
+        body = deepenConcept(text);
       } else {
-        body += `- «${topic}» hakkında: bir önceki yanıtın üzerine eklemek için daha spesifik bir anahtar kelime kullanın (relu, wasm, loss, dsl…).\n- Veya chip’lerden birini seçin.`;
+        body += `- «${topic}» için chip seçin veya kavram adı yazın.`;
       }
       const badges = [
         { text: `[Niyet: takip_detay · Güven: %${(confidence * 100).toFixed(1)}]` },
@@ -974,6 +817,14 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       setDialogContext("takip_detay", topic);
     }
 
+    const MIZAH = [
+      "Neden dropout partiden erken ayrıldı? Çünkü bağlantıları koparmak istedi.",
+      "Adam optimizer bir caféde: «Hesabı momentumla bölelim.»",
+      "XOR kapısı terapide: «Bazen 1+1=0 oluyor, normal mi?» — «Sen nonlinear’sin.»",
+      "Overfitting’e sordular: «Geneller misin?» — «Hayır, ezberlerim.»",
+      "WASM yürüyüşe çıktı ama JavaScript’e «ben native’im» dedi.",
+    ];
+
     async function handleIntent(intent, confidence, text, meta = {}) {
       const oovNote = meta.oovRatio != null ? ` · OOV %${(meta.oovRatio * 100).toFixed(0)}` : "";
       const fallbackNote = meta.webFallback ? " · web-düşüş" : "";
@@ -981,20 +832,27 @@ egit(200, 4, sabir=25, min_delta=0.0001)
         { text: `[Niyet: ${intent} · Güven: %${(confidence * 100).toFixed(1)}${oovNote}${fallbackNote}]` },
       ];
       memory.push({ role: "user", text, intent, confidence, t: Date.now() });
-      const chips = followUpChips(intent);
+      let chips = followUpChips(intent);
       const greetName = profile.name ? `, **${profile.name}**` : "";
 
       if (intent === "selamlama") {
-        const msg = `Selam${greetName}!\n\nBen **ALPER** — SphereX Labs’ın \`turk-ml-framework\` WASM motoru üzerinde çalışan yerli asistanınız.\n- Harici LLM yok\n- 16 niyet · unigram+bigram TF-IDF\n- Saat, hesap, model eğitimi, DSL, araştırma…\n\nNasıl yardımcı olayım?`;
-        addBubble("bot", msg, { badges, chips });
+        addBubble("bot", `Selam${greetName}!\n\nBen **ALPER v${ALPER_VERSION}** — \`alper_beyin.js\` + turk WASM.\n- **${INTENTS.length} niyet** · 1000+ örnek · ${Object.keys(ARTICLES).length}+ makale\n- Unigram+bigram TF-IDF → MLP \`64→32→${INTENTS.length}\`\n- Harici LLM yok\n\nNasıl yardımcı olayım?`, { badges, chips });
         setDialogContext(intent, "selamlama");
       } else if (intent === "hal_hatir") {
-        const msg = `Teşekkürler${greetName} — ben her zaman hazırım (yerel WASM, yorulmam 😊).\n\n- Beyin: ${brain ? "eğitilmiş" : "yok"}\n- Motor: ${engineRunner ? "yüklü" : "bekliyor"}\n- Profil: ${profile.name || "henüz isim yok"}\n\nSizin gününüz nasıl? İsterseniz model eğitelim veya bir kavramı açalım.`;
-        addBubble("bot", msg, { badges, chips });
+        addBubble("bot", `Teşekkürler${greetName} — yerel WASM, yorulmam.\n- Beyin: ${brain ? "eğitilmiş" : "yok"}\n- Motor: ${engineRunner ? "yüklü" : "bekliyor"}\n- Profil: ${profile.name || "isim yok"}\n\nSizin gününüz nasıl?`, { badges, chips });
         setDialogContext(intent, "hal_hatir");
+      } else if (intent === "vedalasma") {
+        addBubble("bot", `Görüşürüz${greetName}.\n- Profiliniz \`localStorage\`’da duruyor\n- Döndüğünüzde kaldığınız kavramdan devam edebiliriz\n\nHoşça kalın.`, { badges, chips });
+        setDialogContext(intent, "veda");
+      } else if (intent === "tesekkur") {
+        addBubble("bot", `Rica ederim${greetName}.\n- İsterseniz bir kavramı derinleştirelim veya model eğitelim.\n- Chip’lerden devam edebilirsiniz.`, { badges, chips });
+        setDialogContext(intent, "tesekkur");
+      } else if (intent === "mizah_sohbet") {
+        const joke = MIZAH[Math.floor(Math.random() * MIZAH.length)];
+        addBubble("bot", `**Kısa espri**${greetName}\n\n${joke}\n\n_(Loss’unuz düşsün.)_`, { badges, chips });
+        setDialogContext(intent, "mizah");
       } else if (intent === "kimlik_sohbet") {
-        const msg = `**Ben ALPER.**\n\n- Üretici: **SphereX Labs**\n- Motor: saf Rust \`turk-ml-framework\` → WASM\n- Beyin: TF-IDF (uni+bi) → MLP \`girdi→64→32→16\`\n- **Harici LLM / OpenAI / Groq API yok**\n\nYapabildiklerim: eğitim, tahmin, DSL üretimi, teşhis, Wikipedia/GitHub araştırma, saat/hesap, sizi isminizle hatırlama.`;
-        addBubble("bot", msg, { badges, chips });
+        addBubble("bot", `**Ben ALPER v${ALPER_VERSION}.**\n- Üretici: **SphereX Labs**\n- Motor: Rust \`turk-ml-framework\` → WASM\n- Beyin: TF-IDF (uni+bi) → MLP · **${INTENTS.length} niyet**\n- Yerel makaleler: **${Object.keys(ARTICLES).length}+**\n- **Harici LLM / OpenAI / Groq yok**`, { badges, chips });
         setDialogContext(intent, "kimlik");
       } else if (intent === "kullanici_hafiza") {
         const n = normalizeTr(text);
@@ -1007,18 +865,20 @@ egit(200, 4, sabir=25, min_delta=0.0001)
           if (role) profile.role = role;
           profile.updatedAt = Date.now();
           saveProfile(profile);
-          const msg = `Memnun oldum, **${profile.name}**!\n\n- Adınız \`localStorage\` profiline kaydedildi (\`alper_user_profile\`)\n- ${role ? `Rol: **${role}**\n- ` : ""}Bundan sonra sizi isminizle hitap ederim.\n\nDeneyin: «benim adım ne»`;
-          addBubble("bot", msg, { badges, chips });
+          addBubble("bot", `Memnun oldum, **${profile.name}**!\n- Kayıt: \`alper_user_profile\`\n${role ? `- Rol: **${role}**\n` : ""}- Deneyin: «benim adım ne»`, { badges, chips });
         } else if (askedOwnName || /hatir|tani|kimim|adim ne/.test(n)) {
           if (profile.name) {
-            addBubble("bot", `Evet${greetName ? "" : ""} — sizi **${profile.name}** olarak tanıyorum.${profile.role ? `\n- Rol: **${profile.role}**` : ""}\n\nUnutmamı isterseniz yeni bir ad söyleyin.`, { badges, chips });
+            addBubble("bot", `Sizi **${profile.name}** olarak tanıyorum.${profile.role ? `\n- Rol: **${profile.role}**` : ""}`, { badges, chips });
           } else {
-            addBubble("bot", "Henüz adınızı bilmiyorum.\n\nÖrnek: **«benim adım Sinan»** — hemen kaydederim.", { badges, chips });
+            addBubble("bot", "Henüz adınızı bilmiyorum.\n\nÖrnek: **«benim adım Sinan»**", { badges, chips });
           }
         } else {
-          addBubble("bot", `Profil:\n- Ad: **${profile.name || "(yok)"}**\n- Rol: **${profile.role || "(yok)"}**\n\nKaydetmek için: «benim adım …»`, { badges, chips });
+          addBubble("bot", `Profil:\n- Ad: **${profile.name || "(yok)"}**\n- Rol: **${profile.role || "(yok)"}**`, { badges, chips });
         }
         setDialogContext(intent, "kullanici_hafiza");
+      } else if (intent === "motivasyon_tavsiye") {
+        addBubble("bot", `**Kısa motivasyon**${greetName}\n- Bugün tek net hedef seçin (ör. XOR %95+ veya bir kavram makalesi)\n- 25 dk odak + 5 dk telemetriye bak\n- Küçük commit > mükemmel plan\n- Takıldığınızda «teşhis et» veya «overfitting çözümü» deyin\n\n_SphereX ruhu: yerelde öğren, ölç, tekrarla._`, { badges, chips });
+        setDialogContext(intent, "motivasyon");
       } else if (intent === "saat_tarih") {
         const { tarih, saat, tz } = formatNowTr();
         addBubble("bot", `**Yerel zaman** (\`${tz}\`)\n- Tarih: **${tarih}**\n- Saat: \`${saat}\``, { badges, chips });
@@ -1026,55 +886,87 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       } else if (intent === "hesaplama") {
         const calc = safeEvalArithmetic(text);
         if (calc) {
-          addBubble("bot", `**Hesap sonucu:** \`${calc.value}\`\n- İfade: \`${calc.expr}\``, { badges: [...badges, { text: `= ${calc.value}`, kind: "ok" }], chips });
+          addBubble("bot", `**Hesap:** \`${calc.value}\`\n- İfade: \`${calc.expr}\``, { badges: [...badges, { text: `= ${calc.value}`, kind: "ok" }], chips });
         } else {
-          addBubble("bot", "Anlaşılır aritmetik bulamadım.\n\nÖrnekler:\n- `hesapla 12*7+3`\n- `karekök 16`", { badges, chips, err: true });
+          addBubble("bot", "Aritmetik bulunamadı.\n- `hesapla 12*7+3`\n- `karekök 16`", { badges, chips, err: true });
         }
         setDialogContext(intent, "hesap");
       } else if (intent === "model_egit_xor") {
         addBubble("bot", "XOR motorunu eğitiyorum…", { badges });
         const r = await trainEngine("xor", "Motor · XOR");
         badges.push({ text: `loss ${r.loss}`, kind: "metric" }, { text: `acc ${r.acc}`, kind: "ok" });
-        addBubble("bot", `**XOR eğitimi tamam**${greetName}.\n- Loss: \`${r.loss}\`\n- Doğruluk: \`${r.acc}\`\n\nCanlı çıkarım paneli hazır.`, { badges, chips });
+        addBubble("bot", `**XOR tamam**${greetName}.\n- Loss: \`${r.loss}\` · Acc: \`${r.acc}\``, { badges, chips });
         setDialogContext(intent, "xor", { lastModelMetrics: r });
       } else if (intent === "model_egit_derin") {
-        addBubble("bot", "Derin MLP (2-küme) eğitimi başlıyor…", { badges });
+        addBubble("bot", "Derin MLP eğitimi…", { badges });
         const r = await trainEngine("mlp", "Motor · Derin MLP");
         badges.push({ text: `loss ${r.loss}`, kind: "metric" }, { text: `acc ${r.acc}`, kind: "ok" });
-        addBubble("bot", `**Derin MLP tamam**.\n- Loss: \`${r.loss}\`\n- Doğruluk: \`${r.acc}\`\n- Val split + erken durdurma aktif`, { badges, chips });
+        addBubble("bot", `**Derin MLP tamam.**\n- Loss: \`${r.loss}\` · Acc: \`${r.acc}\`\n- Val + erken durdurma aktif`, { badges, chips });
         setDialogContext(intent, "derin_mlp", { lastModelMetrics: r });
       } else if (intent === "kod_uretme_dsl") {
-        const deep = /derin|mlp|kume|küme/.test(normalizeTr(text));
-        const code = dslFor(deep ? "mlp" : "xor");
-        addBubble("bot", `**Üretilen \`.turk\` DSL** (${deep ? "derin MLP" : "XOR"}):\n\n\`\`\`turk\n${code}\n\`\`\`\n\nChip’ten eğitime geçebilir veya playground’da yapıştırabilirsiniz.`, { badges, chips });
-        setDialogContext(intent, deep ? "dsl_mlp" : "dsl_xor");
+        const { kind, code } = dslFor(text);
+        addBubble("bot", `**Üretilen \`.turk\` DSL** (\`${kind}\`):\n\n\`\`\`turk\n${code}\n\`\`\`\n\nChip ile eğitime geçebilirsiniz.`, { badges, chips });
+        setDialogContext(intent, "dsl_" + kind);
       } else if (intent === "hiperparametre_ayar") {
-        addBubble("bot", `**Hiperparametre önerileri**\n- XOR: Adam \`lr=0.05\`, MSE, batch=4, ~120 epoch\n- Derin MLP: Adam \`lr=0.03\`, batch=4, sabır=25, min_delta=1e-4\n- Loss salınıyorsa lr’yi yarıya indirin\n- ALPER niyet beyni: CrossEntropy + Softmax, mimari \`→64→32→16\``, { badges, chips });
+        addBubble("bot", `**Hiperparametreler**\n- XOR: Adam \`lr=0.05\`, MSE, batch=4, ~120 epoch\n- Derin MLP: Adam \`lr=0.03\`, batch=4, sabır=25\n- **ALPER v3 beyin:** Adam \`lr=0.035\`, batch=**16**, epoch=**110**, CE+Softmax\n- Loss salınıyorsa lr’yi yarıya indirin`, { badges, chips });
         setDialogContext(intent, "hiperparametre");
       } else if (intent === "egitim_teshis") {
         const m = context.lastModelMetrics;
-        addBubble("bot", `**Eğitim teşhisi**\n- Loss düşmüyorsa: lr 0.01–0.05, batch küçült\n- Val↑ train↓: aşırı uyum → dropout / sabır\n- Acc ~%50: etiket/özellik ve 0.5 eşiği\n- XOR: 80+ epoch; derin: küme + sabır=25\n${m ? `- Son metrik: loss=\`${m.loss}\` acc=\`${m.acc}\`` : "- Henüz motor metrik yok — önce eğitin"}\n- Mesaj: «${text.slice(0, 60)}»`, { badges, chips });
+        addBubble("bot", `**Eğitim teşhisi**\n- Loss↓ yoksa: lr 0.01–0.05, batch küçült\n- Val↑ train↓: overfitting → dropout / sabır\n- Acc~%50: etiket/özellik\n${m ? `- Son motor: loss=\`${m.loss}\` acc=\`${m.acc}\`` : "- Motor metrik yok — önce eğitin"}`, { badges, chips });
         setDialogContext(intent, "teshis");
+      } else if (intent === "overfitting_cozum") {
+        const art = lookupArticle("overfitting");
+        addBubble("bot", (art ? art.body + "\n\n" : "") + `**Pratik checklist**\n- Dropout 0.1–0.3\n- Early stopping (sabır)\n- Model sadeleştir / veri artır\n- Weight decay düşün\n- Val split izle`, { badges, chips });
+        setDialogContext(intent, "overfitting", { lastConcept: "overfitting" });
       } else if (intent === "canli_tahmin") {
         try {
-          const msg = enginePredict(parsePredictFeatures(text));
-          addBubble("bot", msg, { badges, chips });
+          addBubble("bot", enginePredict(parsePredictFeatures(text)), { badges, chips });
         } catch (e) {
           addBubble("bot", String(e.message || e), { badges, chips, err: true });
         }
         setDialogContext(intent, "tahmin");
+      } else if (intent === "model_disa_aktar") {
+        try {
+          if (!engineRunner) throw new Error("Önce bir motor modeli eğitin, sonra indirin.");
+          const json = engineRunner.model_json();
+          const blob = new Blob([json], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a"); a.href = url; a.download = "turk_model.json"; a.click();
+          URL.revokeObjectURL(url);
+          addBubble("bot", "**Model dışa aktarıldı:** `turk_model.json` indirildi.", { badges, chips });
+        } catch (e) {
+          addBubble("bot", String(e.message || e), { badges, chips, err: true });
+        }
+        setDialogContext(intent, "export");
       } else if (intent === "web_arastirma") {
-        addBubble("bot", "Açık web taraniyor (`webAra`)…", { badges });
-        const res = await webAra(text);
-        addBubble("bot", `**Araştırma:** «${res.query}»\n\n${res.summary}`, { badges, chips, htmlExtra: sourcesHtml(res.sources) });
-        setDialogContext(intent, res.query);
-      } else if (intent === "kavram_aciklama") {
-        const body = kavramExplain(text);
-        addBubble("bot", body, { badges, chips });
-        setDialogContext(intent, normalizeTr(text).slice(0, 40));
+        // Prefer local articles when query looks like "<konu> nedir/anlat"
+        const local = lookupArticle(text);
+        if (local && !/github|wikipedia|web/.test(normalizeTr(text))) {
+          context.lastConcept = local.key;
+          chips = articleChips(local.followUps).concat(chips.slice(0, 1));
+          addBubble("bot", local.body + "\n\n_(Yerel makale — web’e düşülmedi.)_", { badges, chips });
+          setDialogContext("kavram_aciklama", local.key, { lastConcept: local.key });
+        } else {
+          addBubble("bot", "Açık web taraniyor (`webAra`)…", { badges });
+          const res = await webAra(text);
+          addBubble("bot", `**Araştırma:** «${res.query}»\n\n${res.summary}`, { badges, chips, htmlExtra: sourcesHtml(res.sources) });
+          setDialogContext(intent, res.query);
+        }
+      } else if (intent === "kavram_aciklama" || intent === "rust_mimari_soru") {
+        const expl = kavramExplain(text);
+        if (expl.key) {
+          chips = articleChips(expl.followUps).concat(followUpChips(intent).slice(0, 1));
+        }
+        addBubble("bot", expl.body, { badges, chips });
+        setDialogContext(intent, expl.key || normalizeTr(text).slice(0, 40), expl.key ? { lastConcept: expl.key } : {});
       } else if (intent === "sistem_durumu") {
-        addBubble("bot", `**Sistem raporu**${greetName}\n- WASM: ${ready ? "hazır" : "yok"}\n- ALPER beyni: ${brain ? "eğitilmiş" : "yok"} (vocab=${vocab.length})\n- Niyet sayısı: **${INTENTS.length}**\n- Motor: ${engineRunner ? `var (girdi=${engineRunner.girdi_boyutu()})` : "yok"}\n- Profil: **${profile.name || "—"}**\n- Öğretilen: ${loadTaught().length}\n- Son niyet: \`${context.lastIntent || "—"}\`\n- Harici LLM/API: **yok**`, { badges, chips });
+        const st = datasetStats();
+        addBubble("bot", `**Sistem raporu**${greetName}\n- WASM: ${ready ? "hazır" : "yok"}\n- ALPER v${ALPER_VERSION}: ${brain ? "eğitilmiş" : "yok"} (vocab=${vocab.length})\n- Niyet: **${st.intents}** · Örnek: **${st.total}** · Makale: **${st.articles}**\n- Motor: ${engineRunner ? `var (girdi=${engineRunner.girdi_boyutu()})` : "yok"}\n- Profil: **${profile.name || "—"}**\n- lastIntent: \`${context.lastIntent || "—"}\` · lastConcept: \`${context.lastConcept || "—"}\`\n- Harici LLM: **yok**`, { badges, chips });
         setDialogContext(intent, "sistem");
+      } else if (intent === "performans_f32_blas") {
+        const a = lookupArticle("f32_f64") || lookupArticle("blas");
+        addBubble("bot", (a ? a.body + "\n\n" : "") + `**Kokpit ipucu**\n- Beyin eğitimi: batch=16, ~110 epoch → hedef <1.5s\n- Release + f32 + BLAS/SIMD büyük matmul’da fark eder\n- Vocab/özellik boyutunu şişirmeyin`, { badges, chips });
+        setDialogContext(intent, "performans", { lastConcept: a?.key || "blas" });
       } else if (intent === "takip_detay") {
         await handleFollowUp(text, confidence, meta);
       } else {
@@ -1101,7 +993,6 @@ egit(200, 4, sabir=25, min_delta=0.0001)
         return;
       }
 
-      // Hızlı kural: "benim adım ne" vs "senin adın ne"
       const n = normalizeTr(cmd);
       const toksJoined = tokenize(cmd).join(" ");
       let classified = classifyIntent(cmd);
@@ -1109,21 +1000,25 @@ egit(200, 4, sabir=25, min_delta=0.0001)
 
       if (/\bbenim ad[ıi]m ne\b/.test(n) || toksJoined.includes("benim_adim_ne")) {
         classified = { ...classified, intent: "kullanici_hafiza", confidence: Math.max(classified.confidence, 0.9) };
-      } else if (/\bsenin ad[ıi]n ne\b/.test(n) || toksJoined.includes("senin_adin_ne") || toksJoined.includes("adin_ne")) {
+      } else if (/\bsenin ad[ıi]n ne\b/.test(n) || toksJoined.includes("senin_adin_ne")) {
         classified = { ...classified, intent: "kimlik_sohbet", confidence: Math.max(classified.confidence, 0.9) };
-      } else if (/^(neden|detay|acikla|açıkla|peki|nasil|nasıl|devam|uygula)\b/.test(n) || classified.intent === "takip_detay") {
+      } else if (/^(neden|detay|acikla|açıkla|peki|nasil|nasıl|devam|uygula|dezavantaj|ornek|örnek)\b/.test(n) || classified.intent === "takip_detay") {
         if (context.lastIntent && classified.confidence < 0.85) {
           classified = { ...classified, intent: "takip_detay", confidence: Math.max(classified.confidence, 0.8) };
         }
       }
 
+      // Local articles first for "<konu> nedir|anlat|açıkla"
+      const localArt = lookupArticle(cmd);
+      const conceptAsk = /\b(nedir|ne demek|anlat|acikla|açıkla|tarif)\b/.test(n);
       let webFallback = false;
-      if (n.includes("arastir") || n.includes("nedir") || n.includes("hakkinda") || n.includes("wikipedia") || n.includes("github")) {
-        if (classified.intent !== "kavram_aciklama" && classified.intent !== "web_arastirma") {
-          // "nedir açıkla" → kavram; pure research keywords → web
-          if (/acikla|anlat|tarif/.test(n)) {
+      if (localArt && conceptAsk) {
+        classified = { ...classified, intent: /ownership|borrow|lifetime|simd|cargo|rust|bindgen/.test(n) ? "rust_mimari_soru" : "kavram_aciklama", confidence: Math.max(classified.confidence, 0.88) };
+      } else if (n.includes("arastir") || n.includes("wikipedia") || n.includes("github") || (n.includes("nedir") && !localArt)) {
+        if (classified.intent !== "kavram_aciklama" && classified.intent !== "rust_mimari_soru" && classified.intent !== "web_arastirma") {
+          if (/acikla|anlat|tarif/.test(n) && localArt) {
             classified = { ...classified, intent: "kavram_aciklama", confidence: Math.max(classified.confidence, 0.75) };
-          } else {
+          } else if (n.includes("arastir") || n.includes("github") || n.includes("wikipedia")) {
             classified = { ...classified, intent: "web_arastirma", confidence: Math.max(classified.confidence, 0.75) };
           }
         }
@@ -1157,7 +1052,7 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       if (busy) return;
       busy = true; retrainBtn.disabled = true; teachBtn.disabled = true;
       try {
-        addBubble("bot", "ALPER beyni yeniden eğitiliyor (64→32→16)…");
+        addBubble("bot", `ALPER v${ALPER_VERSION} yeniden eğitiliyor (batch=${TRAIN_BATCH}, epoch=${TRAIN_EPOCHS})…`);
         const s = await trainAlperBrain();
         addBubble("bot", `Yeniden eğitim tamam. Doğruluk **%${((s.final_accuracy || 0) * 100).toFixed(1)}**.`);
       } catch (e) { addBubble("bot", String(e?.message || e), { err: true }); }
@@ -1211,11 +1106,11 @@ egit(200, 4, sabir=25, min_delta=0.0001)
         ready = true;
         retrainBtn.disabled = false;
         teachBtn.disabled = false;
-        const totalEx = INTENTS.reduce((n, i) => n + (DATASET[i]?.length || 0), 0);
+        const st = datasetStats();
         setStatus("WASM yüklendi — beyin eğitiliyor…", "ok");
-        addBubble("bot", `Merhaba${profile.name ? `, **${profile.name}**` : ""}. Ben **ALPER**.\n\n- ${INTENTS.length} niyet · ~${totalEx} örnek\n- Unigram + bigram TF-IDF\n- MLP \`→64→32→16\` (turk WASM)`);
+        addBubble("bot", `Merhaba${profile.name ? `, **${profile.name}**` : ""}. Ben **ALPER v${ALPER_VERSION}**.\n\n- ${st.intents} niyet · ${st.total} örnek · ${st.articles} makale\n- Mini-batch ${TRAIN_BATCH} · ${TRAIN_EPOCHS} epoch · Adam lr≈0.035\n- MLP \`→64→32→${st.intents}\``);
         await trainAlperBrain();
-        addBubble("bot", `Beyin hazır. Deneyin:\n- «benim adım Sinan» / «benim adım ne» / «senin adın ne»\n- «XOR DSL üret» · «bunu açıkla»\n- Öğret: \`Öğren: saati söylesene -> saat_tarih\``, {
+        addBubble("bot", `Beyin hazır. Deneyin:\n- «benim adım Sinan» · «relu nedir» · «bunu biraz daha aç»\n- «XOR DSL üret» · «aşırı uyum nasıl çözülür»\n- Öğret: \`Öğren: saati söylesene -> saat_tarih\``, {
           chips: followUpChips("selamlama"),
         });
       } catch (e) {
@@ -1225,7 +1120,7 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       }
     }
 
-    console.info("[ALPER] örnek sayısı", INTENTS.reduce((n, i) => n + (DATASET[i]?.length || 0), 0));
+    console.info("[ALPER v3]", datasetStats());
     initSpeech();
     initWasm();
   </script>

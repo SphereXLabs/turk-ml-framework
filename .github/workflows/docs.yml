@@ -40,7 +40,8 @@ jobs:
         run: |
           mkdir -p target/doc/playground target/doc/kokpit
           cp playground/index.html target/doc/playground/index.html
-          cp kokpit/index.html target/doc/kokpit/index.html
+          # Tüm kokpit varlıkları (index.html, alper_beyin.js, …)
+          cp -a kokpit/. target/doc/kokpit/
 
       - name: WASM Derle (Playground + Kokpit paylaşır)
         run: |
