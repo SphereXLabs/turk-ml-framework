@@ -1,12 +1,19 @@
-//! WASM Browser Playground köprüsü — `.turk` DSL'ini tarayıcıda çalıştırır.
+//! WASM Browser Playground / ALPER Kokpit köprüsü.
 //!
 //! Disk erişimi yoktur; `veri_yukle("xor")` gibi çağrılar sentetik bellek verisine
 //! yönlendirilir. Epoch metrikleri ve model özeti JSON olarak döner.
 //! Eğitim sonrası `tahmin_et` ile canlı çıkarım yapılabilir.
+//! `AlperBeyin` — harici LLM olmadan niyet sınıflandırma ağı (TF-IDF/BoW vektörleri).
 
+use crate::aktivasyon::Activation;
 use crate::dil::{EgitimIlerleme, TurkDil};
 use crate::dtype::{self, Float};
+use crate::initializers::{GlorotUniform, Zeros};
+use crate::layer::Dense;
+use crate::loss::CrossEntropy;
 use crate::metrics::{Accuracy, Metric};
+use crate::model::Sequential;
+use crate::optimizer::Adam;
 use ndarray::Array2;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -305,4 +312,200 @@ fn ilerleme_log(olay: &EgitimIlerleme) -> String {
         },
         EgitimIlerleme::Hata(e) => format!("eğitim hatası: {e}"),
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AlperEgitimSonuc {
+    metrics: Vec<EpochMetrik>,
+    input_dim: usize,
+    output_dim: usize,
+    sample_count: usize,
+    final_accuracy: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AlperNiyetSonuc {
+    intent_index: usize,
+    confidence: f64,
+    probabilities: Vec<f64>,
+}
+
+/// ALPER niyet / teşhis beyni — `Sequential` çok sınıflı sınıflandırıcı (WASM).
+///
+/// Harici LLM API’si yoktur; BoW/TF-IDF vektörleri doğrudan bu ağa beslenir.
+#[wasm_bindgen]
+pub struct AlperBeyin {
+    model: Sequential,
+    input_dim: usize,
+    output_dim: usize,
+}
+
+#[wasm_bindgen]
+impl AlperBeyin {
+    /// `input_dim` özellik, `output_dim` sınıf (one-hot) için MLP oluşturur.
+    #[wasm_bindgen(constructor)]
+    pub fn new(input_dim: usize, output_dim: usize) -> Result<AlperBeyin, JsValue> {
+        if input_dim == 0 || output_dim < 2 {
+            return Err(JsValue::from_str(
+                "AlperBeyin: input_dim > 0 ve output_dim >= 2 olmalı",
+            ));
+        }
+
+        let hidden1 = (input_dim * 2).clamp(32, 96);
+        let hidden2 = (output_dim * 4).clamp(16, 48);
+
+        let mut model = Sequential::new();
+        model
+            .add(dense_layer(input_dim, hidden1, Activation::Relu)?)
+            .add(dense_layer(hidden1, hidden2, Activation::Relu)?)
+            .add(dense_layer(hidden2, output_dim, Activation::Softmax)?);
+
+        let lr = dtype::from_f64(0.02);
+        model.compile_with_loss(
+            Box::new(Adam::new(lr, 0.9, 0.999, dtype::from_f64(1e-8))),
+            Box::new(CrossEntropy::new(false)),
+        );
+
+        Ok(Self {
+            model,
+            input_dim,
+            output_dim,
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn girdi_boyutu(&self) -> usize {
+        self.input_dim
+    }
+
+    #[wasm_bindgen]
+    pub fn cikti_boyutu(&self) -> usize {
+        self.output_dim
+    }
+
+    /// Düz JSON matrisleriyle eğit: `x` = [n][input_dim], `y` = [n][output_dim] one-hot.
+    #[wasm_bindgen]
+    pub fn egit(
+        &mut self,
+        x_json: &str,
+        y_json: &str,
+        epochs: usize,
+        batch_size: usize,
+    ) -> Result<JsValue, JsValue> {
+        let x_raw: Vec<Vec<f64>> = serde_json::from_str(x_json)
+            .map_err(|e| JsValue::from_str(&format!("x JSON hatası: {e}")))?;
+        let y_raw: Vec<Vec<f64>> = serde_json::from_str(y_json)
+            .map_err(|e| JsValue::from_str(&format!("y JSON hatası: {e}")))?;
+
+        if x_raw.is_empty() || x_raw.len() != y_raw.len() {
+            return Err(JsValue::from_str(
+                "AlperBeyin.egit: boş veya boyut uyuşmayan veri",
+            ));
+        }
+
+        let n = x_raw.len();
+        let mut x_data = Vec::with_capacity(n * self.input_dim);
+        let mut y_data = Vec::with_capacity(n * self.output_dim);
+
+        for (row_x, row_y) in x_raw.iter().zip(y_raw.iter()) {
+            if row_x.len() != self.input_dim {
+                return Err(JsValue::from_str(&format!(
+                    "x satır boyutu {} != input_dim {}",
+                    row_x.len(),
+                    self.input_dim
+                )));
+            }
+            if row_y.len() != self.output_dim {
+                return Err(JsValue::from_str(&format!(
+                    "y satır boyutu {} != output_dim {}",
+                    row_y.len(),
+                    self.output_dim
+                )));
+            }
+            x_data.extend(row_x.iter().copied().map(dtype::from_f64));
+            y_data.extend(row_y.iter().copied().map(dtype::from_f64));
+        }
+
+        let x = Array2::from_shape_vec((n, self.input_dim), x_data)
+            .map_err(|e| JsValue::from_str(&format!("x shape: {e}")))?;
+        let y = Array2::from_shape_vec((n, self.output_dim), y_data)
+            .map_err(|e| JsValue::from_str(&format!("y shape: {e}")))?;
+
+        let epochs = epochs.max(1);
+        let batch = batch_size.clamp(1, n);
+        let history = self
+            .model
+            .fit(&x.view(), &y.view(), epochs, batch, None)
+            .map_err(|e| JsValue::from_str(&format!("ALPER eğitim hatası: {e}")))?;
+
+        let mut metrics = Vec::with_capacity(history.train_losses.len());
+        for (i, &loss) in history.train_losses.iter().enumerate() {
+            metrics.push(EpochMetrik {
+                epoch: i + 1,
+                loss: dtype::to_f64(loss),
+                accuracy: 0.0,
+            });
+        }
+
+        let pred = self
+            .model
+            .predict(&x.view())
+            .map_err(|e| JsValue::from_str(&format!("doğruluk tahmini: {e}")))?;
+        let final_accuracy = dtype::to_f64(Accuracy::new().compute(&y.view(), &pred.view()));
+        for m in &mut metrics {
+            m.accuracy = final_accuracy;
+        }
+
+        let sonuc = AlperEgitimSonuc {
+            metrics,
+            input_dim: self.input_dim,
+            output_dim: self.output_dim,
+            sample_count: n,
+            final_accuracy,
+        };
+        serde_wasm_bindgen::to_value(&sonuc).map_err(|e| JsValue::from_str(&format!("JSON: {e}")))
+    }
+
+    /// Tek BoW/TF-IDF vektörü → niyet indeksi + softmax güven.
+    #[wasm_bindgen]
+    pub fn niyet_tahmin(&mut self, x_json: &str) -> Result<String, JsValue> {
+        let row: Vec<f64> = serde_json::from_str(x_json)
+            .map_err(|e| JsValue::from_str(&format!("vektör JSON hatası: {e}")))?;
+        if row.len() != self.input_dim {
+            return Err(JsValue::from_str(&format!(
+                "vektör boyutu {} != {}",
+                row.len(),
+                self.input_dim
+            )));
+        }
+
+        let data: Vec<Float> = row.iter().copied().map(dtype::from_f64).collect();
+        let x = Array2::from_shape_vec((1, self.input_dim), data)
+            .map_err(|e| JsValue::from_str(&format!("shape: {e}")))?;
+        let pred = self
+            .model
+            .predict(&x.view())
+            .map_err(|e| JsValue::from_str(&format!("niyet tahmini: {e}")))?;
+
+        let probabilities: Vec<f64> = pred.iter().copied().map(dtype::to_f64).collect();
+        let (intent_index, confidence) = classify_outputs(&probabilities);
+        let sonuc = AlperNiyetSonuc {
+            intent_index,
+            confidence,
+            probabilities,
+        };
+        serde_json::to_string(&sonuc).map_err(|e| JsValue::from_str(&format!("JSON: {e}")))
+    }
+}
+
+fn dense_layer(i: usize, o: usize, act: Activation) -> Result<Dense, JsValue> {
+    Dense::new(
+        i,
+        o,
+        act,
+        Box::new(GlorotUniform::new()),
+        Box::new(Zeros::new()),
+        true,
+    )
+    .map_err(|e| JsValue::from_str(&format!("Dense katman hatası: {e}")))
 }

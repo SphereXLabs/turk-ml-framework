@@ -513,7 +513,7 @@ pub fn turk_sistem_veri_dizini() -> PathBuf {
 
 /// Geriye uyumluluk — `turk_sistem_veri_dizini` kullanın.
 #[deprecated(note = "turk_sistem_veri_dizini kullanın")]
-pub fn jarvis_veri_dizini() -> PathBuf {
+pub fn alper_veri_dizini() -> PathBuf {
     turk_sistem_veri_dizini()
 }
 

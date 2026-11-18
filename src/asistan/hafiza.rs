@@ -1,4 +1,4 @@
-//! TÜRK Jarvis v3 — bağlamsal semantik hafıza havuzu + oturum vektör arama.
+//! TÜRK ALPER v0.3 — bağlamsal semantik hafıza havuzu + oturum vektör arama.
 
 pub use crate::otomasyon::notlar::{hafiza_tara, hafiza_tara_ozet, HafizaEslesme, HafizaMerkezi};
 

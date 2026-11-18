@@ -335,7 +335,7 @@ fn sohbet_baloncuk_ciz(ui: &mut egui::Ui, gonderen: &str, metin: &str) {
 enum TurkSinyal {
     Tamamlandi {
         zincir_loglari: Vec<String>,
-        jarvis_basarili: bool,
+        alper_basarili: bool,
         semantik: Vec<String>,
     },
     Hata(String),
@@ -916,7 +916,7 @@ impl TurkSistemGui {
                         }
                         let _ = tx.send(TurkSinyal::Tamamlandi {
                             zincir_loglari,
-                            jarvis_basarili: zincir_basarili,
+                            alper_basarili: zincir_basarili,
                             semantik,
                         });
                     }
@@ -1037,20 +1037,20 @@ impl TurkSistemGui {
         let mut bitti = false;
         let mut log_satirlari: Vec<String> = Vec::new();
         let mut son_yanit: Option<String> = None;
-        let mut jarvis_basarili = false;
+        let mut alper_basarili = false;
 
         if let Some(rx) = self.turk_rx.as_ref() {
             while let Ok(msg) = rx.try_recv() {
                 match msg {
                     TurkSinyal::Tamamlandi {
                         zincir_loglari,
-                        jarvis_basarili: jarvis_ok,
+                        alper_basarili: alper_ok,
                         semantik,
                     } => {
                         for z in &zincir_loglari {
                             log_satirlari.push(z.clone());
                         }
-                        jarvis_basarili = jarvis_ok;
+                        alper_basarili = alper_ok;
                         self.semantik_bellek = semantik;
                         if let Ok(g) = self.sohbet.lock() {
                             if let Some((_, son)) = g.last() {
@@ -1076,7 +1076,7 @@ impl TurkSistemGui {
             self.ajans_gunlugu_cikar(&yanit);
         }
 
-        if jarvis_basarili {
+        if alper_basarili {
             self.zincir_muhur = Some(ZINCIR_MUHUR_METIN.into());
         }
 

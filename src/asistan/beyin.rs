@@ -96,7 +96,7 @@ impl AsistanBeyni {
 
     /// Tam düşünce döngüsü: Prompt → [Zincir | Karar] → [Araç + Otomasyon] → Son cevap
     pub fn dusunce_dongusu(&mut self, girdi: &str, hafiza_baglam: &str) -> Result<String> {
-        // Jarvis v3: çok adımlı zincir önceliği
+        // ALPER v0.3: çok adımlı zincir önceliği
         if otonom_zincir_planlayici::cok_adimli_mi(girdi) {
             if let Some(sonuc) = otonom_zincir_planlayici::otonom_zincir_planla_ve_yurut(girdi) {
                 return Ok(zincir_yanit_bicimlendir(girdi, sonuc?));

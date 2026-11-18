@@ -13,9 +13,9 @@ TÜRK, Türkçe kullanarak yapay sinir ağları oluşturmanızı, eğitmenizi ve
 > [!IMPORTANT]
 > ### Canlı Tarayıcı Demosu
 >
-> Kurulum olmadan Türkçe komutlarla eğitip tahmin edin — Jarvis asistan + ML monitör tek çatıda:
+> Kurulum olmadan Türkçe komutlarla eğitip tahmin edin — ALPER (yerel `turk` sinir beyni, harici LLM yok) + ML monitör:
 >
-> **[▶ Göktürk Kokpit (Jarvis)](https://spherexlabs.github.io/turk-ml-framework/kokpit/)** &nbsp;·&nbsp; **[WASM Playground](https://spherexlabs.github.io/turk-ml-framework/playground/)** &nbsp;·&nbsp; **[API Docs (`turk`)](https://spherexlabs.github.io/turk-ml-framework/turk/)**
+> **[▶ Göktürk Kokpit (ALPER)](https://spherexlabs.github.io/turk-ml-framework/kokpit/)** &nbsp;·&nbsp; **[WASM Playground](https://spherexlabs.github.io/turk-ml-framework/playground/)** &nbsp;·&nbsp; **[API Docs (`turk`)](https://spherexlabs.github.io/turk-ml-framework/turk/)**
 
 ## 🎯 Vizyon ve Felsefe
 
@@ -32,7 +32,7 @@ Bu vizyon doğrultusunda, TÜRK projesi yalnızca bir dil veya kütüphane deği
 ## 🌟 Özellikler
 
 - **Türkçe Programlama Dili**: Yapay sinir ağlarını Türkçe komutlarla tanımlayın ve eğitin
-- **WASM Playground & Kokpit**: Tarayıcıda DSL + Jarvis Türkçe asistan / canlı çıkarım (kurulum gerekmez)
+- **WASM Playground & ALPER Kokpit**: Tarayıcıda DSL + yerli niyet beyni (TF-IDF → `turk` MLP) / açık web araştırma / canlı çıkarım
 - **Kolay Kullanım**: Basit sözdizimi ile karmaşık yapay sinir ağları oluşturun
 - **Çeşitli Ağ Mimarileri**: Yoğun katmanlar, dropout, aktivasyon fonksiyonları ve daha fazlası
 - **Farklı Optimizasyon Algoritmaları**: SGD, Adam, AdamW, RMSProp
@@ -61,8 +61,10 @@ cargo build --release
 # Göktürk Kokpit (v0.3.0) — Windows (yerel egui)
 .\scripts\cargo.ps1 build --features turk_sistem
 .\scripts\turk-sistem.ps1
+.\scripts\alper.ps1
 
 # Yardımcı scriptler: scripts/  ·  örnek .turk dosyaları: examples/
+# Kokpit (ALPER): https://spherexlabs.github.io/turk-ml-framework/kokpit/
 ```
 
 Detaylı kurulum talimatları, farklı işletim sistemleri için özel adımlar ve sorun giderme için [INSTALL.md](INSTALL.md) dosyasına bakınız.

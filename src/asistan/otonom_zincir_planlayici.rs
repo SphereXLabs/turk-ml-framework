@@ -1,4 +1,4 @@
-//! Jarvis v3 — çok adımlı otonom araç zincirleme (Chain of Thought).
+//! ALPER v0.3 — çok adımlı otonom araç zincirleme (Chain of Thought).
 
 use crate::error::Result;
 use crate::otomasyon::araclar::{self, AracKomut};
