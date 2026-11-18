@@ -2,9 +2,12 @@
 //!
 //! Disk erişimi yoktur; `veri_yukle("xor")` gibi çağrılar sentetik bellek verisine
 //! yönlendirilir. Epoch metrikleri ve model özeti JSON olarak döner.
+//! Eğitim sonrası `tahmin_et` ile canlı çıkarım yapılabilir.
 
 use crate::dil::{EgitimIlerleme, TurkDil};
+use crate::dtype::{self, Float};
 use crate::metrics::{Accuracy, Metric};
+use ndarray::Array2;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -20,6 +23,16 @@ struct WasmCalistirSonuc {
     logs: Vec<String>,
     metrics: Vec<EpochMetrik>,
     model_summary: String,
+    input_dim: usize,
+    output_dim: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WasmTahminSonuc {
+    outputs: Vec<f64>,
+    predicted_class: usize,
+    confidence: f64,
+    label: String,
 }
 
 /// Tarayıcıda TÜRK DSL çalıştırıcı.
@@ -40,7 +53,7 @@ impl TurkWasmRunner {
 
     /// `.turk` DSL kodunu satır satır çalıştırır.
     ///
-    /// Dönüş: `{ logs, metrics: [{epoch, loss, accuracy}], model_summary }`
+    /// Dönüş: `{ logs, metrics, model_summary, input_dim, output_dim }`
     #[wasm_bindgen]
     pub fn calistir_kod(&mut self, kod: &str) -> Result<JsValue, JsValue> {
         let (tx, rx) = std::sync::mpsc::channel::<EgitimIlerleme>();
@@ -110,6 +123,7 @@ impl TurkWasmRunner {
             m.accuracy = accuracy;
         }
 
+        let (input_dim, output_dim) = self.model_dims();
         let model_summary = self
             .dil
             .model
@@ -121,10 +135,91 @@ impl TurkWasmRunner {
             logs,
             metrics,
             model_summary,
+            input_dim,
+            output_dim,
         };
 
         serde_wasm_bindgen::to_value(&sonuc)
             .map_err(|e| JsValue::from_str(&format!("JSON serileştirme hatası: {e}")))
+    }
+
+    /// Eğitilmiş modelin girdi boyutu (yoksa 0).
+    #[wasm_bindgen]
+    pub fn girdi_boyutu(&self) -> usize {
+        self.model_dims().0
+    }
+
+    /// Eğitilmiş modelin çıktı boyutu (yoksa 0).
+    #[wasm_bindgen]
+    pub fn cikti_boyutu(&self) -> usize {
+        self.model_dims().1
+    }
+
+    /// Kullanıcı girdileri üzerinde canlı çıkarım (`set_training(false)`).
+    ///
+    /// `inputs_json`: örn. `"[1.0, 0.0]"` — model girdi boyutuna eşit uzunlukta sayı dizisi.
+    /// Dönüş JSON: `{ outputs, predicted_class, confidence, label }`
+    #[wasm_bindgen]
+    pub fn tahmin_et(&mut self, inputs_json: &str) -> Result<String, JsValue> {
+        let inputs: Vec<f64> = serde_json::from_str(inputs_json).map_err(|e| {
+            JsValue::from_str(&format!("Girdi JSON parse hatası: {e} (örnek: [1.0, 0.0])"))
+        })?;
+
+        let model =
+            self.dil.model.as_mut().ok_or_else(|| {
+                JsValue::from_str("Önce bir model eğitin (Modeli Eğit / Çalıştır).")
+            })?;
+
+        let in_dim = model.layers.first().map(|l| l.input_size()).unwrap_or(0);
+        if in_dim == 0 {
+            return Err(JsValue::from_str("Modelde girdi katmanı yok."));
+        }
+        if inputs.len() != in_dim {
+            return Err(JsValue::from_str(&format!(
+                "Girdi boyutu uyuşmuyor: beklenen {in_dim}, gelen {}",
+                inputs.len()
+            )));
+        }
+
+        let data: Vec<Float> = inputs.iter().copied().map(dtype::from_f64).collect();
+        let x = Array2::from_shape_vec((1, in_dim), data)
+            .map_err(|e| JsValue::from_str(&format!("Tensor şekil hatası: {e}")))?;
+
+        let pred = model
+            .predict(&x.view())
+            .map_err(|e| JsValue::from_str(&format!("Tahmin hatası: {e}")))?;
+
+        let outputs: Vec<f64> = pred.iter().copied().map(dtype::to_f64).collect();
+        let (predicted_class, confidence) = classify_outputs(&outputs);
+        let label = format!("Sınıf {predicted_class} ({confidence:.4})");
+
+        let sonuc = WasmTahminSonuc {
+            outputs,
+            predicted_class,
+            confidence,
+            label,
+        };
+        serde_json::to_string(&sonuc)
+            .map_err(|e| JsValue::from_str(&format!("JSON serileştirme hatası: {e}")))
+    }
+
+    /// JS uyumluluk takma adı — `tahmin_et` ile aynı.
+    #[wasm_bindgen(js_name = predict)]
+    pub fn predict_js(&mut self, inputs_json: &str) -> Result<String, JsValue> {
+        self.tahmin_et(inputs_json)
+    }
+
+    /// Eğitilmiş model ağırlıklarını pretty JSON olarak döndürür (tarayıcıda indirme için).
+    #[wasm_bindgen]
+    pub fn model_json(&self) -> Result<String, JsValue> {
+        let model = self
+            .dil
+            .model
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("İndirilecek model yok — önce eğitin."))?;
+        model
+            .to_json_string()
+            .map_err(|e| JsValue::from_str(&format!("Model JSON hatası: {e}")))
     }
 }
 
@@ -135,6 +230,17 @@ impl Default for TurkWasmRunner {
 }
 
 impl TurkWasmRunner {
+    fn model_dims(&self) -> (usize, usize) {
+        match self.dil.model.as_ref() {
+            Some(m) if !m.layers.is_empty() => {
+                let i = m.layers.first().map(|l| l.input_size()).unwrap_or(0);
+                let o = m.layers.last().map(|l| l.output_size()).unwrap_or(0);
+                (i, o)
+            }
+            _ => (0, 0),
+        }
+    }
+
     /// Aktif sentetik veri (xor / kume) üzerinde ikili doğruluk.
     fn dataset_accuracy(&mut self) -> Option<f64> {
         let (x, y) = self.dil.aktif_degerlendirme_verisi()?;
@@ -142,6 +248,26 @@ impl TurkWasmRunner {
         let pred = model.predict(&x.view()).ok()?;
         let acc = Accuracy::new().compute(&y.view(), &pred.view());
         Some(crate::dtype::to_f64(acc))
+    }
+}
+
+/// Tek çıkış → 0.5 eşiği; çoklu çıkış → argmax.
+fn classify_outputs(outputs: &[f64]) -> (usize, f64) {
+    if outputs.is_empty() {
+        return (0, 0.0);
+    }
+    if outputs.len() == 1 {
+        let p = outputs[0];
+        let cls = if p >= 0.5 { 1 } else { 0 };
+        let conf = if cls == 1 { p } else { 1.0 - p };
+        (cls, conf)
+    } else {
+        let (idx, &val) = outputs
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or((0, &0.0));
+        (idx, val)
     }
 }
 

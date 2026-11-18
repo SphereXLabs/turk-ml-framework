@@ -1,6 +1,6 @@
 [package]
 name = "turk"
-version = "3.0.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["SphereX <turkdilmodeli@gmail.com>"]
 description = "Türkçe yapay sinir ağı kütüphanesi"

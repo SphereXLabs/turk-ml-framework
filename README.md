@@ -8,7 +8,7 @@
 
 TÜRK, Türkçe kullanarak yapay sinir ağları oluşturmanızı, eğitmenizi ve değerlendirmenizi sağlayan açık kaynaklı bir yapay zeka kütüphanesi ve DSL (Domain Specific Language) projesidir.
 
-> **v3.0.0 — Göktürk Kokpit:** Yerel semantik hafıza, otonom araç zinciri, sistem paneli (`turk_sistem`), WASM tarayıcı playground, `f32` / BLAS hızlandırma ve modernize CI/CD dahildir.
+> **v0.3.0 — Göktürk Kokpit:** Yerel semantik hafıza, otonom araç zinciri, sistem paneli (`turk_sistem`), WASM tarayıcı playground (canlı tahmin), `f32` / BLAS hızlandırma ve modernize CI/CD dahildir.
 
 > [!IMPORTANT]
 > ### Canlı Tarayıcı Demosu (WASM Playground)
@@ -58,7 +58,7 @@ git clone https://github.com/SphereXLabs/turk-ml-framework.git
 cd turk-ml-framework
 cargo build --release
 
-# Göktürk Kokpit (v3.0.0) — Windows
+# Göktürk Kokpit (v0.3.0) — Windows
 .\cargo.ps1 build --features turk_sistem
 .\turk-sistem.ps1
 ```

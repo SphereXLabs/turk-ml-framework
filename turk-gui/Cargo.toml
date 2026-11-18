@@ -1,6 +1,6 @@
 [package]
 name = "turk-gui"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["TURK Dil Topluluğu <TurkDilModeli@gmail.com>"]
 description = "TURK Programlama Dili için grafik kullanıcı arayüzü"

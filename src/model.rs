@@ -820,11 +820,8 @@ impl Sequential {
         Ok(())
     }
 
-    /// Modeli dosyaya kaydeder
-    ///
-    /// # Parametreler
-    /// - `path`: Kaydedilecek dosya yolu
-    pub fn save(&self, path: &str) -> Result<()> {
+    /// Model ağırlıklarını JSON metnine serileştirir (disk gerekmez — WASM uyumlu).
+    pub fn to_json_string(&self) -> Result<String> {
         let mut layer_data = Vec::with_capacity(self.layers.len());
 
         for layer in &self.layers {
@@ -888,7 +885,15 @@ impl Sequential {
             cihaz: self.cihaz.kisa().to_string(),
         };
 
-        let json = serde_json::to_string_pretty(&model_data)?;
+        Ok(serde_json::to_string_pretty(&model_data)?)
+    }
+
+    /// Modeli dosyaya kaydeder
+    ///
+    /// # Parametreler
+    /// - `path`: Kaydedilecek dosya yolu
+    pub fn save(&self, path: &str) -> Result<()> {
+        let json = self.to_json_string()?;
 
         let mut file = fs::File::create(path)?;
         file.write_all(json.as_bytes())?;

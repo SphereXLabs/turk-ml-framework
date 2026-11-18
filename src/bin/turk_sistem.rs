@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! TÜRK Çekirdeği — Kadim Siber Kokpit v3.0.0 (Göktürk Runik + Semantik Hafıza + Zincir)
+//! TÜRK Çekirdeği — Kadim Siber Kokpit v0.3.0 (Göktürk Runik + Semantik Hafıza + Zincir)
 
 #[path = "../kokpit_ui.rs"]
 mod kokpit_ui;
@@ -31,7 +31,7 @@ use turk::{
 const KOMUT_MERKEZI_YUKSEKLIK_TABAN: f32 = 88.0;
 const TURK_CMD_PROMPT: &str = "𐰰𐰼𐰇𐱅_CMD > ";
 const KOMUT_GIRDI_ID: &str = "turk_komut_merkezi_girdi";
-const BASLIK_MUHUR: &str = "🇹🇷 𐰰𐰼𐰇𐱅 // SİBER KONTROL PANELİ v3.0.0";
+const BASLIK_MUHUR: &str = "🇹🇷 𐰰𐰼𐰇𐱅 // SİBER KONTROL PANELİ v0.3.0";
 const PANEL_SEMANTIK: &str = "🧠 SEMANTİK BELLEK";
 const ZINCIR_MUHUR_METIN: &str =
     "✓ Çoklu operasyon zinciri başarıyla kararlı sonuca ulaştırıldı, Sinan kanka!";
@@ -81,7 +81,7 @@ fn main() -> Result<(), eframe::Error> {
         };
 
         eframe::run_native(
-            "TÜRK v3.0.0 — Göktürk Kokpit",
+            "TÜRK v0.3.0 — Göktürk Kokpit",
             options,
             Box::new(|cc| {
                 tema_uygula(&cc.egui_ctx);
@@ -435,7 +435,7 @@ impl Default for TurkSistemGui {
             ));
         }
         loglar.push(format!(
-            "[{damga}] ▸ TÜRK v3.0.0 — Göktürk Kokpit (Semantik Hafıza + Otonom Zincir) aktif."
+            "[{damga}] ▸ TÜRK v0.3.0 — Göktürk Kokpit (Semantik Hafıza + Otonom Zincir) aktif."
         ));
 
         let (vekil_tx, vekil_rx) = SistemVekili::baslat();

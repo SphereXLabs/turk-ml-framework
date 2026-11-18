@@ -214,6 +214,100 @@
       border-top: 1px solid var(--line);
       background: rgba(0, 0, 0, 0.22);
     }
+
+    .inference {
+      border-top: 1px solid var(--line);
+      padding: 0.85rem 1rem 1.1rem;
+      display: none;
+      flex-direction: column;
+      gap: 0.75rem;
+      background: rgba(110, 198, 212, 0.04);
+    }
+    .inference.visible { display: flex; }
+    .inference-h {
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .inference-h strong {
+      color: var(--text);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: none;
+      font-size: 0.92rem;
+    }
+    .infer-inputs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+    }
+    .infer-inputs label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .infer-inputs input {
+      width: 5.5rem;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      padding: 0.45rem 0.55rem;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--bg2);
+      color: var(--text);
+      outline: none;
+    }
+    .infer-inputs input:focus { border-color: var(--cyan); }
+    .infer-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      align-items: center;
+    }
+    .btn-secondary {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 0.55rem 0.95rem;
+      background: var(--bg2);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      border-color: var(--cyan);
+      transform: translateY(-1px);
+    }
+    .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-accent {
+      border: none;
+      border-radius: var(--radius);
+      padding: 0.55rem 0.95rem;
+      background: linear-gradient(135deg, var(--cyan), #4aa8b8);
+      color: #061218;
+      font-family: var(--font);
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-accent:hover:not(:disabled) { filter: brightness(1.06); }
+    .btn-accent:disabled { opacity: 0.45; cursor: not-allowed; }
+    .infer-result {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.5;
+      color: var(--ok);
+      min-height: 1.4em;
+      white-space: pre-wrap;
+    }
+    .infer-result.err { color: var(--err); }
+    .infer-result.muted { color: var(--muted); }
     #console {
       margin: 0;
       padding: 0.85rem 1rem 1.1rem;
@@ -294,6 +388,18 @@
             <canvas id="chart" aria-label="Loss ve accuracy grafiği"></canvas>
           </div>
           <pre class="summary" id="summary">(model özeti burada görünecek)</pre>
+          <div class="inference" id="inference" aria-label="Canlı tahmin testi">
+            <div class="inference-h">
+              <strong>Canlı Tahmin Testi (Inference)</strong>
+              · eğitilmiş model
+            </div>
+            <div class="infer-inputs" id="infer-inputs"></div>
+            <div class="infer-actions">
+              <button type="button" class="btn-accent" id="predict-btn" disabled>Tahmin Et</button>
+              <button type="button" class="btn-secondary" id="download-btn" disabled>Modeli JSON İndir</button>
+            </div>
+            <div class="infer-result muted" id="infer-result">Eğitimden sonra buradan canlı tahmin deneyin.</div>
+          </div>
         </section>
 
         <section class="panel" aria-label="Çalıştırma konsolu" style="min-height: 220px;">
@@ -308,7 +414,7 @@
     </div>
 
     <footer>
-      <span>SphereX Labs · TÜRK v3</span>
+      <span>SphereX Labs · TÜRK v0.3</span>
       <a href="../turk/index.html">API Dokümantasyonu</a>
       <a href="https://github.com/SphereXLabs/turk-ml-framework">GitHub</a>
     </footer>
@@ -362,9 +468,16 @@ egit(150, 4)
     const consoleEl = document.getElementById("console");
     const summaryEl = document.getElementById("summary");
     const editorPanel = document.getElementById("editor-panel");
+    const inferenceEl = document.getElementById("inference");
+    const inferInputsEl = document.getElementById("infer-inputs");
+    const inferResultEl = document.getElementById("infer-result");
+    const predictBtn = document.getElementById("predict-btn");
+    const downloadBtn = document.getElementById("download-btn");
 
     let TurkWasmRunner = null;
     let ready = false;
+    /** @type {any} */
+    let trainedRunner = null;
 
     const chart = new Chart(document.getElementById("chart"), {
       type: "line",
@@ -486,6 +599,51 @@ egit(150, 4)
       consoleEl.scrollTop = consoleEl.scrollHeight;
     }
 
+    function defaultFeatureValue(dim, index) {
+      if (dim === 2) return index === 0 ? 1 : 0;
+      return index === 0 ? 1 : 0;
+    }
+
+    function setupInferencePanel(inputDim) {
+      const dim = Number(inputDim) || 0;
+      inferInputsEl.innerHTML = "";
+      if (dim <= 0) {
+        inferenceEl.classList.remove("visible");
+        predictBtn.disabled = true;
+        downloadBtn.disabled = true;
+        inferResultEl.className = "infer-result muted";
+        inferResultEl.textContent = "Eğitimden sonra buradan canlı tahmin deneyin.";
+        return;
+      }
+      for (let i = 0; i < dim; i++) {
+        const label = document.createElement("label");
+        label.textContent = `x${i}`;
+        const input = document.createElement("input");
+        input.type = "number";
+        input.step = "any";
+        input.value = String(defaultFeatureValue(dim, i));
+        input.dataset.index = String(i);
+        input.setAttribute("aria-label", `Özellik x${i}`);
+        label.appendChild(input);
+        inferInputsEl.appendChild(label);
+      }
+      inferenceEl.classList.add("visible");
+      predictBtn.disabled = !trainedRunner;
+      downloadBtn.disabled = !trainedRunner;
+      inferResultEl.className = "infer-result muted";
+      inferResultEl.textContent =
+        dim === 2
+          ? "Varsayılan girdi [1.0, 0.0] — «Tahmin Et» ile deneyin."
+          : `${dim} özelliklik girdi hazır — «Tahmin Et» ile deneyin.`;
+    }
+
+    function readInferenceInputs() {
+      return Array.from(inferInputsEl.querySelectorAll("input")).map((el) => {
+        const v = Number(el.value);
+        return Number.isFinite(v) ? v : 0;
+      });
+    }
+
     preset.addEventListener("change", () => loadPreset(preset.value));
     loadPreset("xor");
 
@@ -521,9 +679,11 @@ egit(150, 4)
       resetChart();
       summaryEl.textContent = "Eğitiliyor…";
       consoleEl.textContent = "";
+      trainedRunner = null;
+      setupInferencePanel(0);
 
       try {
-        // Her koşuda temiz runner (önceki model state'i kalmasın)
+        // Her koşuda temiz runner; eğitim sonrası canlı tahmin için saklanır
         const runner = new TurkWasmRunner();
         const sonuc = runner.calistir_kod(kod);
         const logs = sonuc.logs || [];
@@ -531,6 +691,9 @@ egit(150, 4)
         renderConsole(logs, false);
         updateChart(metrics);
         summaryEl.textContent = sonuc.model_summary || "(özet yok)";
+        trainedRunner = runner;
+        const dim = sonuc.input_dim || runner.girdi_boyutu() || 2;
+        setupInferencePanel(dim);
         const last = metrics[metrics.length - 1];
         if (last) {
           setStatus(
@@ -545,9 +708,62 @@ egit(150, 4)
         renderConsole([msg], true);
         setStatus("Hata", "err");
         summaryEl.textContent = "(hata — model özeti yok)";
+        trainedRunner = null;
+        setupInferencePanel(0);
       } finally {
         runBtn.disabled = false;
         editorPanel.classList.remove("running");
+      }
+    });
+
+    predictBtn.addEventListener("click", () => {
+      if (!trainedRunner) {
+        inferResultEl.className = "infer-result err";
+        inferResultEl.textContent = "Önce bir model eğitin.";
+        return;
+      }
+      try {
+        const features = readInferenceInputs();
+        const raw = trainedRunner.tahmin_et(JSON.stringify(features));
+        const sonuc = typeof raw === "string" ? JSON.parse(raw) : raw;
+        const outs = (sonuc.outputs || [])
+          .map((v) => Number(v).toFixed(4))
+          .join(", ");
+        inferResultEl.className = "infer-result";
+        inferResultEl.textContent =
+          `${sonuc.label || "—"}\n` +
+          `Çıktı: [${outs}]\n` +
+          `predicted_class=${sonuc.predicted_class} · confidence=${Number(sonuc.confidence).toFixed(4)}`;
+      } catch (e) {
+        const msg = typeof e === "string" ? e : e?.message || String(e);
+        inferResultEl.className = "infer-result err";
+        inferResultEl.textContent = msg;
+      }
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      if (!trainedRunner) {
+        inferResultEl.className = "infer-result err";
+        inferResultEl.textContent = "İndirilecek model yok — önce eğitin.";
+        return;
+      }
+      try {
+        const json = trainedRunner.model_json();
+        const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "turk_model.json";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        inferResultEl.className = "infer-result";
+        inferResultEl.textContent = "Model JSON indirildi: turk_model.json";
+      } catch (e) {
+        const msg = typeof e === "string" ? e : e?.message || String(e);
+        inferResultEl.className = "infer-result err";
+        inferResultEl.textContent = msg;
       }
     });
 
