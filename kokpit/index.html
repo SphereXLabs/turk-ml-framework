@@ -69,6 +69,11 @@
     footer a{color:var(--accent);text-decoration:none} footer a:hover{text-decoration:underline}
     .brain-bar{padding:.55rem 1rem;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:space-between}
     .brain-bar .meta{font-family:var(--mono);font-size:.72rem;color:var(--muted)}
+    .teach-row{display:flex;flex-wrap:wrap;gap:.4rem;padding:.55rem 1rem .75rem;border-top:1px solid var(--line);align-items:center}
+    .teach-row input,.teach-row select{font-family:var(--font);font-size:.82rem;padding:.45rem .55rem;border-radius:6px;border:1px solid var(--line);background:var(--bg2);color:var(--text);outline:none}
+    .teach-row input{flex:1;min-width:140px}
+    .teach-row select{max-width:160px}
+    .teach-row label{font-size:.68rem;color:var(--muted);letter-spacing:.04em;width:100%}
   </style>
 </head>
 <body>
@@ -100,9 +105,15 @@
           <span class="meta" id="brain-meta">Beyin: henüz eğitilmedi</span>
           <button type="button" class="btn btn-sec" id="retrain-btn" disabled>ALPER'i Yeniden Eğit</button>
         </div>
+        <div class="teach-row" aria-label="ALPER'e yeni cümle öğret">
+          <label>ALPER'e Yeni Cümle Öğret — veya sohbette: Öğren: cümle -&gt; niyet</label>
+          <input id="teach-phrase" type="text" placeholder="Örn: saat kaç oldu" autocomplete="off" />
+          <select id="teach-intent" aria-label="Niyet seç"></select>
+          <button type="button" class="btn btn-sec" id="teach-btn" disabled>Öğret &amp; Yeniden Eğit</button>
+        </div>
         <div class="composer">
           <button type="button" class="btn btn-mic" id="mic-btn" title="Mikrofon">🎙</button>
-          <input id="cmd" type="text" placeholder='Örn: "XOR modelini eğit" veya "Adam nedir araştır"' autocomplete="off" />
+          <input id="cmd" type="text" placeholder='Örn: "saat kaç" · "sen kimsin" · "hesapla 12*7"' autocomplete="off" />
           <button type="button" class="btn btn-primary" id="send-btn">Gönder</button>
         </div>
       </section>
@@ -144,7 +155,7 @@
   </div>
 
   <script type="module">
-    /* ─── Niyetler & zengin Türkçe eğitim seti ─── */
+    /* ─── Niyetler & zengin Türkçe eğitim seti (11 sınıf) ─── */
     const INTENTS = [
       "selamlama",
       "model_egit_xor",
@@ -154,13 +165,20 @@
       "web_arastirma",
       "canli_tahmin",
       "sistem_durumu",
+      "saat_tarih",
+      "kimlik_sohbet",
+      "hesaplama",
     ];
+
+    const CONFIDENCE_GATE = 0.72;
 
     const DATASET = {
       selamlama: [
-        "merhaba", "selam", "günaydın", "iyi akşamlar", "hey alper", "alper naber",
-        "nasılsın", "selamun aleyküm", "hello", "merhaba alper", "selam kanka",
-        "iyi günler", "hoş geldin", "alper burda mısın", "merhabalar",
+        "selam", "merhaba", "selamlar", "günaydın", "iyi akşamlar", "hey alper",
+        "merhaba alper", "selam alper", "selamun aleyküm", "hello", "hi",
+        "iyi günler", "iyi geceler", "hoş geldin", "merhabalar", "selam kanka",
+        "alper selam", "selam dostum", "hey", "günaydın alper", "iyi akşamlar alper",
+        "selamlar alper", "merhaba dostum", "alper burda mısın", "alper naber",
       ],
       model_egit_xor: [
         "xor modelini oluştur ve eğit", "xor ağını eğit", "xor sinir ağı kur",
@@ -209,6 +227,25 @@
         "beyin eğitildi mi", "motor ve asistan durumu", "status report",
         "çalışıyor musun", "kaynak durumu", "telemetri özeti",
       ],
+      saat_tarih: [
+        "saat kaç", "bugün tarih ne", "günlerden ne", "tarih kaç", "zamanı söyle",
+        "hangi aydayız", "saati göster", "bugün günlerden ne", "şu an saat kaç",
+        "tarihi söyle", "bugünün tarihi", "hangi yıldayız", "saat nedir",
+        "zamanı göster", "takvimde bugün ne", "local saat kaç",
+      ],
+      kimlik_sohbet: [
+        "sen kimsin", "adın ne", "seni kim yaptı", "neler yapabilirsin", "nasılsın",
+        "ne işe yararsın", "kimin eserisin", "kendini tanıt", "alper kim",
+        "sen bir yapay zeka mısın", "ne yapıyorsun", "yeteneklerin neler",
+        "kim geliştirdi seni", "spherex labs mı yaptı", "nasıl çalışıyorsun",
+        "llm kullanıyor musun", "harici api var mı",
+      ],
+      hesaplama: [
+        "hesapla", "kaç eder", "topla", "çarp", "böl", "karekökü", "matematik",
+        "hesapla 12 arti 5", "2 carpi 8 kac eder", "karekok 16", "100 bolu 4",
+        "matematik sorusu hesapla", "toplama yap", "carpma islemi", "bolme yap",
+        "hesap makinesi", "su ifadeyi hesapla",
+      ],
     };
 
     const ENGINE_PRESETS = {
@@ -235,22 +272,23 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     };
 
     const HINTS = [
-      "Merhaba ALPER",
+      "Selam",
+      "Saat kaç",
+      "Sen kimsin",
+      "Hesapla 12*7",
       "XOR modelini eğit",
-      "Derin MLP çalıştır",
       "Adam nedir araştır",
-      "1 ve 0 için tahmin yap",
       "Sistem durumunu raporla",
-      "Loss düşmüyor teşhis et",
     ];
 
     const STOP = new Set([
       "ve","veya","ile","bir","bu","şu","o","da","de","ki","mi","mu","mü","icin","için",
       "gibi","kadar","daha","en","çok","cok","ya","ama","fakat","lütfen","lutfen","ben",
-      "sen","biz","siz","onlar","var","yok","olan","olarak","nedir","ne",
+      "biz","siz","onlar","var","yok","olan","olarak",
     ]);
 
     const MEMORY_KEY = "alper_kokpit_memory_v1";
+    const TAUGHT_KEY = "alper_taught_examples_v1";
 
     /* ─── Türkçe token / gövde ─── */
     function normalizeTr(s) {
@@ -300,19 +338,23 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       }
       return [...df.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .slice(0, 160)
+        .slice(0, 220)
         .map(([term, d]) => ({ term, df: d, idf: Math.log((1 + docs.length) / (1 + d)) + 1 }));
     }
 
     function vectorize(text, vocab) {
       const toks = tokenize(text);
+      const vocabSet = new Set(vocab.map((v) => v.term));
+      const known = toks.filter((t) => vocabSet.has(t)).length;
+      const oovRatio = toks.length ? 1 - known / toks.length : 1;
       const tf = new Map();
       for (const t of toks) tf.set(t, (tf.get(t) || 0) + 1);
       const len = Math.max(toks.length, 1);
-      return vocab.map(({ term, idf }) => {
+      const vector = vocab.map(({ term, idf }) => {
         const f = (tf.get(term) || 0) / len;
         return f * idf;
       });
+      return { vector, oovRatio, tokenCount: toks.length, knownCount: known };
     }
 
     function oneHot(i, n) {
@@ -321,15 +363,42 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       return y;
     }
 
+    function loadTaught() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(TAUGHT_KEY) || "[]");
+        return Array.isArray(raw) ? raw.filter((e) => e?.phrase && INTENTS.includes(e.intent)) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveTaught(list) {
+      localStorage.setItem(TAUGHT_KEY, JSON.stringify(list.slice(-200)));
+    }
+
+    function allTrainingDocs() {
+      const taught = loadTaught();
+      const docs = INTENTS.flatMap((i) => DATASET[i] || []);
+      for (const t of taught) docs.push(t.phrase);
+      return docs;
+    }
+
     function buildTrainingMatrices(vocab) {
       const x = [];
       const y = [];
+      const taught = loadTaught();
       INTENTS.forEach((intent, idx) => {
-        for (const phrase of DATASET[intent]) {
-          x.push(vectorize(phrase, vocab));
+        for (const phrase of DATASET[intent] || []) {
+          x.push(vectorize(phrase, vocab).vector);
           y.push(oneHot(idx, INTENTS.length));
         }
       });
+      for (const t of taught) {
+        const idx = INTENTS.indexOf(t.intent);
+        if (idx < 0) continue;
+        x.push(vectorize(t.phrase, vocab).vector);
+        y.push(oneHot(idx, INTENTS.length));
+      }
       return { x, y };
     }
 
@@ -348,6 +417,9 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     const predictBtn = document.getElementById("predict-btn");
     const downloadBtn = document.getElementById("download-btn");
     const hintsEl = document.getElementById("hints");
+    const teachPhraseEl = document.getElementById("teach-phrase");
+    const teachIntentEl = document.getElementById("teach-intent");
+    const teachBtn = document.getElementById("teach-btn");
 
     let TurkWasmRunner = null;
     let AlperBeyin = null;
@@ -357,6 +429,13 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     let vocab = [];
     let engineRunner = null;
     let memory = loadMemory();
+
+    INTENTS.forEach((intent) => {
+      const opt = document.createElement("option");
+      opt.value = intent;
+      opt.textContent = intent;
+      teachIntentEl.appendChild(opt);
+    });
 
     const chart = new Chart(document.getElementById("chart"), {
       type: "line",
@@ -464,45 +543,91 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     /* ─── ALPER beyin eğitimi ─── */
     async function trainAlperBrain() {
       if (!AlperBeyin) throw new Error("AlperBeyin WASM yok");
-      const allDocs = INTENTS.flatMap((i) => DATASET[i]);
+      const allDocs = allTrainingDocs();
       vocab = buildVocabulary(allDocs);
       const { x, y } = buildTrainingMatrices(vocab);
       brain = new AlperBeyin(vocab.length, INTENTS.length);
+      const taughtN = loadTaught().length;
       brainMeta.textContent = `Eğitiliyor… ${x.length} örnek · vocab=${vocab.length}`;
       setStatus("ALPER beyni eğitiliyor…");
-      const sonuc = brain.egit(JSON.stringify(x), JSON.stringify(y), 55, 16);
+      const sonuc = brain.egit(JSON.stringify(x), JSON.stringify(y), 60, 16);
       updateChart(sonuc.metrics || [], "ALPER beyni");
       const acc = ((sonuc.final_accuracy || 0) * 100).toFixed(1);
-      brainMeta.textContent = `Beyin hazır · ${sonuc.sample_count} örnek · doğruluk %${acc} · ${vocab.length} terim`;
+      brainMeta.textContent =
+        `Beyin hazır · ${sonuc.sample_count} örnek · %${acc} · ${vocab.length} terim` +
+        (taughtN ? ` · +${taughtN} öğretilen` : "");
       summaryEl.textContent =
-        `ALPER Sequential MLP\n` +
-        `girdi=${sonuc.input_dim} (TF-IDF) → gizli → softmax(${sonuc.output_dim} niyet)\n` +
+        `ALPER Sequential MLP · ${INTENTS.length} niyet\n` +
+        `girdi=${sonuc.input_dim} (TF-IDF) → gizli → softmax(${sonuc.output_dim})\n` +
         `niyetler: ${INTENTS.join(", ")}\n` +
-        `final accuracy: %${acc}\n` +
-        `harici LLM/API yok — turk WASM`;
+        `final accuracy: %${acc}` +
+        (taughtN ? `\nöğretilen cümle: ${taughtN}` : "") +
+        `\nharici LLM/API yok — turk WASM · güven eşiği ${CONFIDENCE_GATE}`;
       setStatus("ALPER beyni hazır", "ok");
       return sonuc;
     }
 
     function classifyIntent(text) {
       if (!brain || !vocab.length) return null;
-      const vec = vectorize(text, vocab);
-      const raw = brain.niyet_tahmin(JSON.stringify(vec));
+      const { vector, oovRatio, tokenCount, knownCount } = vectorize(text, vocab);
+      const raw = brain.niyet_tahmin(JSON.stringify(vector));
       const r = typeof raw === "string" ? JSON.parse(raw) : raw;
       const intent = INTENTS[r.intent_index] || INTENTS[0];
-      return { intent, confidence: r.confidence || 0, probabilities: r.probabilities || [] };
+      return {
+        intent,
+        confidence: r.confidence || 0,
+        probabilities: r.probabilities || [],
+        oovRatio,
+        tokenCount,
+        knownCount,
+      };
+    }
+
+    function looksLikeQuestionOrTopic(text) {
+      const n = normalizeTr(text);
+      if (/[?]/.test(text)) return true;
+      if (/\b(nedir|nedır|ne demek|kimdir|nasil|nasıl|hangi|nerede|ne zaman|hakkinda|hakkında|araştır|arastir|anlat|bilgi)\b/.test(n)) {
+        return true;
+      }
+      // kısa selamlama değilse ve birkaç anlamlı token varsa konu say
+      const toks = tokenize(text);
+      if (toks.length >= 2 && !/^(selam|merhaba|hey|hi|hello|gunaydin|iyi)$/.test(toks[0] || "")) {
+        return true;
+      }
+      return false;
+    }
+
+    function isPureGreeting(text) {
+      const n = normalizeTr(text);
+      return /^(selam|selamlar|merhaba|merhabalar|hey|hi|hello|gunaydin|iyi aksamlar|iyi gunler|iyi geceler)(\s+alper)?[!?.]*$/.test(n);
+    }
+
+    function shouldWebFallback(classified, text) {
+      if (!classified) return true;
+      if (classified.intent === "web_arastirma") return false;
+      if (isPureGreeting(text)) return false;
+      // Selamlama/kimlik/saat/hesap için düşük eşik tolere etme — OOV yüksekse web
+      const lowConf = classified.confidence < CONFIDENCE_GATE;
+      const mostlyOov = classified.tokenCount > 0 && classified.oovRatio >= 0.55;
+      if ((lowConf || mostlyOov) && looksLikeQuestionOrTopic(text)) return true;
+      if (lowConf && mostlyOov && classified.tokenCount >= 2) return true;
+      return false;
     }
 
     /* ─── Açık web araştırma (CORS, API key yok) ─── */
     function extractResearchQuery(text) {
       let q = text
         .replace(/alper/gi, " ")
-        .replace(/\b(araştır|arastir|hakkında bilgi ver|hakkinda bilgi ver|nedir|wikipedia|github)\b/gi, " ")
+        .replace(/\b(araştır|arastir|hakkında bilgi ver|hakkinda bilgi ver|nedir|wikipedia|github|web ara)\b/gi, " ")
         .replace(/[:\-–]/g, " ")
         .trim();
       q = q.replace(/\s+/g, " ").trim();
       if (q.length < 2) q = text.trim();
       return q.slice(0, 80);
+    }
+
+    async function webAra(query) {
+      return researchOpenWeb(query);
     }
 
     async function researchOpenWeb(query) {
@@ -645,16 +770,102 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       );
     }
 
-    async function handleIntent(intent, confidence, text) {
-      const badge = `[Niyet: ${intent} · Güven: %${(confidence * 100).toFixed(1)}]`;
+    function formatNowTr() {
+      const now = new Date();
+      const tarih = new Intl.DateTimeFormat("tr-TR", {
+        weekday: "long", year: "numeric", month: "long", day: "numeric",
+      }).format(now);
+      const saat = new Intl.DateTimeFormat("tr-TR", {
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+      }).format(now);
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "yerel";
+      return { tarih, saat, tz };
+    }
+
+    function safeEvalArithmetic(text) {
+      let expr = text
+        .toLocaleLowerCase("tr-TR")
+        .replace(/hesapla|kaç eder|kac eder|sonuç|sonuc|eşittir|esittir|matematik/gi, " ")
+        .replace(/karekökü?|karekok(u|ü)?/gi, "sqrt")
+        .replace(/×/g, "*")
+        .replace(/÷/g, "/")
+        .replace(/\barti\b|\bartı\b/g, "+")
+        .replace(/\beksi\b/g, "-")
+        .replace(/\bcarpi\b|\bçarpı\b|\bcarp\b|\bçarp\b/g, "*")
+        .replace(/\bbolu\b|\bbölü\b|\bbol\b|\bböl\b/g, "/")
+        .replace(/,/g, ".");
+      expr = expr.replace(/[^0-9+\-*/().sqrt\s]/gi, " ");
+      expr = expr.replace(/sqrt\s*\(?\s*([0-9.]+)\s*\)?/g, "Math.sqrt($1)");
+      expr = expr.replace(/\s+/g, "");
+      if (!expr || !/\d/.test(expr)) return null;
+      const cleaned = expr.replace(/Math\.sqrt\(/g, "").replace(/[+\-*/().]/g, "");
+      if (!/^[0-9.]*$/.test(cleaned)) return null;
+      try {
+        const val = Function(`"use strict"; return (${expr});`)();
+        if (typeof val !== "number" || !Number.isFinite(val)) return null;
+        return { expr, value: val };
+      } catch {
+        return null;
+      }
+    }
+
+    function parseTeachCommand(text) {
+      const m = text.match(/^\s*(?:öğren|ogren)\s*:\s*(.+?)\s*(?:->|→|=>)\s*([a-zA-ZğüşıöçĞÜŞİÖÇ_]+)\s*$/i);
+      if (!m) return null;
+      const phrase = m[1].trim();
+      const intentRaw = normalizeTr(m[2]).replace(/\s+/g, "_");
+      const intent = INTENTS.find((i) => i === intentRaw || i.includes(intentRaw) || intentRaw.includes(i));
+      if (!phrase || !intent) return null;
+      return { phrase, intent };
+    }
+
+    async function teachExample(phrase, intent, announce = true) {
+      if (!INTENTS.includes(intent)) throw new Error(`Bilinmeyen niyet: ${intent}`);
+      if (!phrase.trim()) throw new Error("Boş cümle öğretilemez");
+      const taught = loadTaught();
+      taught.push({ phrase: phrase.trim(), intent, t: Date.now() });
+      saveTaught(taught);
+      if (announce) {
+        addBubble("bot", `Öğrendim: «${phrase.trim()}» → ${intent}\nBeyni yeniden eğitiyorum…`);
+      }
+      const s = await trainAlperBrain();
+      return s;
+    }
+
+    async function handleIntent(intent, confidence, text, meta = {}) {
+      const oovNote = meta.oovRatio != null
+        ? ` · OOV %${(meta.oovRatio * 100).toFixed(0)}`
+        : "";
+      const fallbackNote = meta.webFallback ? " · web-düşüş" : "";
+      const badge = `[Niyet: ${intent} · Güven: %${(confidence * 100).toFixed(1)}${oovNote}${fallbackNote}]`;
       memory.push({ role: "user", text, intent, confidence, t: Date.now() });
 
       if (intent === "selamlama") {
         const msg =
-          "Merhaba! Ben ALPER — harici LLM kullanmayan yerli asistanınız.\n" +
-          "Niyet beynim `turk` WASM Sequential ağı; web araştırması Wikipedia/GitHub açık API’leriyle.\n" +
-          "Ne yapmak istersiniz: model eğitmek, teşhis, tahmin veya araştırma?";
+          "Selam! Ben ALPER — SphereX Labs’ın `turk-ml-framework` WASM motoru üzerinde çalışan yerli asistanınız.\n" +
+          "Harici LLM yok. Saat sorabilir, hesap yaptırabilir, model eğitebilir veya web’de araştırabilirsiniz.";
         addBubble("bot", msg, { badge });
+        memory.push({ role: "alper", text: msg, intent, t: Date.now() });
+      } else if (intent === "saat_tarih") {
+        const { tarih, saat, tz } = formatNowTr();
+        const msg = `Şu an (tarayıcı saati, ${tz}):\n• Tarih: ${tarih}\n• Saat: ${saat}`;
+        addBubble("bot", msg, { badge });
+        memory.push({ role: "alper", text: msg, intent, t: Date.now() });
+      } else if (intent === "kimlik_sohbet") {
+        const msg =
+          "Ben ALPER.\n" +
+          "SphereX Labs tarafından, tamamen yerli Rust `turk-ml-framework` WASM motoru üzerine inşa edildim.\n" +
+          "Niyet beynim TF-IDF + Sequential MLP; harici LLM / OpenAI / Groq API anahtarı kullanmam.\n" +
+          "Yapabildiklerim: model eğitimi (XOR/MLP), canlı tahmin, eğitim teşhisi, açık web araştırma, saat/tarih, basit hesap.\n" +
+          "Bana yeni cümle de öğretebilirsiniz: «Öğren: saati söylesene -> saat_tarih»";
+        addBubble("bot", msg, { badge });
+        memory.push({ role: "alper", text: msg, intent, t: Date.now() });
+      } else if (intent === "hesaplama") {
+        const calc = safeEvalArithmetic(text);
+        const msg = calc
+          ? `Hesap sonucu: ${calc.value}\nİfade: ${calc.expr}`
+          : "Anlaşılır bir aritmetik ifade bulamadım. Örnek: «hesapla 12*7+3» veya «karekök 16».";
+        addBubble("bot", msg, { badge, err: !calc });
         memory.push({ role: "alper", text: msg, intent, t: Date.now() });
       } else if (intent === "model_egit_xor") {
         addBubble("bot", "XOR motorunu eğitiyorum…", { badge });
@@ -677,8 +888,8 @@ egit(200, 4, sabir=25, min_delta=0.0001)
         addBubble("bot", msg, { badge });
         memory.push({ role: "alper", text: msg, intent, t: Date.now() });
       } else if (intent === "web_arastirma") {
-        addBubble("bot", "Açık web kaynaklarını tarıyorum (API anahtarı yok)…", { badge });
-        const res = await researchOpenWeb(text);
+        addBubble("bot", "Açık web kaynaklarını tarıyorum (webAra · API anahtarı yok)…", { badge });
+        const res = await webAra(text);
         const msg = `Araştırma: «${res.query}»\n\n${res.summary}`;
         addBubble("bot", msg, { badge, htmlExtra: sourcesHtml(res.sources) });
         memory.push({ role: "alper", text: msg, intent, t: Date.now() });
@@ -712,22 +923,66 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       addBubble("user", cmd);
       cmdEl.value = "";
 
-      // Araştırma anahtar kelimesi — düşük güvenli niyetleri güçlendir
+      const teach = parseTeachCommand(cmd);
+      if (teach) {
+        busy = true;
+        sendBtn.disabled = true;
+        teachBtn.disabled = true;
+        try {
+          const s = await teachExample(teach.phrase, teach.intent, true);
+          addBubble(
+            "bot",
+            `Canlı öğrenme tamam. Doğruluk %${((s.final_accuracy || 0) * 100).toFixed(1)}.\n` +
+              `Şimdi aynı cümleyi tekrar yazarak deneyebilirsiniz.`
+          );
+        } catch (e) {
+          addBubble("bot", String(e?.message || e), { err: true });
+        } finally {
+          busy = false;
+          sendBtn.disabled = false;
+          teachBtn.disabled = !ready;
+        }
+        return;
+      }
+
       let classified = classifyIntent(cmd);
       if (!classified) {
         addBubble("bot", "Önce ALPER beynini eğitin.", { err: true });
         return;
       }
+
       const n = normalizeTr(cmd);
-      if ((n.includes("arastir") || n.includes("nedir") || n.includes("hakkinda") || n.includes("wikipedia") || n.includes("github"))
-          && classified.confidence < 0.55) {
-        classified = { ...classified, intent: "web_arastirma", confidence: Math.max(classified.confidence, 0.6) };
+      let webFallback = false;
+      if (
+        n.includes("arastir") ||
+        n.includes("nedir") ||
+        n.includes("hakkinda") ||
+        n.includes("wikipedia") ||
+        n.includes("github")
+      ) {
+        if (classified.confidence < 0.85 || classified.intent !== "web_arastirma") {
+          classified = {
+            ...classified,
+            intent: "web_arastirma",
+            confidence: Math.max(classified.confidence, 0.75),
+          };
+        }
+      } else if (shouldWebFallback(classified, cmd)) {
+        webFallback = true;
+        classified = {
+          ...classified,
+          intent: "web_arastirma",
+          confidence: classified.confidence,
+        };
       }
 
       busy = true;
       sendBtn.disabled = true;
       try {
-        await handleIntent(classified.intent, classified.confidence, cmd);
+        await handleIntent(classified.intent, classified.confidence, cmd, {
+          oovRatio: classified.oovRatio,
+          webFallback,
+        });
       } catch (e) {
         addBubble("bot", String(e?.message || e), { err: true });
         setStatus("Hata", "err");
@@ -750,7 +1005,7 @@ egit(200, 4, sabir=25, min_delta=0.0001)
     });
     retrainBtn.addEventListener("click", async () => {
       if (busy) return;
-      busy = true; retrainBtn.disabled = true;
+      busy = true; retrainBtn.disabled = true; teachBtn.disabled = true;
       try {
         addBubble("bot", "ALPER niyet beyni yeniden eğitiliyor (turk Sequential)…");
         const s = await trainAlperBrain();
@@ -758,7 +1013,27 @@ egit(200, 4, sabir=25, min_delta=0.0001)
       } catch (e) {
         addBubble("bot", String(e?.message || e), { err: true });
       } finally {
-        busy = false; retrainBtn.disabled = false;
+        busy = false; retrainBtn.disabled = false; teachBtn.disabled = !ready;
+      }
+    });
+
+    teachBtn.addEventListener("click", async () => {
+      if (busy || !ready) return;
+      const phrase = (teachPhraseEl.value || "").trim();
+      const intent = teachIntentEl.value;
+      if (!phrase) {
+        addBubble("bot", "Öğretmek için bir cümle yazın.", { err: true });
+        return;
+      }
+      busy = true; teachBtn.disabled = true; retrainBtn.disabled = true;
+      try {
+        const s = await teachExample(phrase, intent, true);
+        teachPhraseEl.value = "";
+        addBubble("bot", `Öğretme + eğitim tamam · doğruluk %${((s.final_accuracy || 0) * 100).toFixed(1)}.`);
+      } catch (e) {
+        addBubble("bot", String(e?.message || e), { err: true });
+      } finally {
+        busy = false; teachBtn.disabled = false; retrainBtn.disabled = false;
       }
     });
     predictBtn.addEventListener("click", () => {
@@ -805,12 +1080,22 @@ egit(200, 4, sabir=25, min_delta=0.0001)
         AlperBeyin = mod.AlperBeyin;
         ready = true;
         retrainBtn.disabled = false;
+        teachBtn.disabled = false;
         setStatus("WASM yüklendi — beyin eğitiliyor…", "ok");
         addBubble("bot", "Merhaba. Ben ALPER.\nHarici LLM yok; niyet beynim `turk` Sequential ağıyla eğitilecek.");
         await trainAlperBrain();
-        addBubble("bot", "Niyet beynim hazır. Türkçe yazın veya mikrofona konuşun.\nÖrnek: «XOR modelini eğit» · «Adam nedir araştır»");
+        addBubble(
+          "bot",
+          "Niyet beynim hazır (11 sınıf). Örnek: «saat kaç» · «sen kimsin» · «hesapla 3+5» · «Adam nedir araştır».\n" +
+            "Öğretmek için: «Öğren: saati söylesene -> saat_tarih» veya alttaki öğret panelini kullanın.\n" +
+            `Düşük güven (<${CONFIDENCE_GATE}) + yüksek OOV → otomatik webAra.`
+        );
         if (memory.length) {
           addBubble("bot", `Önceki oturumdan ${memory.length} hafıza kaydı yüklendi (localStorage).`);
+        }
+        const taughtN = loadTaught().length;
+        if (taughtN) {
+          addBubble("bot", `Daha önce öğrettiğiniz ${taughtN} cümle beynime eklendi.`);
         }
       } catch (e) {
         ready = false;
