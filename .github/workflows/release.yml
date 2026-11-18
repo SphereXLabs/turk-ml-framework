@@ -14,8 +14,6 @@ jobs:
   build:
     name: Build Release Binary (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # macOS arm64 runner kapasite kuyruğu bazen iptal eder; Linux/Windows artifact'ları yeterlidir
-    continue-on-error: ${{ startsWith(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
@@ -26,10 +24,8 @@ jobs:
           - os: windows-latest
             asset_name: turk-windows-amd64
             gui: true
-          # macos-13 (Intel) — arm64 macos-latest kapasite kuyruğundan kaçınır
-          - os: macos-13
-            asset_name: turk-macos-amd64
-            gui: false
+          # macOS binary: GitHub macOS runner kuyruğu sık sık Release'i blokluyor.
+          # CI hâlâ macos-13'te test eder; macOS artifact isteğe bağlı sonraki sürümde eklenebilir.
 
     steps:
       - uses: actions/checkout@v4
@@ -87,8 +83,6 @@ jobs:
   create-release:
     name: Create Release
     needs: build
-    # Matrix içindeki continue-on-error (macOS) sonrası hâlâ artifact varsa sürüm oluştur
-    if: always() && !cancelled() && needs.build.result != 'failure'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -117,7 +111,6 @@ jobs:
 
             - Linux (x64): `turk-linux-amd64`
             - Windows (x64): `turk-windows-amd64.exe`, `turk-windows-amd64_gui.exe`
-            - macOS (x64): `turk-macos-amd64`
 
             ## Kurulum
 
