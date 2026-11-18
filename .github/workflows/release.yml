@@ -14,6 +14,8 @@ jobs:
   build:
     name: Build Release Binary (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # macOS arm64 runner kapasite kuyruğu bazen iptal eder; Linux/Windows artifact'ları yeterlidir
+    continue-on-error: ${{ startsWith(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
@@ -24,7 +26,8 @@ jobs:
           - os: windows-latest
             asset_name: turk-windows-amd64
             gui: true
-          - os: macos-latest
+          # macos-13 (Intel) — arm64 macos-latest kapasite kuyruğundan kaçınır
+          - os: macos-13
             asset_name: turk-macos-amd64
             gui: false
 
@@ -84,6 +87,8 @@ jobs:
   create-release:
     name: Create Release
     needs: build
+    # Matrix içindeki continue-on-error (macOS) sonrası hâlâ artifact varsa sürüm oluştur
+    if: always() && !cancelled() && needs.build.result != 'failure'
     runs-on: ubuntu-latest
     permissions:
       contents: write
