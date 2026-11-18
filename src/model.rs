@@ -209,6 +209,7 @@ impl EarlyStopping {
 /// use turk::aktivasyon::Activation;
 /// use turk::initializers::{GlorotUniform, Zeros};
 /// use turk::optimizer::SGD;
+/// use turk::Float;
 /// use ndarray::Array2;
 ///
 /// fn dense(i: usize, o: usize, act: Activation) -> turk::layer::Dense {
