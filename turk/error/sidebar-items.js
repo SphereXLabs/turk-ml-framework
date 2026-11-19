@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Aktivasyon","TurkError"],"type":["Result"]};

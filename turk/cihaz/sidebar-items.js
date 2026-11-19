@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Cihaz"],"fn":["cihaz_listesi_metin","mevcut_cihazlar"],"struct":["CihazDurumu"]};

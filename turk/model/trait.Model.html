@@ -1,0 +1,175 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Model Modülü"><title>Model in turk::model - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="turk" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Model</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../turk/index.html">turk</a><span class="version">0.3.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Model</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#model-modülü" title="Model Modülü">Model Modülü</a><ul><li><a href="#Örnek-kullanım" title="Örnek Kullanım">Örnek Kullanım</a></li></ul></li></ul><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.backward" title="backward">backward</a></li><li><a href="#tymethod.evaluate" title="evaluate">evaluate</a></li><li><a href="#tymethod.fit" title="fit">fit</a></li><li><a href="#tymethod.forward" title="forward">forward</a></li><li><a href="#tymethod.load" title="load">load</a></li><li><a href="#tymethod.predict" title="predict">predict</a></li><li><a href="#tymethod.save" title="save">save</a></li><li><a href="#tymethod.summary" title="summary">summary</a></li><li><a href="#tymethod.update" title="update">update</a></li></ul><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In turk::<wbr>model</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">turk</a>::<wbr><a href="index.html">model</a></div><h1>Trait <span class="trait">Model</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/turk/model.rs.html#236-344">Source</a> </span></div><pre class="rust item-decl"><code>pub trait Model:
+    <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a>
+    + <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a>
+    + <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/fmt/trait.Debug.html" title="trait core::fmt::Debug">Debug</a> {
+    // Required methods
+    fn <a href="#tymethod.forward" class="fn">forward</a>&lt;'a&gt;(
+        &amp;mut self,
+        input: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+    ) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.Array2.html" title="type ndarray::aliases::Array2">Array2</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.backward" class="fn">backward</a>&lt;'a&gt;(
+        &amp;mut self,
+        grad: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+    ) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.Array2.html" title="type ndarray::aliases::Array2">Array2</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.update" class="fn">update</a>(&amp;mut self) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.save" class="fn">save</a>(&amp;self, path: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.str.html">str</a>) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.load" class="fn">load</a>(&amp;mut self, path: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.str.html">str</a>) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.summary" class="fn">summary</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.fit" class="fn">fit</a>&lt;'a&gt;(
+        &amp;mut self,
+        x_train: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+        y_train: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+        epochs: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.usize.html">usize</a>,
+        batch_size: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.usize.html">usize</a>,
+        validation_data: <a class="enum" href="https://doc.rust-lang.org/1.100.0/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;(&amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;, &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;)&gt;,
+    ) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="struct" href="struct.History.html" title="struct turk::model::History">History</a>&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.predict" class="fn">predict</a>&lt;'a&gt;(
+        &amp;mut self,
+        x: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+    ) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.Array2.html" title="type ndarray::aliases::Array2">Array2</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;&gt;;
+<span class="item-spacer"></span>    fn <a href="#tymethod.evaluate" class="fn">evaluate</a>&lt;'a&gt;(
+        &amp;mut self,
+        x_val: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+        y_val: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+    ) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;;
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="model-modülü"><a class="doc-anchor" href="#model-mod%C3%BCl%C3%BC">§</a>Model Modülü</h2>
+<p>Bu modül, yapay sinir ağı modelleri oluşturmak ve eğitmek için gerekli sınıfları ve
+fonksiyonları içerir. Modüldeki temel bileşenler:</p>
+<ul>
+<li><code>Model</code> trait’i: Tüm model tipleri için ortak bir arayüz sağlar</li>
+<li><code>Sequential</code> sınıfı: Ardışık (Sequential) modellerini temsil eder</li>
+<li>Yardımcı fonksiyonlar: Kayıp hesaplama, gradient hesaplama vb.</li>
+</ul>
+<h3 id="Örnek-kullanım"><a class="doc-anchor" href="#%C3%96rnek-kullan%C4%B1m">§</a>Örnek Kullanım</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>turk::model::Sequential;
+<span class="kw">use </span>turk::aktivasyon::Activation;
+<span class="kw">use </span>turk::initializers::{GlorotUniform, Zeros};
+<span class="kw">use </span>turk::optimizer::SGD;
+<span class="kw">use </span>turk::Float;
+<span class="kw">use </span>ndarray::Array2;
+
+<span class="kw">fn </span>dense(i: usize, o: usize, act: Activation) -&gt; turk::layer::Dense {
+    turk::layer::Dense::new(i, o, act, Box::new(GlorotUniform::new()), Box::new(Zeros::new()), <span class="bool-val">true</span>).unwrap()
+}
+
+<span class="kw">let </span><span class="kw-2">mut </span>model = Sequential::new();
+model.add(dense(<span class="number">784</span>, <span class="number">128</span>, Activation::Relu))
+     .add(dense(<span class="number">128</span>, <span class="number">10</span>, Activation::Softmax))
+     .compile(SGD::new(<span class="number">0.01</span>, <span class="prelude-val">None</span>, <span class="bool-val">false</span>));
+
+<span class="kw">let </span>x_train = Array2::&lt;Float&gt;::zeros((<span class="number">100</span>, <span class="number">784</span>));
+<span class="kw">let </span>y_train = Array2::&lt;Float&gt;::zeros((<span class="number">100</span>, <span class="number">10</span>));
+model.fit(<span class="kw-2">&amp;</span>x_train.view(), <span class="kw-2">&amp;</span>y_train.view(), <span class="number">10</span>, <span class="number">32</span>, <span class="prelude-val">None</span>).unwrap();
+
+<span class="kw">let </span>x_test = Array2::&lt;Float&gt;::zeros((<span class="number">10</span>, <span class="number">784</span>));
+<span class="kw">let </span>_predictions = model.predict(<span class="kw-2">&amp;</span>x_test.view()).unwrap();</code></pre></div>
+<p>Model trait - Makine öğrenmesi modelleri için arayüz</p>
+<p>Bu trait, farklı model türleri (Sequential, Functional vb.) için ortak
+bir arayüz tanımlar. Temel model işlevlerini (eğitim, tahmin, kaydedip yükleme)
+bu trait üzerinden erişilebilir hale getirir.</p>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.forward" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#246">Source</a><h4 class="code-header">fn <a href="#tymethod.forward" class="fn">forward</a>&lt;'a&gt;(
+    &amp;mut self,
+    input: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.Array2.html" title="type ndarray::aliases::Array2">Array2</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;&gt;</h4></section></summary><div class="docblock"><p>İleri yayılım (forward propagation)</p>
+<p>Girdi verilerini modelin içinden geçirerek çıktı üretir.</p>
+<h5 id="parametreler"><a class="doc-anchor" href="#parametreler">§</a>Parametreler</h5>
+<ul>
+<li><code>input</code>: Girdi tensörü, boyut (batch_size, input_features)</li>
+</ul>
+<h5 id="dönüş"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;Array2&lt;Float&gt;&gt;</code>: Başarılı ise model çıktısı, hata durumunda ilgili hata</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.backward" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#258">Source</a><h4 class="code-header">fn <a href="#tymethod.backward" class="fn">backward</a>&lt;'a&gt;(
+    &amp;mut self,
+    grad: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.Array2.html" title="type ndarray::aliases::Array2">Array2</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;&gt;</h4></section></summary><div class="docblock"><p>Geri yayılım (backpropagation)</p>
+<p>Çıktıdan girdiye doğru gradyan hesaplar ve parametre güncellemeleri için
+bu bilgiyi kullanır.</p>
+<h5 id="parametreler-1"><a class="doc-anchor" href="#parametreler-1">§</a>Parametreler</h5>
+<ul>
+<li><code>grad</code>: Çıktı gradyanı tensörü</li>
+</ul>
+<h5 id="dönüş-1"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-1">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;Array2&lt;Float&gt;&gt;</code>: Girdiye göre gradyan, hata durumunda ilgili hata</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.update" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#266">Source</a><h4 class="code-header">fn <a href="#tymethod.update" class="fn">update</a>(&amp;mut self) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;</h4></section></summary><div class="docblock"><p>Ağırlık güncellemesi</p>
+<p>Modelin optimizer’ı ile parametreleri günceller.</p>
+<h5 id="dönüş-2"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-2">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;()&gt;</code>: Başarılı ise Ok(()), hata durumunda ilgili hata</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.save" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#275">Source</a><h4 class="code-header">fn <a href="#tymethod.save" class="fn">save</a>(&amp;self, path: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.str.html">str</a>) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;</h4></section></summary><div class="docblock"><p>Modeli dosyaya kaydet</p>
+<h5 id="parametreler-2"><a class="doc-anchor" href="#parametreler-2">§</a>Parametreler</h5>
+<ul>
+<li><code>path</code>: Kaydedilecek dosya yolu</li>
+</ul>
+<h5 id="dönüş-3"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-3">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;()&gt;</code>: Başarılı ise Ok(()), hata durumunda ilgili hata</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.load" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#284">Source</a><h4 class="code-header">fn <a href="#tymethod.load" class="fn">load</a>(&amp;mut self, path: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.str.html">str</a>) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;</h4></section></summary><div class="docblock"><p>Modeli dosyadan yükle</p>
+<h5 id="parametreler-3"><a class="doc-anchor" href="#parametreler-3">§</a>Parametreler</h5>
+<ul>
+<li><code>path</code>: Yüklenecek dosya yolu</li>
+</ul>
+<h5 id="dönüş-4"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-4">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;()&gt;</code>: Başarılı ise Ok(()), hata durumunda ilgili hata</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.summary" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#293">Source</a><h4 class="code-header">fn <a href="#tymethod.summary" class="fn">summary</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/string/struct.String.html" title="struct alloc::string::String">String</a></h4></section></summary><div class="docblock"><p>Model özetini döndürür</p>
+<p>Model yapısı, katmanlar ve parametreler hakkında bilgi içeren
+formatlanmış bir metin döndürür.</p>
+<h5 id="dönüş-5"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-5">§</a>Dönüş</h5>
+<ul>
+<li><code>String</code>: Model özeti</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.fit" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#309-316">Source</a><h4 class="code-header">fn <a href="#tymethod.fit" class="fn">fit</a>&lt;'a&gt;(
+    &amp;mut self,
+    x_train: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+    y_train: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+    epochs: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.usize.html">usize</a>,
+    batch_size: <a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.usize.html">usize</a>,
+    validation_data: <a class="enum" href="https://doc.rust-lang.org/1.100.0/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;(&amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;, &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;)&gt;,
+) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="struct" href="struct.History.html" title="struct turk::model::History">History</a>&gt;</h4></section></summary><div class="docblock"><p>Modeli eğitir</p>
+<p>Verilen eğitim verileri üzerinde modeli belirtilen sayıda epoch
+ve batch boyutu ile eğitir.</p>
+<h5 id="parametreler-4"><a class="doc-anchor" href="#parametreler-4">§</a>Parametreler</h5>
+<ul>
+<li><code>x_train</code>: Eğitim girdi verileri</li>
+<li><code>y_train</code>: Eğitim hedef değerleri</li>
+<li><code>epochs</code>: Eğitim tekrar sayısı</li>
+<li><code>batch_size</code>: Her iterasyonda kullanılacak örnek sayısı</li>
+<li><code>validation_data</code>: Doğrulama verileri (isteğe bağlı)</li>
+</ul>
+<h5 id="dönüş-6"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-6">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;History&gt;</code>: Her epoch için toplanan eğitim/doğrulama kayıp ve metrikleri</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.predict" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#327">Source</a><h4 class="code-header">fn <a href="#tymethod.predict" class="fn">predict</a>&lt;'a&gt;(&amp;mut self, x: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.Array2.html" title="type ndarray::aliases::Array2">Array2</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;&gt;</h4></section></summary><div class="docblock"><p>Tahmin yapar</p>
+<p>Model üzerinde ileri yayılım yaparak tahminleri hesaplar.</p>
+<h5 id="parametreler-5"><a class="doc-anchor" href="#parametreler-5">§</a>Parametreler</h5>
+<ul>
+<li><code>x</code>: Girdi verileri</li>
+</ul>
+<h5 id="dönüş-7"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-7">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;Array2&lt;Float&gt;&gt;</code>: Model tahminleri</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.evaluate" class="method"><a class="src rightside" href="../../src/turk/model.rs.html#339-343">Source</a><h4 class="code-header">fn <a href="#tymethod.evaluate" class="fn">evaluate</a>&lt;'a&gt;(
+    &amp;mut self,
+    x_val: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+    y_val: &amp;'a <a class="type" href="https://docs.rs/ndarray/0.15/ndarray/aliases/type.ArrayView2.html" title="type ndarray::aliases::ArrayView2">ArrayView2</a>&lt;'a, <a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;,
+) -&gt; <a class="type" href="../error/type.Result.html" title="type turk::error::Result">Result</a>&lt;<a class="type" href="../dtype/type.Float.html" title="type turk::dtype::Float">Float</a>&gt;</h4></section></summary><div class="docblock"><p>Modeli değerlendirir</p>
+<p>Verilen test verileri üzerinde modelin performansını değerlendirir.</p>
+<h5 id="parametreler-6"><a class="doc-anchor" href="#parametreler-6">§</a>Parametreler</h5>
+<ul>
+<li><code>x_val</code>: Test girdi verileri</li>
+<li><code>y_val</code>: Test hedef değerleri</li>
+</ul>
+<h5 id="dönüş-8"><a class="doc-anchor" href="#d%C3%B6n%C3%BC%C5%9F-8">§</a>Dönüş</h5>
+<ul>
+<li><code>Result&lt;Float&gt;</code>: Değerlendirme skoru (genellikle kayıp değeri)</li>
+</ul>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait <b>is</b> <a href="https://doc.rust-lang.org/1.100.0/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety".</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"><div class="negative-marker"></div><section id="impl-Model-for-Sequential" class="impl"><a class="src rightside" href="../../src/turk/model.rs.html#1705-1752">Source</a><a href="#impl-Model-for-Sequential" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="trait.Model.html" title="trait turk::model::Model">Model</a> for <a class="struct" href="struct.Sequential.html" title="struct turk::model::Sequential">Sequential</a></h3></section></div><script src="../../trait.impl/turk/model/trait.Model.js" async></script></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ONE","ZERO"],"fn":["from_f64","to_f64"],"type":["Float"]};

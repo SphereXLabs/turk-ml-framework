@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_initializer"],"struct":["GlorotNormal","GlorotUniform","HeNormal","HeUniform","Ones","RandomNormal","Xavier","Zeros"],"trait":["Initializer"]};

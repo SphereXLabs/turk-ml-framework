@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["kullanici_zoo_dizini","manifest_yukle","model_bilgi_metin","model_bul","model_indir","model_script_yolu","zoo_kok","zoo_listesi_metin"],"struct":["ZooManifest","ZooModelMeta"]};

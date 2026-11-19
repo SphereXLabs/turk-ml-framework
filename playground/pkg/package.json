@@ -1,0 +1,31 @@
+{
+  "name": "turk",
+  "type": "module",
+  "collaborators": [
+    "SphereX <turkdilmodeli@gmail.com>"
+  ],
+  "description": "Türkçe yapay sinir ağı kütüphanesi",
+  "version": "0.3.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SphereXLabs/turk-ml-framework"
+  },
+  "files": [
+    "turk_bg.wasm",
+    "turk.js",
+    "turk.d.ts"
+  ],
+  "main": "turk.js",
+  "types": "turk.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "turk",
+    "turkish",
+    "neural-network",
+    "deep-learning",
+    "ai"
+  ]
+}

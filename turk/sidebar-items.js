@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VERSION"],"fn":["create_file","open_file","read_file","write_file"],"mod":["aktivasyon","alper","ast","cihaz","cnn","dil","dsl_parser","dtype","error","initializers","katman_kayit","layer","lexer","loss","metrics","model","model_zoo","onnx","optimizer","preprocessing","source_position","token","utils","veri"],"struct":["Turk","TurkLang"]};

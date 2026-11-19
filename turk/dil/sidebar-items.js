@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EgitimIlerleme","Value"],"struct":["TurkDil"],"trait":["ModelExt"],"type":["YukluVeri"]};

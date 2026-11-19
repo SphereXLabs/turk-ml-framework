@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_optimizer","create_optimizer_from_params"],"struct":["Adam","AdamW","RMSProp","SGD"],"trait":["Optimizer"]};

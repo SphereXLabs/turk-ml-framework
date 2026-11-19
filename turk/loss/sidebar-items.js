@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_loss"],"struct":["BinaryCrossentropy","CategoricalCrossEntropy","CrossEntropy","Huber","MAE","MSE","SparseCategoricalCrossentropy"],"trait":["Loss"]};

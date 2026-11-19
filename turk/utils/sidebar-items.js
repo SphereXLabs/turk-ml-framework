@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["argmax","batch_iterator","bootstrap_sample","classification_report","confusion_matrix","load_csv","one_hot_encode","save_csv","shuffle_data","stack_selected_rows","train_test_split","validate_tensor_shapes"],"mod":["tensor_ops"]};

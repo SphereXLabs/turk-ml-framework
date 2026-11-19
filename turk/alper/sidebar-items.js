@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ALPER_VERSION","INTENTS"],"fn":["normalize_tr","tokenize"],"struct":["AlperBeyin","AlperYanit","IntentSonuc","UserProfile","VocabTerm"]};

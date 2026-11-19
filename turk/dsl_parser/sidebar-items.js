@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DslKomut"],"fn":["hata_satirini_goster","komut_ayristir","parantez_dengesi_kontrol"]};

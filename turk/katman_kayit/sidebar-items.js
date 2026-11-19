@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["KatmanKayit","KatmanYukleVerisi"],"trait":["Katman"],"type":["DslUreteciFn","JsonYukleyiciFn"]};

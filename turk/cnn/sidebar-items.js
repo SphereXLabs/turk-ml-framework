@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["Conv1D","Conv2D","Flatten","MaxPool2D"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["EarlyStopping","History","Sequential"],"trait":["Model"],"type":["EpochCallback"]};

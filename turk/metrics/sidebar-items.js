@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_metric"],"struct":["Accuracy","F1","MAE","MSE","Precision","R2","RMSE","Recall"],"trait":["Metric"]};

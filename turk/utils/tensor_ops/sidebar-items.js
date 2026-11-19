@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["dot","elementwise_mul","l2_normalize","mean","mse","mse_gradient"]};
