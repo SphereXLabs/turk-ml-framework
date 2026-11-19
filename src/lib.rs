@@ -62,6 +62,10 @@ pub mod cihaz;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod model_zoo;
 
+// ALPER yerli niyet asistanı (masaüstü Sequential + ikili önbellek)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod alper;
+
 // WASM Browser Playground köprüsü
 #[cfg(feature = "wasm")]
 pub mod wasm;
@@ -76,6 +80,8 @@ pub mod ses;
 
 // Re-export
 pub use aktivasyon::Activation;
+#[cfg(not(target_arch = "wasm32"))]
+pub use alper::{AlperBeyin, AlperYanit, IntentSonuc, UserProfile, ALPER_VERSION, INTENTS};
 pub use cihaz::{cihaz_listesi_metin, mevcut_cihazlar, Cihaz};
 pub use cnn::{Conv1D, Conv2D, Flatten, MaxPool2D};
 pub use dil::TurkDil;
