@@ -564,6 +564,273 @@ impl Layer for Flatten {
     }
 }
 
+/// 1B evrişim katmanı (valid padding).
+///
+/// Girdi düzeni: `(batch, uzunluk * giris_kanal)` — zaman adımı t için kanallar
+/// `t * giris_kanal .. (t+1) * giris_kanal` aralığında ardışıktır.
+/// Çıkış: `(batch, out_len * cikis_kanal)` aynı düzenle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Conv1D {
+    pub giris_kanal: usize,
+    pub cikis_kanal: usize,
+    pub cekirdek: usize,
+    pub adim: usize,
+    pub uzunluk: usize,
+    pub out_len: usize,
+    pub activation: Activation,
+    /// Ağırlıklar: `(cekirdek * giris_kanal, cikis_kanal)`
+    pub weights: Array2<Float>,
+    pub biases: Array2<Float>,
+    pub trainable: bool,
+    #[serde(skip)]
+    last_input: Option<Array2<Float>>,
+    #[serde(skip)]
+    last_pre_activation: Option<Array2<Float>>,
+}
+
+impl Conv1D {
+    pub fn new(
+        giris_kanal: usize,
+        cikis_kanal: usize,
+        cekirdek: usize,
+        adim: usize,
+        uzunluk: usize,
+        activation: Activation,
+    ) -> Result<Self> {
+        if giris_kanal == 0 || cikis_kanal == 0 || cekirdek == 0 || adim == 0 || uzunluk == 0 {
+            return Err(TurkError::LayerError(
+                "Conv1D: boyutlar / adım sıfır olamaz".into(),
+            ));
+        }
+        if uzunluk < cekirdek {
+            return Err(TurkError::LayerError(format!(
+                "Conv1D: uzunluk ({uzunluk}) çekirdekten ({cekirdek}) küçük olamaz"
+            )));
+        }
+        let out_len = (uzunluk - cekirdek) / adim + 1;
+        if out_len == 0 {
+            return Err(TurkError::LayerError("Conv1D: çıkış uzunluğu sıfır".into()));
+        }
+        let w_init = GlorotUniform::new();
+        let b_init = Zeros::new();
+        let weights = w_init.initialize((cekirdek * giris_kanal, cikis_kanal))?;
+        let biases = b_init.initialize((1, cikis_kanal))?;
+        Ok(Self {
+            giris_kanal,
+            cikis_kanal,
+            cekirdek,
+            adim,
+            uzunluk,
+            out_len,
+            activation,
+            weights,
+            biases,
+            trainable: true,
+            last_input: None,
+            last_pre_activation: None,
+        })
+    }
+
+    fn girdi_flat(&self) -> usize {
+        self.uzunluk * self.giris_kanal
+    }
+    fn cikti_flat(&self) -> usize {
+        self.out_len * self.cikis_kanal
+    }
+
+    fn forward_batch(&self, input: &ArrayView2<Float>) -> Array2<Float> {
+        let batch = input.nrows();
+        let mut raw = Array2::zeros((batch, self.cikti_flat()));
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
+            let rows: Vec<Vec<Float>> = (0..batch)
+                .into_par_iter()
+                .map(|n| {
+                    let mut row = vec![0.0; self.cikti_flat()];
+                    for ot in 0..self.out_len {
+                        let t0 = ot * self.adim;
+                        for oc in 0..self.cikis_kanal {
+                            let mut sum = self.biases[[0, oc]];
+                            for k in 0..self.cekirdek {
+                                for ic in 0..self.giris_kanal {
+                                    let in_idx = (t0 + k) * self.giris_kanal + ic;
+                                    let w_idx = k * self.giris_kanal + ic;
+                                    sum += input[[n, in_idx]] * self.weights[[w_idx, oc]];
+                                }
+                            }
+                            row[ot * self.cikis_kanal + oc] = sum;
+                        }
+                    }
+                    row
+                })
+                .collect();
+            for (n, row) in rows.into_iter().enumerate() {
+                for (j, v) in row.into_iter().enumerate() {
+                    raw[[n, j]] = v;
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            for n in 0..batch {
+                for ot in 0..self.out_len {
+                    let t0 = ot * self.adim;
+                    for oc in 0..self.cikis_kanal {
+                        let mut sum = self.biases[[0, oc]];
+                        for k in 0..self.cekirdek {
+                            for ic in 0..self.giris_kanal {
+                                let in_idx = (t0 + k) * self.giris_kanal + ic;
+                                let w_idx = k * self.giris_kanal + ic;
+                                sum += input[[n, in_idx]] * self.weights[[w_idx, oc]];
+                            }
+                        }
+                        raw[[n, ot * self.cikis_kanal + oc]] = sum;
+                    }
+                }
+            }
+        }
+
+        raw
+    }
+}
+
+impl Layer for Conv1D {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
+        if input.ncols() != self.girdi_flat() {
+            return Err(TurkError::ShapeMismatch(format!(
+                "Conv1D: beklenen {} özellik, gelen {}",
+                self.girdi_flat(),
+                input.ncols()
+            )));
+        }
+        let pre = self.forward_batch(input);
+        self.last_input = Some(input.to_owned());
+        self.last_pre_activation = Some(pre.clone());
+        Ok(self.activation.forward(&pre))
+    }
+
+    fn backward(
+        &self,
+        _input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
+        let input = self.last_input.as_ref().ok_or_else(|| {
+            TurkError::LayerError("Conv1D: forward çağrılmadan backward yapılamaz".into())
+        })?;
+        let pre = self
+            .last_pre_activation
+            .as_ref()
+            .ok_or_else(|| TurkError::LayerError("Conv1D: pre_activation kaydedilmemiş".into()))?;
+        let act_grad = self.activation.backward(pre);
+        let dz = &act_grad * grad_output;
+        let batch = dz.nrows();
+        let mut grad_input = Array2::zeros(input.dim());
+        let mut grad_weights = Array2::zeros(self.weights.dim());
+        let mut grad_biases = Array2::zeros(self.biases.dim());
+
+        for n in 0..batch {
+            for ot in 0..self.out_len {
+                let t0 = ot * self.adim;
+                for oc in 0..self.cikis_kanal {
+                    let delta = dz[[n, ot * self.cikis_kanal + oc]];
+                    grad_biases[[0, oc]] += delta;
+                    for k in 0..self.cekirdek {
+                        for ic in 0..self.giris_kanal {
+                            let in_idx = (t0 + k) * self.giris_kanal + ic;
+                            let w_idx = k * self.giris_kanal + ic;
+                            grad_weights[[w_idx, oc]] += delta * input[[n, in_idx]];
+                            grad_input[[n, in_idx]] += delta * self.weights[[w_idx, oc]];
+                        }
+                    }
+                }
+            }
+        }
+        Ok((grad_input, grad_weights, grad_biases))
+    }
+
+    fn update(
+        &mut self,
+        grad_weights: &ArrayView2<Float>,
+        grad_biases: &ArrayView2<Float>,
+        learning_rate: Float,
+    ) -> Result<()> {
+        if !self.trainable {
+            return Ok(());
+        }
+        self.weights = &self.weights - &(grad_weights.to_owned() * learning_rate);
+        self.biases = &self.biases - &(grad_biases.to_owned() * learning_rate);
+        Ok(())
+    }
+
+    fn get_weights(&self) -> Result<Array2<Float>> {
+        Ok(self.weights.clone())
+    }
+    fn get_biases(&self) -> Result<Array2<Float>> {
+        Ok(self.biases.clone())
+    }
+    fn set_weights(&mut self, w: &ArrayView2<Float>) -> Result<()> {
+        self.weights = w.to_owned();
+        Ok(())
+    }
+    fn set_biases(&mut self, b: &ArrayView2<Float>) -> Result<()> {
+        self.biases = b.to_owned();
+        Ok(())
+    }
+    fn activation_type(&self) -> Activation {
+        self.activation
+    }
+    fn layer_type(&self) -> &'static str {
+        "Conv1D"
+    }
+    fn input_size(&self) -> usize {
+        self.girdi_flat()
+    }
+    fn output_size(&self) -> usize {
+        self.cikti_flat()
+    }
+    fn param_count(&self) -> usize {
+        self.weights.len() + self.biases.len()
+    }
+    fn set_trainable(&mut self, t: bool) {
+        self.trainable = t;
+    }
+    fn is_trainable(&self) -> bool {
+        self.trainable
+    }
+    fn clone_box(&self) -> Box<dyn Layer> {
+        Box::new(self.clone())
+    }
+    fn reset(&mut self) {
+        self.last_input = None;
+        self.last_pre_activation = None;
+    }
+    fn weights_as_vec(&self) -> Vec<Float> {
+        self.weights.iter().copied().collect()
+    }
+    fn biases_as_vec(&self) -> Vec<Float> {
+        self.biases.iter().copied().collect()
+    }
+    fn dropout_rate(&self) -> Option<Float> {
+        None
+    }
+    fn use_batch_norm(&self) -> Option<bool> {
+        None
+    }
+    fn layer_metadata(&self) -> HashMap<String, Float> {
+        let mut m = HashMap::new();
+        m.insert("giris_kanal".into(), self.giris_kanal as Float);
+        m.insert("cikis_kanal".into(), self.cikis_kanal as Float);
+        m.insert("cekirdek".into(), self.cekirdek as Float);
+        m.insert("adim".into(), self.adim as Float);
+        m.insert("uzunluk".into(), self.uzunluk as Float);
+        m.insert("out_len".into(), self.out_len as Float);
+        m
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

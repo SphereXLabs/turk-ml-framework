@@ -14,10 +14,10 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::aktivasyon::Activation;
-use crate::cnn::{Conv2D, Flatten, MaxPool2D};
+use crate::cnn::{Conv1D, Conv2D, Flatten, MaxPool2D};
 use crate::error::{Result, TurkError};
 use crate::initializers::{GlorotUniform, Zeros};
-use crate::layer::{BatchNormalization, Dense, Dropout, Layer};
+use crate::layer::{BatchNormalization, Dense, Dropout, Embedding, Layer};
 
 // ─── Katman Trait (Türkçe API) ─────────────────────────────────────────────
 
@@ -218,10 +218,61 @@ impl KatmanKayit {
                     "MaxPool2D",
                     yukle_maxpool,
                 )
-                .kaydet("flatten duzlestir", uret_flatten, "Flatten", yukle_flatten);
+                .kaydet("flatten duzlestir", uret_flatten, "Flatten", yukle_flatten)
+                .kaydet(
+                    "gommeli embedding gomme",
+                    uret_gommeli,
+                    "Embedding",
+                    yukle_gommeli,
+                )
+                .kaydet(
+                    "evrisim1d conv1d",
+                    uret_evrisim1d,
+                    "Conv1D",
+                    yukle_evrisim1d,
+                );
             k
         })
     }
+}
+
+/// `kelime=1000, boyut=32` veya konumsal `1000, 32` parametrelerini çözer.
+fn named_or_pos_usize(params: &str) -> Result<(HashMap<String, usize>, Vec<usize>)> {
+    let mut named = HashMap::new();
+    let mut positional = Vec::new();
+    for part in params.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = part.split_once('=') {
+            let key = k.trim().trim_matches('"').to_lowercase();
+            // yalnızca tamsayı değerleri named usize haritasına
+            if let Ok(val) = v.trim().trim_matches('"').parse::<usize>() {
+                named.insert(key, val);
+            }
+            continue;
+        }
+        if let Ok(val) = part.parse::<usize>() {
+            positional.push(val);
+        }
+        // aktivasyon string'leri yok sayılır
+    }
+    Ok((named, positional))
+}
+
+fn named_str_map(params: &str) -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    for part in params.split(',') {
+        let part = part.trim();
+        if let Some((k, v)) = part.split_once('=') {
+            m.insert(
+                k.trim().trim_matches('"').to_lowercase(),
+                v.trim().trim_matches('"').to_string(),
+            );
+        }
+    }
+    m
 }
 
 // ─── Dense üreteci / yükleyicisi ───────────────────────────────────────────
@@ -465,6 +516,153 @@ fn yukle_flatten(veri: &KatmanYukleVerisi) -> Result<Box<dyn Layer>> {
     Ok(Box::new(Flatten::new(size)))
 }
 
+// ─── Embedding / gommeli ────────────────────────────────────────────────────
+
+/// `gommeli(kelime=1000, boyut=32 [, sekans=1])` veya `gommeli(1000, 32 [, 1])`
+fn uret_gommeli(params: &str) -> Result<Box<dyn Layer>> {
+    let (named, pos) = named_or_pos_usize(params)?;
+    let kelime = named
+        .get("kelime")
+        .or(named.get("vocab"))
+        .or(named.get("kelime_sayisi"))
+        .copied()
+        .or_else(|| pos.first().copied())
+        .ok_or_else(|| {
+            TurkError::SyntaxError(
+                "gommeli: kelime=... veya konumsal (kelime, boyut) gerekli".into(),
+            )
+        })?;
+    let boyut = named
+        .get("boyut")
+        .or(named.get("dim"))
+        .copied()
+        .or_else(|| pos.get(1).copied())
+        .ok_or_else(|| TurkError::SyntaxError("gommeli: boyut=... gerekli".into()))?;
+    let sekans = named
+        .get("sekans")
+        .or(named.get("seq"))
+        .copied()
+        .or_else(|| pos.get(2).copied())
+        .unwrap_or(1);
+    Ok(Box::new(Embedding::new(kelime, boyut, sekans)?))
+}
+
+fn yukle_gommeli(veri: &KatmanYukleVerisi) -> Result<Box<dyn Layer>> {
+    let kelime = veri.ek("kelime_sayisi") as usize;
+    let boyut = veri.ek("boyut") as usize;
+    let sekans = {
+        let s = veri.ek("sekans") as usize;
+        if s == 0 {
+            1
+        } else {
+            s
+        }
+    };
+    if kelime == 0 || boyut == 0 {
+        return Err(TurkError::deserialization_error(
+            "Embedding metadata eksik (kelime_sayisi, boyut)",
+        ));
+    }
+    let mut layer = Embedding::new(kelime, boyut, sekans)?;
+    if !veri.agirliklar.is_empty() {
+        if let Ok(w) = ndarray::Array2::from_shape_vec((kelime, boyut), veri.agirliklar.clone()) {
+            layer.set_weights(&w.view())?;
+        }
+    }
+    Ok(Box::new(layer))
+}
+
+// ─── Conv1D / evrisim1d ─────────────────────────────────────────────────────
+
+/// `evrisim1d(giris=1, cikis=8, cekirdek=3 [, adim=1, uzunluk=16, aktivasyon=relu])`
+fn uret_evrisim1d(params: &str) -> Result<Box<dyn Layer>> {
+    let (named, pos) = named_or_pos_usize(params)?;
+    let strs = named_str_map(params);
+    let giris = named
+        .get("giris")
+        .or(named.get("giris_kanal"))
+        .or(named.get("in"))
+        .copied()
+        .or_else(|| pos.first().copied())
+        .ok_or_else(|| TurkError::SyntaxError("evrisim1d: giris=... gerekli".into()))?;
+    let cikis = named
+        .get("cikis")
+        .or(named.get("cikis_kanal"))
+        .or(named.get("out"))
+        .copied()
+        .or_else(|| pos.get(1).copied())
+        .ok_or_else(|| TurkError::SyntaxError("evrisim1d: cikis=... gerekli".into()))?;
+    let cekirdek = named
+        .get("cekirdek")
+        .or(named.get("kernel"))
+        .copied()
+        .or_else(|| pos.get(2).copied())
+        .ok_or_else(|| TurkError::SyntaxError("evrisim1d: cekirdek=... gerekli".into()))?;
+    let adim = named
+        .get("adim")
+        .or(named.get("stride"))
+        .copied()
+        .or_else(|| pos.get(3).copied())
+        .unwrap_or(1);
+    let uzunluk = named
+        .get("uzunluk")
+        .or(named.get("length"))
+        .or(named.get("seq"))
+        .copied()
+        .or_else(|| pos.get(4).copied())
+        .unwrap_or_else(|| 16usize.max(cekirdek));
+    let akt_str = strs
+        .get("aktivasyon")
+        .cloned()
+        .or_else(|| {
+            // son konumsal string aktivasyon olabilir
+            params
+                .split(',')
+                .map(str::trim)
+                .filter(|p| p.parse::<usize>().is_err() && !p.contains('='))
+                .map(|s| s.trim_matches('"').to_string())
+                .next()
+        })
+        .unwrap_or_else(|| "relu".into());
+    let akt = Activation::from_str(&akt_str)?;
+    Ok(Box::new(Conv1D::new(
+        giris, cikis, cekirdek, adim, uzunluk, akt,
+    )?))
+}
+
+fn yukle_evrisim1d(veri: &KatmanYukleVerisi) -> Result<Box<dyn Layer>> {
+    let giris = veri.ek("giris_kanal") as usize;
+    let cikis = veri.ek("cikis_kanal") as usize;
+    let cekirdek = veri.ek("cekirdek") as usize;
+    let adim = {
+        let a = veri.ek("adim") as usize;
+        if a == 0 {
+            1
+        } else {
+            a
+        }
+    };
+    let uzunluk = veri.ek("uzunluk") as usize;
+    if giris == 0 || cikis == 0 || cekirdek == 0 || uzunluk == 0 {
+        return Err(TurkError::deserialization_error(
+            "Conv1D metadata eksik (giris_kanal, cikis_kanal, cekirdek, uzunluk)",
+        ));
+    }
+    let mut layer = Conv1D::new(giris, cikis, cekirdek, adim, uzunluk, veri.aktivasyon)?;
+    if !veri.agirliklar.is_empty() {
+        let k = cekirdek * giris;
+        if let Ok(w) = ndarray::Array2::from_shape_vec((k, cikis), veri.agirliklar.clone()) {
+            layer.set_weights(&w.view())?;
+        }
+    }
+    if !veri.biaslar.is_empty() {
+        if let Ok(b) = ndarray::Array2::from_shape_vec((1, cikis), veri.biaslar.clone()) {
+            layer.set_biases(&b.view())?;
+        }
+    }
+    Ok(Box::new(layer))
+}
+
 // ─── Testler ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -498,6 +696,27 @@ mod tests {
         assert_eq!(l.layer_type(), "Dense");
         assert_eq!(l.input_size(), 2);
         assert_eq!(l.output_size(), 4);
+    }
+
+    #[test]
+    fn test_kayit_dsl_gommeli_named() {
+        let k = KatmanKayit::varsayilan();
+        let l = k
+            .dsl_olustur_tamam("gommeli(kelime=1000, boyut=32)")
+            .unwrap();
+        assert_eq!(l.layer_type(), "Embedding");
+        assert_eq!(l.output_size(), 32);
+    }
+
+    #[test]
+    fn test_kayit_dsl_evrisim1d_named() {
+        let k = KatmanKayit::varsayilan();
+        let l = k
+            .dsl_olustur_tamam("evrisim1d(giris=1, cikis=8, cekirdek=3, uzunluk=10)")
+            .unwrap();
+        assert_eq!(l.layer_type(), "Conv1D");
+        assert_eq!(l.input_size(), 10);
+        assert_eq!(l.output_size(), 8 * 8);
     }
 
     #[test]

@@ -820,17 +820,14 @@ impl Sequential {
         Ok(())
     }
 
-    /// Model ağırlıklarını JSON metnine serileştirir (disk gerekmez — WASM uyumlu).
-    pub fn to_json_string(&self) -> Result<String> {
+    fn collect_model_data(&self) -> Result<ModelData> {
         let mut layer_data = Vec::with_capacity(self.layers.len());
 
         for layer in &self.layers {
             let _weights = layer.get_weights()?;
             let _biases = layer.get_biases()?;
 
-            // BatchNormalization için ek meta
             let (bn_eps, bn_mom) = if layer.layer_type() == "BatchNormalization" {
-                // epsilon/momentum varsayılan değerleri (BatchNorm struct'tan alınamıyorsa)
                 (1e-5, 0.1)
             } else {
                 (0.0, 0.0)
@@ -860,7 +857,7 @@ impl Sequential {
         let optimizer_params = if let Some(optimizer) = &self.optimizer {
             OptimizerParams {
                 learning_rate: optimizer.learning_rate(),
-                momentum: None, // Burada tipe göre doğru değerleri set etmelisiniz
+                momentum: None,
                 beta1: None,
                 beta2: None,
                 epsilon: None,
@@ -877,36 +874,16 @@ impl Sequential {
             }
         };
 
-        let model_data = ModelData {
+        Ok(ModelData {
             layers: layer_data,
             optimizer_type,
             optimizer_params,
             schema_version: "1.0".to_string(),
             cihaz: self.cihaz.kisa().to_string(),
-        };
-
-        Ok(serde_json::to_string_pretty(&model_data)?)
+        })
     }
 
-    /// Modeli dosyaya kaydeder
-    ///
-    /// # Parametreler
-    /// - `path`: Kaydedilecek dosya yolu
-    pub fn save(&self, path: &str) -> Result<()> {
-        let json = self.to_json_string()?;
-
-        let mut file = fs::File::create(path)?;
-        file.write_all(json.as_bytes())?;
-
-        info!("Model başarıyla kaydedildi: {}", path);
-        Ok(())
-    }
-
-    /// Model ağırlıklarını JSON metninden yükler (WASM / localStorage önbellek uyumlu).
-    pub fn load_from_json_str(&mut self, contents: &str) -> Result<()> {
-        let model_data: ModelData = serde_json::from_str(contents)?;
-
-        // Eski modeli temizle
+    fn apply_model_data(&mut self, model_data: ModelData) -> Result<()> {
         self.layers.clear();
         self.optimizer = None;
         self.loss = None;
@@ -916,7 +893,6 @@ impl Sequential {
             _ => Cihaz::Cpu,
         };
 
-        // Katmanları yükle — KatmanKayit üzerinden (artık match bloğu yok)
         let kayit = KatmanKayit::varsayilan();
         for ld in model_data.layers {
             let girdi_boyutu = if ld.input_size > 0 {
@@ -948,7 +924,6 @@ impl Sequential {
             self.add_boxed(katman);
         }
 
-        // Optimizer'ı yükle
         let optimizer = crate::optimizer::create_optimizer_from_params(
             &model_data.optimizer_type,
             model_data.optimizer_params.learning_rate,
@@ -963,16 +938,67 @@ impl Sequential {
         Ok(())
     }
 
-    /// Modeli dosyadan yükler
-    ///
-    /// # Parametreler
-    /// - `path`: Yüklenecek dosya yolu
+    /// Model ağırlıklarını JSON metnine serileştirir (disk gerekmez — WASM uyumlu).
+    pub fn to_json_string(&self) -> Result<String> {
+        let model_data = self.collect_model_data()?;
+        Ok(serde_json::to_string_pretty(&model_data)?)
+    }
+
+    /// Kompakt bincode baytları (JSON'tan ~5–10× küçük / hızlı).
+    pub fn to_bincode_bytes(&self) -> Result<Vec<u8>> {
+        let model_data = self.collect_model_data()?;
+        bincode::serialize(&model_data).map_err(|e| {
+            TurkError::serialization_error(&format!("bincode serileştirme hatası: {e}"))
+        })
+    }
+
+    /// Modeli dosyaya kaydeder (JSON).
+    pub fn save(&self, path: &str) -> Result<()> {
+        let json = self.to_json_string()?;
+        let mut file = fs::File::create(path)?;
+        file.write_all(json.as_bytes())?;
+        info!("Model başarıyla kaydedildi: {}", path);
+        Ok(())
+    }
+
+    /// Modeli ikili (bincode) dosyaya kaydeder — `modeli_ikili_kaydet`.
+    pub fn modeli_ikili_kaydet(&self, path: &str) -> Result<()> {
+        let bytes = self.to_bincode_bytes()?;
+        let mut file = fs::File::create(path)?;
+        file.write_all(&bytes)?;
+        info!("Model ikili kaydedildi: {} ({} bayt)", path, bytes.len());
+        Ok(())
+    }
+
+    /// Model ağırlıklarını JSON metninden yükler (WASM / localStorage önbellek uyumlu).
+    pub fn load_from_json_str(&mut self, contents: &str) -> Result<()> {
+        let model_data: ModelData = serde_json::from_str(contents)?;
+        self.apply_model_data(model_data)
+    }
+
+    /// Bincode baytlarından model yükler.
+    pub fn load_from_bincode_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        let model_data: ModelData = bincode::deserialize(bytes).map_err(|e| {
+            TurkError::deserialization_error(&format!("bincode yükleme hatası: {e}"))
+        })?;
+        self.apply_model_data(model_data)
+    }
+
+    /// Modeli dosyadan yükler (JSON).
     pub fn load(&mut self, path: &str) -> Result<()> {
         let mut file = fs::File::open(path)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
         self.load_from_json_str(&contents)?;
         info!("Model başarıyla yüklendi: {}", path);
+        Ok(())
+    }
+
+    /// İkili (bincode) dosyadan model yükler — `modeli_ikili_yukle`.
+    pub fn modeli_ikili_yukle(&mut self, path: &str) -> Result<()> {
+        let bytes = fs::read(path)?;
+        self.load_from_bincode_bytes(&bytes)?;
+        info!("Model ikili yüklendi: {} ({} bayt)", path, bytes.len());
         Ok(())
     }
 

@@ -315,6 +315,20 @@ impl TurkDil {
                     self.yukle_icerik(icerik.as_str())
                 }
             }
+            crate::dsl_parser::DslKomut::ModeliIkiliKaydet { icerik } => {
+                if kontrol_modu {
+                    self.kaydet_on_kontrol_icerik(icerik.as_str())
+                } else {
+                    self.ikili_kaydet_icerik(icerik.as_str())
+                }
+            }
+            crate::dsl_parser::DslKomut::ModeliIkiliYukle { icerik } => {
+                if kontrol_modu {
+                    self.yukle_on_kontrol_icerik(icerik.as_str())
+                } else {
+                    self.ikili_yukle_icerik(icerik.as_str())
+                }
+            }
             crate::dsl_parser::DslKomut::OnnxDisaAktar { dosya } => {
                 if kontrol_modu {
                     self.onnx_on_kontrol(dosya.as_str())
@@ -962,6 +976,47 @@ impl TurkDil {
             model.load(&dosya_yolu)?;
             self.model = Some(model);
 
+            Ok(Value::None)
+        }
+    }
+
+    fn ikili_kaydet_icerik(&mut self, icerik: &str) -> Result<Value> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = icerik;
+            return Err(TurkError::RuntimeError(
+                "modeli_ikili_kaydet() WASM ortamında desteklenmiyor (disk yok).".into(),
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let model = self
+                .model
+                .as_ref()
+                .ok_or_else(|| TurkError::RuntimeError("Kaydedilecek model bulunmuyor".into()))?;
+            let dosya_yolu = dosya_yolu_icerikten(icerik)?;
+            info!("Model ikili kaydediliyor: {dosya_yolu}");
+            model.modeli_ikili_kaydet(&dosya_yolu)?;
+            self.kaydet_yolu = Some(dosya_yolu);
+            Ok(Value::None)
+        }
+    }
+
+    fn ikili_yukle_icerik(&mut self, icerik: &str) -> Result<Value> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = icerik;
+            return Err(TurkError::RuntimeError(
+                "modeli_ikili_yukle() WASM ortamında desteklenmiyor (disk yok).".into(),
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let dosya_yolu = dosya_yolu_icerikten(icerik)?;
+            info!("Model ikili yükleniyor: {dosya_yolu}");
+            let mut model = Sequential::new();
+            model.modeli_ikili_yukle(&dosya_yolu)?;
+            self.model = Some(model);
             Ok(Value::None)
         }
     }

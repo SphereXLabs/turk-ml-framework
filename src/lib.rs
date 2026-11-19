@@ -77,7 +77,7 @@ pub mod ses;
 // Re-export
 pub use aktivasyon::Activation;
 pub use cihaz::{cihaz_listesi_metin, mevcut_cihazlar, Cihaz};
-pub use cnn::{Conv2D, Flatten, MaxPool2D};
+pub use cnn::{Conv1D, Conv2D, Flatten, MaxPool2D};
 pub use dil::TurkDil;
 pub use dil::{EgitimIlerleme, Value};
 pub use dsl_parser::{hata_satirini_goster, komut_ayristir, DslKomut};
@@ -85,7 +85,7 @@ pub use dtype::Float;
 pub use error::{Result, TurkError};
 pub use initializers::{GlorotNormal, GlorotUniform, HeNormal, HeUniform, Initializer};
 pub use katman_kayit::{Katman, KatmanKayit, KatmanYukleVerisi};
-pub use layer::{BatchNormalization, Dense, Dropout, Layer};
+pub use layer::{BatchNormalization, Dense, Dropout, Embedding, Layer};
 pub use loss::{CrossEntropy, Loss, MAE, MSE};
 pub use metrics::{Accuracy, Metric, Precision, Recall, F1};
 pub use model::{EarlyStopping, EpochCallback, History, Sequential};

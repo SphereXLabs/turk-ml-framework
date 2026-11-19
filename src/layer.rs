@@ -824,6 +824,196 @@ impl fmt::Display for BatchNormalization {
     }
 }
 
+/// Kelime gömme (Embedding) katmanı — lookup tablosu.
+///
+/// Girdi: `(batch, sekans)` tamsayı token indeksleri (Float olarak).
+/// Çıktı: `(batch, sekans * boyut)` — her token için `boyut` boyutlu vektör ardışık yazılır.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Embedding {
+    pub kelime_sayisi: usize,
+    pub boyut: usize,
+    pub sekans: usize,
+    pub weights: Array2<Float>,
+    pub trainable: bool,
+    #[serde(skip)]
+    last_indices: Option<Array2<usize>>,
+}
+
+impl Embedding {
+    pub fn new(kelime_sayisi: usize, boyut: usize, sekans: usize) -> Result<Self> {
+        if kelime_sayisi == 0 || boyut == 0 || sekans == 0 {
+            return Err(TurkError::LayerError(
+                "Embedding: kelime_sayisi, boyut ve sekans sıfır olamaz".into(),
+            ));
+        }
+        let init = GlorotUniform::new();
+        let weights = init.initialize((kelime_sayisi, boyut))?;
+        Ok(Self {
+            kelime_sayisi,
+            boyut,
+            sekans,
+            weights,
+            trainable: true,
+            last_indices: None,
+        })
+    }
+
+    pub fn yeni(kelime_sayisi: usize, boyut: usize) -> Result<Self> {
+        Self::new(kelime_sayisi, boyut, 1)
+    }
+
+    fn indeks_clamp(&self, raw: Float) -> usize {
+        let i = raw.round() as isize;
+        if i < 0 {
+            0
+        } else if (i as usize) >= self.kelime_sayisi {
+            self.kelime_sayisi - 1
+        } else {
+            i as usize
+        }
+    }
+}
+
+impl Layer for Embedding {
+    fn forward(&mut self, input: &ArrayView2<Float>) -> Result<Array2<Float>> {
+        if input.ncols() != self.sekans {
+            return Err(TurkError::ShapeMismatch(format!(
+                "Embedding: beklenen sekans {}, gelen {}",
+                self.sekans,
+                input.ncols()
+            )));
+        }
+        let batch = input.nrows();
+        let mut out = Array2::zeros((batch, self.sekans * self.boyut));
+        let mut indices = Array2::zeros((batch, self.sekans));
+        for n in 0..batch {
+            for t in 0..self.sekans {
+                let idx = self.indeks_clamp(input[[n, t]]);
+                indices[[n, t]] = idx;
+                for d in 0..self.boyut {
+                    out[[n, t * self.boyut + d]] = self.weights[[idx, d]];
+                }
+            }
+        }
+        self.last_indices = Some(indices);
+        Ok(out)
+    }
+
+    fn backward(
+        &self,
+        input: &ArrayView2<Float>,
+        grad_output: &ArrayView2<Float>,
+    ) -> Result<(Array2<Float>, Array2<Float>, Array2<Float>)> {
+        let indices = self.last_indices.as_ref().ok_or_else(|| {
+            TurkError::LayerError("Embedding: forward çağrılmadan backward yapılamaz".into())
+        })?;
+        if grad_output.ncols() != self.sekans * self.boyut {
+            return Err(TurkError::ShapeMismatch(format!(
+                "Embedding backward: beklenen {}, gelen {}",
+                self.sekans * self.boyut,
+                grad_output.ncols()
+            )));
+        }
+        let batch = input.nrows();
+        let mut grad_weights = Array2::zeros(self.weights.dim());
+        // Token indeksleri türevlenemez — girdi gradyanı sıfır
+        let grad_input = Array2::zeros(input.dim());
+        for n in 0..batch {
+            for t in 0..self.sekans {
+                let idx = indices[[n, t]];
+                for d in 0..self.boyut {
+                    grad_weights[[idx, d]] += grad_output[[n, t * self.boyut + d]];
+                }
+            }
+        }
+        let grad_biases = Array2::zeros((0, 0));
+        Ok((grad_input, grad_weights, grad_biases))
+    }
+
+    fn update(
+        &mut self,
+        grad_weights: &ArrayView2<Float>,
+        _grad_biases: &ArrayView2<Float>,
+        learning_rate: Float,
+    ) -> Result<()> {
+        if !self.trainable || grad_weights.is_empty() {
+            return Ok(());
+        }
+        if grad_weights.dim() != self.weights.dim() {
+            return Err(TurkError::ShapeMismatch(
+                "Embedding update: ağırlık gradyanı boyutu uyuşmuyor".into(),
+            ));
+        }
+        self.weights = &self.weights - &(grad_weights.to_owned() * learning_rate);
+        Ok(())
+    }
+
+    fn get_weights(&self) -> Result<Array2<Float>> {
+        Ok(self.weights.clone())
+    }
+    fn get_biases(&self) -> Result<Array2<Float>> {
+        Ok(Array2::zeros((0, 0)))
+    }
+    fn set_weights(&mut self, w: &ArrayView2<Float>) -> Result<()> {
+        if w.dim() != self.weights.dim() {
+            return Err(TurkError::ShapeMismatch(
+                "Embedding set_weights: boyut uyuşmazlığı".into(),
+            ));
+        }
+        self.weights = w.to_owned();
+        Ok(())
+    }
+    fn set_biases(&mut self, _: &ArrayView2<Float>) -> Result<()> {
+        Ok(())
+    }
+    fn activation_type(&self) -> Activation {
+        Activation::Linear
+    }
+    fn layer_type(&self) -> &'static str {
+        "Embedding"
+    }
+    fn input_size(&self) -> usize {
+        self.sekans
+    }
+    fn output_size(&self) -> usize {
+        self.sekans * self.boyut
+    }
+    fn param_count(&self) -> usize {
+        self.weights.len()
+    }
+    fn set_trainable(&mut self, t: bool) {
+        self.trainable = t;
+    }
+    fn is_trainable(&self) -> bool {
+        self.trainable
+    }
+    fn clone_box(&self) -> Box<dyn Layer> {
+        Box::new(self.clone())
+    }
+    fn reset(&mut self) {
+        self.last_indices = None;
+    }
+    fn weights_as_vec(&self) -> Vec<Float> {
+        self.weights.iter().copied().collect()
+    }
+    fn biases_as_vec(&self) -> Vec<Float> {
+        vec![]
+    }
+    fn dropout_rate(&self) -> Option<Float> {
+        None
+    }
+    fn use_batch_norm(&self) -> Option<bool> {
+        None
+    }
+    fn layer_metadata(&self) -> HashMap<String, Float> {
+        let mut m = HashMap::new();
+        m.insert("kelime_sayisi".into(), self.kelime_sayisi as Float);
+        m.insert("boyut".into(), self.boyut as Float);
+        m.insert("sekans".into(), self.sekans as Float);
+        m
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

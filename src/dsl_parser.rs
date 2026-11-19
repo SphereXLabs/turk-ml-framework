@@ -9,18 +9,45 @@ use crate::error::{Result, TurkError};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DslKomut {
     ModelOlustur,
-    KatmanEkle { icerik: String },
-    Derle { icerik: String },
+    KatmanEkle {
+        icerik: String,
+    },
+    Derle {
+        icerik: String,
+    },
     ModelBilgisi,
-    Egit { icerik: String },
-    VeriYukle { icerik: String },
-    Kaydet { icerik: String },
-    Yukle { icerik: String },
-    OnnxDisaAktar { dosya: String },
+    Egit {
+        icerik: String,
+    },
+    VeriYukle {
+        icerik: String,
+    },
+    Kaydet {
+        icerik: String,
+    },
+    Yukle {
+        icerik: String,
+    },
+    /// Bincode ikili checkpoint kaydet
+    ModeliIkiliKaydet {
+        icerik: String,
+    },
+    /// Bincode ikili checkpoint yükle
+    ModeliIkiliYukle {
+        icerik: String,
+    },
+    OnnxDisaAktar {
+        dosya: String,
+    },
     CihazBilgisi,
     ModelZoo,
-    ModelIndir { id: String, hedef: Option<String> },
-    ModelCalistir { id: String },
+    ModelIndir {
+        id: String,
+        hedef: Option<String>,
+    },
+    ModelCalistir {
+        id: String,
+    },
 }
 
 /// Tek satırlık komutu ayrıştırır.
@@ -70,6 +97,18 @@ pub fn komut_ayristir(komut: &str, satir_no: usize) -> Result<DslKomut> {
     }
     if let Some(icerik) = fonksiyon_ici(ham, "yukle", satir_no)? {
         return Ok(DslKomut::Yukle { icerik });
+    }
+    if let Some(icerik) = fonksiyon_ici(ham, "modeli_ikili_kaydet", satir_no)? {
+        return Ok(DslKomut::ModeliIkiliKaydet { icerik });
+    }
+    if let Some(icerik) = fonksiyon_ici(ham, "ikili_kaydet", satir_no)? {
+        return Ok(DslKomut::ModeliIkiliKaydet { icerik });
+    }
+    if let Some(icerik) = fonksiyon_ici(ham, "modeli_ikili_yukle", satir_no)? {
+        return Ok(DslKomut::ModeliIkiliYukle { icerik });
+    }
+    if let Some(icerik) = fonksiyon_ici(ham, "ikili_yukle", satir_no)? {
+        return Ok(DslKomut::ModeliIkiliYukle { icerik });
     }
 
     if let Some(icerik) = fonksiyon_ici(ham, "veri_yukle", satir_no)? {
